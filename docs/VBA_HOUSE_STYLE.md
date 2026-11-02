@@ -1,0 +1,150 @@
+# 🧩 VBA house style
+
+These conventions apply to every VBA component of the workbook. The
+[repository structure](REPOSITORY_STRUCTURE.md) says where each kind of
+component lives and which may call which; the
+[installation guide](../INSTALLATION.md) says how source moves between the
+repository and Excel. The template itself holds no VBA, so the examples below
+name no existing component.
+
+## Naming and visibility
+
+Replace `<REGIME>` with the project's short name, such as `SACCR` or `LCR`,
+once, in this table and in the structure guide.
+
+| Element | Convention | Example |
+| --- | --- | --- |
+| Core standard module | `CORE_` plus subject | `CORE_Validation` |
+| Public facade module | `<REGIME>_` plus subject | `<REGIME>_Functions` |
+| Host-independent class | `C` plus noun | `CCalculationResult` |
+| Excel adapter module | `M_` plus subject | `M_Run` |
+| Document module | `ThisWorkbook`, or `sh` plus role | `shInputs` |
+| UserForm | `frm` plus role | `frmRunOptions` |
+| Test module | `TEST_` plus subject | `TEST_Harness` |
+| Example module | `EX_` plus subject | `EX_Inputs` |
+| Procedure | PascalCase verb phrase | `ValidateInput` |
+| Parameter or local variable | Descriptive PascalCase | `CalculationCurrency` |
+| Constant, error constant | `UPPER_SNAKE_CASE`, `ERR_` prefix | `ERR_INVALID_INPUT` |
+| Enum and member | `<REGIME>` plus noun; short member prefix | `<REGIME>RunStatus`, `rsFailed` |
+
+- A component's name equals its exported `Attribute VB_Name` and its file
+  name stem.
+- VBA names are case-insensitive, and the VBE re-cases every use of a name to
+  its latest spelling. Review case changes in a diff before accepting them.
+- Single-letter names are for loop counters only.
+- There are no mutable public variables.
+
+Every component starts with `Option Explicit`. Core and test standard modules
+also use `Option Private Module`. Procedures are `Private` unless another
+component calls them. `Public` does not mean supported: only the declarations
+listed in [PUBLIC_API.txt](PUBLIC_API.txt) are the supported API, and a change
+to one updates the inventory, its contract and its tests together.
+
+- Declare array bounds explicitly; never use `Option Base`.
+- Prefer specific types to `Variant`. Use `Variant` only at a boundary that
+  must carry missing, error or mixed values, and validate it there.
+- Pass `ByVal` by default; document every `ByRef` argument a procedure
+  changes.
+- Core code has no Excel object model access and no mutable run state.
+
+A native `Declare` needs its own compatibility review: `PtrSafe` alone does not
+make a declaration correct. Use `LongPtr` for pointers and handles, and the
+widths the API defines for every other argument; never replace `Long` with
+`LongPtr` wholesale.
+
+## Contracts, units and errors
+
+Each procedure's header states, where they apply: `PURPOSE`, `INPUTS`,
+`RETURNS`, `ERROR POLICY`, `DEPENDENCIES`, `STATE OWNERSHIP` and `REFERENCE`,
+with an `UPDATED` date. `INPUTS` gives each argument's meaning, type, unit,
+currency or date basis, valid range and ownership. `REFERENCE` cites the
+[calculation contract](methodology/CALCULATION_CONTRACTS.md) and the source it
+implements. Comments explain invariants and reasons, not obvious assignments.
+
+- Use `Double` for amounts and proportions, `Long` for counts, `Boolean` for
+  flags, `String` for identifiers and currency codes, and `Date` for dates on
+  the host side. Where a date crosses a boundary as text, state its format.
+- Names or contracts distinguish decimal rates from basis points, and amounts
+  in currency units from scaled display amounts.
+- Never invent a rounding rule, day count, regulatory parameter or valid
+  range: record it in the calculation contract first.
+- Never turn missing input into zero silently, and use no undocumented
+  default.
+
+Errors raised by the project use named `ERR_` constants, allocated once in one
+documented range: `vbObjectError + 2048` through `vbObjectError + 4095`.
+`Err.Source` names the component and procedure. A message describes the
+condition without repeating confidential input. Error codes distinguish
+invalid input, unsupported scope, numerical failure, and host or cleanup
+failure.
+
+Core procedures raise documented errors. Facade entry points translate them as
+their contract says: a macro returns or reports a structured failure; a
+worksheet function may return a documented `CVErr` value in a `Variant`.
+Worksheet functions change no Excel state and show no dialog. A facade never
+turns an unexpected failure into an amount that looks valid.
+
+`On Error Resume Next` guards one operation only. Check and clear `Err`
+immediately after it, then restore the intended handler. Never use it around
+a whole calculation or cleanup sequence.
+
+## Operation and cleanup outcomes
+
+An operation that changes host state reports both outcomes to its caller:
+
+| Field | Meaning |
+| --- | --- |
+| `OperationSucceeded` | Whether the intended work completed |
+| `PrimaryError` | The saved error number, source and description, or none |
+| `CleanupSucceeded` | Whether every required restoration succeeded |
+| `CleanupErrors` | Every restoration that failed, with its error |
+| `RecoveryRequired` | True when host state could not be restored |
+
+A successful operation whose cleanup failed is not a success, and a failed
+operation stays failed even if its cleanup succeeded. Callers check both.
+These are required fields of the result, not an existing type.
+
+- Capture each setting before changing it, and record which settings were
+  captured and which were changed. Register the restoration before attempting
+  the change, so that a setter that fails half way is still restored.
+- Never restore a value that was not captured. Restore only what the
+  operation tried to change, to the captured value; a nested operation keeps
+  its caller's state.
+- Normal and error paths both enter cleanup. Save `Err.Number`, `Err.Source`
+  and `Err.Description` into variables before any other call.
+- Restore each setting through its own helper and handler, and attempt every
+  restoration even when one fails. Cleanup never replaces the saved primary
+  error.
+- Return both outcomes, or publish the cleanup failures through a documented
+  output before raising the saved primary error again. If only cleanup fails,
+  report a cleanup failure, not success.
+- Never reset `Calculation`, `EnableEvents`, `ScreenUpdating`, `DisplayAlerts`
+  or `StatusBar` to an assumed default. Capture only what the operation
+  changes. Sheets and other objects an operation creates need the same
+  explicit cleanup.
+
+Failure-path tests cover partial capture, a failed change, a primary failure,
+each failed restoration, and a primary and cleanup failure together.
+
+## Source representation
+
+- Exported `.bas`, `.cls` and `.frm` files are ASCII only, without a byte
+  order mark. Represent other characters at run time, for example with
+  `ChrW`, or keep them in a separately specified resource, so the source does
+  not depend on a Windows code page.
+- A form's binary `.frx` stays beside its `.frm`.
+- Git stores VBA source with LF line endings and checks it out with CRLF
+  (`.gitattributes`). Keep the `VERSION`, `BEGIN`, `END` and `Attribute` lines
+  that the VBE writes.
+- Indent with four spaces; no tabs and no trailing white space. Keep
+  procedure declarations, `End` statements and labels at their outer level.
+  Separate procedures with two blank lines.
+- Use `MODULE SETTINGS`, `DECLARE`, `INITIALIZE` and `FAIL` sections where they
+  make a routine easier to follow, not as empty ceremony.
+- A generated component names its generator and is regenerated, never edited
+  by hand.
+
+Changed VBA is imported, compiled and run on the supported host before its
+behaviour is accepted. Repository checks are not compilation. Record the full
+commit, the Excel build and bitness, the references and the results, as the
+[validation plan](methodology/VALIDATION_PLAN.md#evidence-record) describes.

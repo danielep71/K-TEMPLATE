@@ -394,7 +394,7 @@ class AlertTests(unittest.TestCase):
             issue = self.history(ws, (50, 20, 1), (150, 40, 2))
             assert issue is not None
             self.assertEqual(issue["title"], "Traffic alert: 2026-10-14")
-            self.assertIn("views spike, clones spike, stars increased.", issue["body"])
+            self.assertIn("views spike, stars increased.", issue["body"])
             self.assertIn("| Stars | 2 | 1 |", issue["body"])
             for line in ("- Planned start: 2026-10-14 (UTC collection date)",
                          "- Target end date: 2026-10-21 (Europe/Rome)",
@@ -427,8 +427,18 @@ class AlertTests(unittest.TestCase):
 
     def test_a_spike_needs_double_and_the_minimum_growth(self) -> None:
         with workspace() as ws:
-            # Clones double (4 to 8) but grow by less than 10: no spike.
-            self.assertIsNone(self.history(ws, (1, 4, 1), (1, 8, 1)))
+            # Views double (40 to 80) but grow by less than 100: no spike.
+            self.assertIsNone(self.history(ws, (40, 1, 1), (80, 1, 1)))
+
+    def test_clones_alone_raise_no_alert(self) -> None:
+        # Workflow checkouts count as clones: a busy CI day is not interest.
+        with workspace() as ws:
+            self.assertIsNone(self.history(ws, (10, 60, 1), (10, 639, 1)))
+        with workspace() as ws:
+            issue = self.history(ws, (50, 60, 1), (150, 639, 1))
+            assert issue is not None
+            self.assertIn("traffic recorded on 2026-10-14: views spike.", issue["body"])
+            self.assertIn("| Clones | 639 | 60 |", issue["body"])
 
     def test_new_referrer_needs_enough_views(self) -> None:
         few = [{"referrer": "github.com", "count": 3, "uniques": 1},
