@@ -11,7 +11,10 @@ documented assumption, and its contract says so.
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | *Illustrative:* `SRC-01` | Example regulation | Example authority | 2026-01-01 | Official publication reference or URL | — | — | `unverified` | — | — |
 
-- **ID:** `SRC-` followed by a number, never reused.
+- **ID:** `SRC-` followed by a number, never reused. An independent
+  implementation used to compute reference values, such as another author's
+  tool, is registered too, with an `IMPL-` ID
+  ([test cases](TEST_CASES.md#reference-classes)).
 - **Version or date:** the consolidated version, publication or application
   date that the workbook implements.
 - **Locator:** where the issuer publishes it, precise enough to find the same

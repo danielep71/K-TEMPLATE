@@ -105,6 +105,8 @@ git switch --detach FULL_SHA
 git status --short
 python -m unittest discover -s tests
 python tools/check_changelog.py
+python tools/check_test_cases.py
+python tools/check_derivations.py
 python tools/check_links.py
 ```
 

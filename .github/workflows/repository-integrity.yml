@@ -116,6 +116,12 @@ jobs:
             fi
           done < <(grep -o -E 'raw\.githubusercontent\.com/[^/]+/[^/]+/traffic-history/' README.md | cut -d/ -f2,3 | sort -u)
           exit "$failed"
+      - name: Check tracked binary files
+        run: python tools/check_binaries.py
+      - name: Check the numerical test cases
+        run: python tools/check_test_cases.py
+      - name: Compare the derivation scripts with the expected values
+        run: python tools/check_derivations.py
       - name: Check the changelog and VERSION
         # The link references must point to this repository, so a generated
         # repository fails until it replaces the template's.
@@ -143,12 +149,13 @@ jobs:
           import sys
           from pathlib import Path
 
-          import yaml
+          sys.path.insert(0, 'tests')
+          from strict_yaml import load
 
           path = Path('.github/workflows/codeql.yml')
           if not path.exists():
               sys.exit(0)
-          document = yaml.safe_load(path.read_text(encoding='utf-8'))
+          document = load(path.read_text(encoding='utf-8'))
           triggers = document.get('on', document.get(True)) or {}
           branch = os.environ['DEFAULT_BRANCH']
           failed = False

@@ -24,7 +24,8 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `src/forms/` | UserForms, each `.frm` with its `.frx` | Reserved |
 | `tests/` | Python tests of the repository tooling (`test_*.py`) | Present |
 | `tests/modules/` | VBA test modules | Reserved |
-| `tests/fixtures/`, `tests/expected/` | Synthetic inputs and independently derived expected results | Reserved |
+| `tests/fixtures/`, `tests/expected/` | Synthetic inputs and expected results in the [test-case format](methodology/TEST_CASES.md) | Present, with one illustrative case |
+| `tests/derivations/` | Scripts that compute expected values from the documented method ([derivation scripts](methodology/TEST_CASES.md#derivation-scripts)) | Present, with one illustrative script |
 | `tools/` | Repository checks, setup and build tooling, in Python | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
 | `test-results/` | Disposable output of local and CI runs | Ignored by Git |
@@ -35,6 +36,13 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
   `src/workbook/Template.xlsx`, a macro-free template, and the copies under
   `docs/methodology/sources/`. A built workbook is saved outside the checkout
   or under `test-results/`.
+- **No unreviewed binaries.** **Repository integrity** runs
+  `tools/check_binaries.py`, which fails on any tracked file that
+  `.gitattributes` treats as binary, or that contains a NUL byte, outside those
+  paths and the `.frx` beside its `.frm`. To keep another binary, such as an
+  image for the documentation, review it and add its path, SHA-256 and reason
+  to `.github/binary-allowlist.json`; a later change to the file fails until
+  the entry is updated.
 - **Forms.** A form's `.frx` stays beside its `.frm`.
 
 ## Dependencies

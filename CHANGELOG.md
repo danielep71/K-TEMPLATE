@@ -61,5 +61,20 @@ milestones and their pull requests.
 - A release process: [RELEASING.md](RELEASING.md), this changelog, a release
   certification record and a milestone closeout record under `docs/release/`,
   and `tools/check_changelog.py`, which **Repository integrity** runs (#69).
+- A numerical test-case format, `docs/methodology/TEST_CASES.md`, with an
+  illustrative case under `tests/fixtures/` and `tests/expected/`, and
+  `tools/check_test_cases.py`, which **Repository integrity** runs (#75).
+- `tools/check_binaries.py`, which **Repository integrity** runs: a tracked
+  binary file outside the approved paths fails unless
+  `.github/binary-allowlist.json` lists it with its current SHA-256 (#113).
+- `tools/check_derivations.py`, which **Repository integrity** runs: it runs
+  the derivation scripts named by expected values and compares their results
+  within tolerance, with an illustrative script for the example case (#115).
+
+### Changed
+
+- **Repository integrity** proves that actionlint rejects an invalid workflow,
+  and the workflow control tests reject duplicate YAML keys in the workflows,
+  Dependabot's configuration and the issue forms (#114).
 
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main

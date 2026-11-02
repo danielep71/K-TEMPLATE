@@ -135,6 +135,7 @@ inherited policies may impose additional restrictions.
 
 | File or setting | Action in the new repository | Reason / dependency |
 | --- | --- | --- |
+| `tools/check_binaries.py`, `tests/test_check_binaries.py`, `.github/binary-allowlist.json` | **Keep** | Fails **Repository integrity** on a tracked binary outside the approved paths. Add a reviewed binary, such as a documentation image, to the allowlist with its SHA-256 and reason. |
 | `.gitattributes`, `.gitignore`, `.editorconfig` | **Keep** | Line-ending, binary-file, ignore and editor rules for workbooks, exported VBA source and regulatory source copies. Adjust them only with a layout change that needs it. |
 | `.github/labels.json`, `.github/scripts/`, `.github/ISSUE_TEMPLATE/`, the label, triage and milestone workflows, `tools/check_issues.py` | **Keep** | Ongoing label and issue automation; see *Initialize issue labels* above. |
 | `AGENTS.md` | **Adapt** | Delete the template-only section first; keep the remaining instructions that still apply to the project. |
@@ -145,7 +146,8 @@ inherited policies may impose additional restrictions.
 | `LICENSE` | **Keep or replace** | MPL-2.0 by default. The integrity workflow requires a non-empty `LICENSE`. |
 | `docs/VBA_HOUSE_STYLE.md`, `docs/REPOSITORY_STRUCTURE.md`, `docs/PUBLIC_API.txt`, `INSTALLATION.md` | **Keep and adapt** | VBA naming, contracts, errors and cleanup; component locations and dependency direction; the supported API inventory; import and export. Replace `<REGIME>` with the project's short name, and adapt the host policy. |
 | `RELEASING.md`, `CHANGELOG.md`, `docs/release/`, `tools/check_changelog.py`, `tests/test_check_changelog.py` | **Keep and adapt** | The release process, the changelog, and the certification and closeout records. Replace the changelog's entries and its link references with the new repository's: **Repository integrity** fails while a link reference points to another repository. Do not create `VERSION` before the first release. |
-| `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts and validation plan. Replace each illustrative row with the project's entries as decisions are taken. |
+| `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts, validation plan and the numerical test-case format. Replace each illustrative row with the project's entries as decisions are taken. |
+| `tests/fixtures/`, `tests/expected/`, `tests/derivations/`, `tools/check_test_cases.py`, `tools/check_derivations.py` and their tests | **Keep and adapt** | The numerical test cases, their format check and the comparison with the derivation scripts, which **Repository integrity** runs. Remove the `illustrative-format-example` case and `tests/derivations/illustrative_total.py` when you replace the illustrative entries of the methodology guides they use. |
 | `docs/licenses/` | **Keep** | Notice and license texts for the files listed in `THIRD_PARTY_NOTICES.txt`, which keep the license the notice states for them (MPL-2.0 or MIT) whatever license you choose. If you remove a listed file, remove it from the notice too. |
 | `docs/repo_governance/SETTINGS.md` | **Keep and maintain** | Records the adopted baseline. The integrity workflow explicitly requires this file. |
 | `docs/setup/repository-settings.json` | **Keep** | Enables future drift checks and reapplication. The setup tests read this file. |
@@ -154,7 +156,7 @@ inherited policies may impose additional restrictions.
 | `docs/setup/REPOSITORY_SETUP.md` | **Keep or retire after handover** | Optional operational guide; remove links to it if you retire it. |
 | `.github/PULL_REQUEST_TEMPLATE.md` | **Keep and adapt** | Records linked issues, validation, final-head review and what was not validated. Add the project's own checks to *Validated*. |
 | `.github/workflows/traffic-history.yml`, `tools/traffic_history.py`, `tests/test_traffic_history.py`, `docs/repo_governance/TRAFFIC.md` | **Keep; enable if wanted** | Optional traffic collection. It does nothing until you follow *Enabling* in `TRAFFIC.md`. Point the README's traffic badges at the new repository, or remove them; **Repository integrity** fails while they read another repository. Remove all four files and the badges together if you never want it, and update `docs/licenses/THIRD_PARTY_NOTICES.txt`, which lists the files. |
-| `pyproject.toml`, `tools/requirements-quality-ci.txt` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling and strict mode are active. |
+| `pyproject.toml`, `tools/requirements-quality-ci.txt` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling, strict mode and actionlint are active, and `tests/strict_yaml.py` makes the workflow control tests reject duplicate YAML keys. |
 | `.github/dependabot.yml`, `.github/requirements.txt` | **Keep** | Proposes updates to the SHA-pinned Actions, the hash-locked configuration parser that the workflow control tests use, and the hash-locked quality tools. Its `target-branch` names the active release branch: set it to this repository's release branch or remove it to target the default branch. **Repository integrity** fails while it names a branch that does not exist. |
 | `.github/workflows/codeql.yml` | **Keep** | Scans the Python, JavaScript and workflow code with CodeQL's security-extended queries on pushes and pull requests to `main` and `release/**`, and weekly; results appear under **Security → Code scanning**. Pull requests are analyzed without write permission: their SARIF is kept as a 30-day artifact and they show no code scanning annotations. Leave GitHub's default setup off, because it rejects results from this workflow. Free on a public repository; on a private one it needs GitHub Code Security and the repository variable `CODE_SCANNING` set to `enabled`, otherwise it skips the analysis. If the default branch is not `main`, rename it in the workflow's `push` and `pull_request` branch lists; **Repository integrity** fails while they omit it. |
 | `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links and anchors in **Repository integrity**, external links weekly. |
@@ -174,8 +176,9 @@ utilities. Keep them in the source template so future repositories receive them.
 3. In that same PR, add meaningful project checks to the workflow. Keep the job
    name **`Repository integrity`**, its coverage of all relevant PRs, the steps
    that set up Node.js and install the configuration parser, the quality tools
-   and actionlint, the **Run repository tests**, Ruff, mypy, actionlint and label
-   automation steps, the existing required-document and whitespace checks, and
+   and actionlint, the **Run repository tests**, Ruff, mypy, actionlint, label
+   automation, binary, test-case and derivation steps, the existing
+   required-document and whitespace checks, and
    the template-cleanup checks: the template-only section, the issue contact
    links, the README traffic badges, the changelog, Dependabot's target
    branches and CodeQL's default branch. Keep `.github/workflows/codeql.yml`: it is not part of the
