@@ -10,6 +10,9 @@ compares every value the expected file attributes to it:
 - a number matches when |actual - expected| <= max(absolute, relative * |expected|);
 - a text matches exactly.
 
+A file-based case runs each script once per variant instead, with the
+variant's directory as the argument, and compares that variant's values.
+
 A match shows that the script and the expected file agree. It validates
 neither: a value derived within the project stays illustrative. With no
 script named, the check passes and says so.
@@ -88,14 +91,8 @@ def run_script(root: Path, script: str, fixture: Path) -> tuple[dict[Key, Any] |
     return {key(item): item for item in outputs}, ""
 
 
-def check_case(root: Path, path: Path) -> tuple[list[str], int]:
-    """Check one expected file; return the findings and the number of values compared."""
-    where = path.relative_to(root).as_posix()
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (UnicodeDecodeError, ValueError):
-        return [], 0  # check_test_cases.py reports a malformed file
-    outputs = data.get("outputs") if isinstance(data, dict) else None
+def compare(root: Path, where: str, outputs: object, fixture: Path) -> tuple[list[str], int]:
+    """Run the scripts that one list of outputs names on one fixture, and compare."""
     by_script: dict[str, list[dict[str, Any]]] = {}
     for output in outputs if isinstance(outputs, list) else []:
         reference = output.get("reference") if isinstance(output, dict) else None
@@ -104,7 +101,6 @@ def check_case(root: Path, path: Path) -> tuple[list[str], int]:
             by_script.setdefault(script, []).append(output)
     findings: list[str] = []
     compared = 0
-    fixture = root / FIXTURES / path.name
     for script, wanted in sorted(by_script.items()):
         derived, problem = run_script(root, script, fixture)
         if derived is None:
@@ -117,6 +113,31 @@ def check_case(root: Path, path: Path) -> tuple[list[str], int]:
                 findings.append(f"{where}: {script} gives no {label(key(output))}")
             elif reason := matches(output, actual):
                 findings.append(f"{where}: {label(key(output))} from {script}: {reason}")
+    return findings, compared
+
+
+def check_case(root: Path, path: Path) -> tuple[list[str], int]:
+    """Check one expected file; return the findings and the number of values compared."""
+    where = path.relative_to(root).as_posix()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return [], 0  # check_test_cases.py reports a malformed file
+    if not isinstance(data, dict):
+        return [], 0
+    variants = data.get("variants")
+    if not isinstance(variants, dict):
+        return compare(root, where, data.get("outputs"), root / FIXTURES / path.name)
+    findings: list[str] = []
+    compared = 0
+    for variant, outputs in sorted(variants.items()):
+        directory = root / FIXTURES / path.stem / variant
+        if not directory.is_dir():
+            continue  # check_test_cases.py reports an expected variant without files
+        variant_findings, variant_compared = compare(
+            root, f"{where}: variants.{variant}", outputs, directory)
+        findings += variant_findings
+        compared += variant_compared
     return findings, compared
 
 

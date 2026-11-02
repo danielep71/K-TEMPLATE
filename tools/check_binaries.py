@@ -2,11 +2,14 @@
 """Reject tracked binary files outside the approved paths and the allowlist.
 
 A file is binary when .gitattributes unsets its text attribute (the
-office-doc, opaque and vba-form-bin rules, and the byte-preserved regulatory
-sources), or when a file Git would treat as text contains a NUL byte. A
-binary file passes only if it is:
+office-doc, opaque and vba-form-bin rules, the byte-preserved regulatory
+sources and the variant files of file-based test cases), or when a file Git
+would treat as text contains a NUL byte. A binary file passes only if it is:
 
 - under docs/methodology/sources/, the byte-preserved regulatory sources;
+- in a variant directory of a file-based test case,
+  tests/fixtures/<case-id>/<variant>/, where tools/check_test_cases.py admits
+  only the files the data contract names;
 - src/workbook/Template.xlsx, the macro-free workbook template;
 - a UserForm .frx with its .frm beside it; or
 - listed in .github/binary-allowlist.json with its current SHA-256.
@@ -29,7 +32,9 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = Path(".github/binary-allowlist.json")
-APPROVED_PATHS = ("docs/methodology/sources/*", "src/workbook/Template.xlsx")
+# fnmatch's * also matches "/": the second pattern needs a variant directory.
+APPROVED_PATHS = ("docs/methodology/sources/*", "tests/fixtures/*/*/*",
+                  "src/workbook/Template.xlsx")
 SNIFF_BYTES = 8000
 
 

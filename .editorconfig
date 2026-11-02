@@ -12,8 +12,9 @@
 #   - Python and shell scripts use 4-space indentation.
 #   - Trailing whitespace is removed except in Markdown, where two trailing
 #     spaces can represent an explicit line break.
-#   - Regulatory source copies in docs/methodology/sources/ are left byte for
-#     byte: no line-ending, final-newline or white-space changes.
+#   - Regulatory source copies in docs/methodology/sources/ and the variant
+#     files of file-based test cases are left byte for byte: no line-ending,
+#     final-newline or white-space changes.
 #   - VBA source encoding is intentionally not forced. The VBE exports text
 #     using the Windows system code page, so VBA source is ASCII only
 #     by policy; no Git working-tree encoding is configured.
@@ -187,4 +188,17 @@ trim_trailing_whitespace = false
 charset = utf-8
 end_of_line = lf
 insert_final_newline = true
+trim_trailing_whitespace = false
+
+
+#------------------------------------------------------------------------------
+# FILE-BASED TEST CASE VARIANTS
+#------------------------------------------------------------------------------
+# tests/fixtures/<case-id>/<variant>/ holds input files byte for byte, matching
+# .gitattributes: their line endings, final newline and white space may be
+# what the case tests.
+[tests/fixtures/*/*/**]
+charset = unset
+end_of_line = unset
+insert_final_newline = unset
 trim_trailing_whitespace = false

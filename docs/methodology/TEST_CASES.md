@@ -13,25 +13,32 @@ integrity** runs it ([checking](#checking)). It never runs a calculation.
 
 ## Files
 
-A case is one input file and one expected-result file:
+A case is one fixture and one expected-result file. The fixture takes one of
+two forms:
 
 | File | Holds |
 | --- | --- |
-| `tests/fixtures/<case-id>.json` | Synthetic inputs, grouped by dataset |
+| `tests/fixtures/<case-id>.json` | A JSON fixture: synthetic inputs as records, grouped by dataset |
+| `tests/fixtures/<case-id>/` | A [file-based case](#file-based-cases): a `case.json` manifest and one directory per variant, holding input files |
 | `tests/expected/<case-id>.json` | Expected results, each with its provenance |
 | `tests/derivations/<name>.py` | Optional: a script that computes expected values from the documented method, separately from the code under test |
 
-- Case IDs are lowercase kebab-case, equal to the file names, and never
-  reused.
+- Use a **JSON fixture** to test a calculation: its inputs are values, already
+  read. Use a **file-based case** to test the import of the files the
+  [data contract](DATA_CONTRACT.md) defines, where the file itself matters:
+  delimiters, headers, encodings, decimal separators, line endings, a
+  malformed line, or a reconciliation against control totals.
+- Case IDs are lowercase kebab-case, equal to the file or directory names,
+  and never reused. A case has one form, never both.
 - A case whose expected values are all `illustrative` starts with
   `illustrative-`, and only such a case may.
 - Every fixture has an expected file, and every expected file a fixture.
-- Files are UTF-8 JSON, stored with LF. All data is **synthetic**: never real
+- JSON files are UTF-8, stored with LF. All data is **synthetic**: never real
   positions, counterparties, clients, amounts or market data.
 
-`illustrative-format-example` shows the format and holds no regulatory value.
-It uses the illustrative entries of the methodology guides; remove it when you
-replace them.
+`illustrative-format-example` and `illustrative-file-import-example` show the
+two forms and hold no regulatory value. They use the illustrative entries of
+the methodology guides; remove them when you replace those.
 
 <a id="fixture-format"></a>
 
@@ -84,6 +91,56 @@ replace them.
 and numbers are finite in every category: `NaN`, `Infinity` and a number that
 overflows to infinity, such as `1e400`, are rejected. Test a non-finite input
 in a VBA test module instead.
+
+<a id="file-based-cases"></a>
+
+## File-based cases
+
+```text
+tests/fixtures/illustrative-file-import-example/
+├── case.json
+├── crlf-line-endings/
+│   └── positions.csv
+└── lf-line-endings/
+    └── positions.csv
+```
+
+- **Manifest.** `case.json` holds the keys of a [JSON fixture](#fixture-format)
+  with `kind` `test-file-fixture`, and with `datasets` as a list of the `DS-`
+  IDs the case reads instead of records. Its `id` is the directory name. Every
+  key is checked in every category, `invalid` included.
+- **Variants.** Each other entry is a directory, one import of the case, named
+  in lowercase kebab-case. It holds only files that the *Datasets* table of
+  the data contract names for the manifest's datasets. A variant may omit a
+  file, for example to test a missing input.
+- **Encoding.** Each file decodes in the encoding the *Datasets* table gives
+  its dataset, UTF-8 by default. An `invalid` case may hold a file that does
+  not, because that is what it tests.
+- **Bytes.** Git stores variant files byte for byte and reports no
+  white-space error in them, and editors leave them as they are
+  (`.gitattributes`, `.editorconfig`). A file keeps its line endings, final
+  newline and trailing blanks, so a case can test them.
+- **Expected file.** It has `variants` instead of `outputs`: an object with one
+  key per variant directory, each holding a non-empty list of
+  [outputs](#expected-format). A variant without expected outputs, or expected
+  outputs without a variant, fails. A record `scope` names a dataset of the
+  manifest and a text locating the record, such as a line number or a key,
+  because the records are rows of the files.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "test-expected",
+  "fixture": "illustrative-file-import-example",
+  "variants": {
+    "crlf-line-endings": [{"quantity": "illustrative_total_notional_amount", "...": "..."}],
+    "lf-line-endings": [{"quantity": "illustrative_total_notional_amount", "...": "..."}]
+  }
+}
+```
+
+The other rules are the same for both forms. The category applies to every
+variant, so an `invalid` case needs a `_status` text output in each variant.
 
 <a id="expected-format"></a>
 
@@ -165,7 +222,10 @@ test. An output names it in `reference.script`, and
 compares the two:
 
 - it runs each named script once per case, as
-  `python -I tests/derivations/<name>.py tests/fixtures/<case-id>.json`;
+  `python -I tests/derivations/<name>.py tests/fixtures/<case-id>.json`, or for
+  a file-based case once per variant, with
+  `tests/fixtures/<case-id>/<variant>` as the argument, comparing that
+  variant's outputs;
 - the script prints one JSON object, `{"outputs": [...]}`, whose items have the
   `quantity` and `scope` of an expected output and its `value` or `text`;
 - every output that names the script must appear in what it prints, and match
@@ -175,8 +235,8 @@ A failing script, output that is not JSON, a missing quantity or a mismatch
 fails the check. A match shows only that the script and the expected file
 agree: the value stays `illustrative`, because the project derived it. The
 scripts use the Python standard library only and are never a runtime
-dependency of the workbook. `tests/derivations/illustrative_total.py` shows
-the format for `illustrative-format-example`.
+dependency of the workbook. `tests/derivations/illustrative_total.py` and
+`illustrative_file_total.py` show the format for the two example cases.
 
 <a id="tolerance"></a>
 
@@ -263,6 +323,12 @@ It checks:
 - strict JSON, with no duplicate key and only finite numbers, in every
   category;
 - the harness metadata of every fixture;
+- for a file-based case:
+  - the whole manifest;
+  - the variant names, and that each variant holds only files the data
+    contract names for the manifest's datasets;
+  - outside an `invalid` case, that each file decodes in its encoding;
+  - that the expected file's variants and the variant directories agree;
 - outside an `invalid` case, the calculation inputs:
   - the calculation and the datasets, against the methodology guides;
   - record identifiers;
@@ -280,6 +346,8 @@ It checks:
 It does not check:
 
 - whether an input key or a quantity name belongs to the contracts;
+- the content of a variant file beyond its name and encoding: its layout is
+  what the import under test checks;
 - that an `invalid` case has no numeric output for what it rejects;
 - any value: nothing is computed or compared. `tools/check_derivations.py`
   compares the values that a [derivation script](#derivation-scripts) computes,
