@@ -7,15 +7,19 @@ are skipped locally and fail in GitHub Actions.
 
 import os
 import re
+import sys
 import unittest
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tests'))
+
 try:
+    import strict_yaml
     import yaml
 except ImportError:  # pragma: no cover - exercised only without the parser
     yaml = None
 
-ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / '.github/workflows'
 REQUIRED_JOB = ('repository-integrity.yml', 'repository-integrity')
 REQUIRED_CHECK = 'Repository integrity'
@@ -31,7 +35,7 @@ PINNED = re.compile(r'^[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}$')
 
 
 def load(path):
-    document = yaml.safe_load(path.read_text(encoding='utf-8'))
+    document = strict_yaml.load(path.read_text(encoding='utf-8'))
     # YAML 1.1 reads the bare key "on" as True.
     if True in document:
         document['on'] = document.pop(True)
@@ -47,6 +51,20 @@ def workflows():
 class WorkflowControlTests(unittest.TestCase):
     def test_parser_is_available(self):
         self.assertIsNotNone(yaml, 'install .github/requirements.txt before running the tests')
+
+    def test_duplicate_keys_are_rejected(self):
+        self.assertEqual(strict_yaml.load('a: 1\nb: {c: 2}\n'), {'a': 1, 'b': {'c': 2}})
+        for text in ('permissions: {}\npermissions:\n  contents: write\n',
+                     'jobs:\n  build:\n    runs-on: a\n    runs-on: b\n'):
+            with self.subTest(text=text), self.assertRaisesRegex(yaml.YAMLError, 'duplicate key'):
+                strict_yaml.load(text)
+
+    def test_repository_yaml_has_no_duplicate_keys(self):
+        files = sorted([*ROOT.glob('.github/**/*.yml'), *ROOT.glob('.github/**/*.yaml')])
+        self.assertTrue(any(path.parent.name == 'ISSUE_TEMPLATE' for path in files))
+        for path in files:
+            with self.subTest(path=path.relative_to(ROOT).as_posix()):
+                strict_yaml.load(path.read_text(encoding='utf-8'))
 
     def test_actions_are_pinned_and_checkouts_drop_credentials(self):
         for name, document in workflows().items():
@@ -259,7 +277,7 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertEqual(len(node), 1, f'one Node.js version everywhere, found {node}')
 
     def test_dependabot_covers_each_pinned_dependency_once(self):
-        document = yaml.safe_load((ROOT / '.github/dependabot.yml').read_text(encoding='utf-8'))
+        document = strict_yaml.load((ROOT / '.github/dependabot.yml').read_text(encoding='utf-8'))
         self.assertEqual(document['version'], 2)
         updates = document['updates']
         self.assertEqual(sorted((u['package-ecosystem'], u['directory']) for u in updates),

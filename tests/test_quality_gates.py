@@ -1,8 +1,9 @@
-"""Prove that the Ruff complexity ceiling and mypy strict mode are active.
+"""Prove that the Ruff complexity ceiling, mypy strict mode and actionlint are active.
 
-Ruff and mypy are installed from tools/requirements-quality-ci.txt. The
-Repository integrity job sets REQUIRE_QUALITY_TOOLS=1, so these tests fail
-there if a tool is missing; elsewhere they are skipped without the tools.
+Ruff and mypy are installed from tools/requirements-quality-ci.txt, and
+actionlint as a checksum-verified release. The Repository integrity job sets
+REQUIRE_QUALITY_TOOLS=1, so these tests fail there if a tool is missing;
+elsewhere they are skipped without the tools.
 """
 
 import os
@@ -54,6 +55,17 @@ class QualityGateTests(unittest.TestCase):
         self.assertEqual(ok_code, 0, ok_log)
         self.assertNotEqual(bad_code, 0, bad_log)
         self.assertIn('[no-untyped-def]', bad_log)
+
+    @tool('actionlint')
+    def test_actionlint_rejects_an_unknown_key(self):
+        workflow = ('name: Probe\non: push\npermissions: {}\njobs:\n  probe:\n'
+                    '    runs-on: ubuntu-24.04\n    steps:\n      - run: echo ok\n')
+        command = ['actionlint', '-no-color', '-shellcheck=', '-pyflakes=', '-']
+        ok_code, ok_log = run(command, workflow)
+        bad_code, bad_log = run(command, workflow + '        bogus-key: true\n')
+        self.assertEqual(ok_code, 0, ok_log)
+        self.assertNotEqual(bad_code, 0, bad_log)
+        self.assertIn('unexpected key "bogus-key"', bad_log)
 
 
 if __name__ == '__main__':
