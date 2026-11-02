@@ -38,8 +38,8 @@ empty or marked `NOT RUN` is never a pass.
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
-| Repository integrity on the candidate | PASS or FAIL | Run link |
-| Repository checks from a clean clone (RELEASING.md step 3) | PASS or FAIL | Output summary |
+| Repository integrity on the candidate | PASS or FAIL | Run link, and its `integrity-<sha>-…` artifact |
+| Repository checks from a clean clone (RELEASING.md step 3) | PASS or FAIL | `report.json`: commit, `dirty: false`, status |
 | CodeQL alerts open on the default branch | None, or each with its assessment | Alert links |
 
 ### Regression evidence

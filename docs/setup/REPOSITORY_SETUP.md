@@ -159,6 +159,7 @@ inherited policies may impose additional restrictions.
 | `pyproject.toml`, `tools/requirements-quality-ci.txt` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling, strict mode and actionlint are active, and `tests/strict_yaml.py` makes the workflow control tests reject duplicate YAML keys. |
 | `.github/dependabot.yml`, `.github/requirements.txt` | **Keep** | Proposes updates to the SHA-pinned Actions, the hash-locked configuration parser that the workflow control tests use, and the hash-locked quality tools. Its `target-branch` names the active release branch: set it to this repository's release branch or remove it to target the default branch. **Repository integrity** fails while it names a branch that does not exist. |
 | `.github/workflows/codeql.yml` | **Keep** | Scans the Python, JavaScript and workflow code with CodeQL's security-extended queries on pushes and pull requests to `main` and `release/**`, and weekly; results appear under **Security → Code scanning**. Pull requests are analyzed without write permission: their SARIF is kept as a 30-day artifact and they show no code scanning annotations. Leave GitHub's default setup off, because it rejects results from this workflow. Free on a public repository; on a private one it needs GitHub Code Security and the repository variable `CODE_SCANNING` set to `enabled`, otherwise it skips the analysis. If the default branch is not `main`, rename it in the workflow's `push` and `pull_request` branch lists; **Repository integrity** fails while they omit it. |
+| `tools/check_repository.py`, `tests/test_check_repository.py` | **Keep and evolve** | Runs every **Repository integrity** check, locally and in CI, and writes per-check logs, `report.json` (commit, dirty state, file hashes) and the job summary under `test-results/integrity/`; CI keeps them as a 30-day artifact. Add project checks to its list. |
 | `tools/format_vba.py`, `tests/test_format_vba.py` | **Keep** | Brings exported VBA source into the house-style layout with `--write`; **Repository integrity** runs `--check`. It passes while there is no VBA source. |
 | `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links and anchors in **Repository integrity**, external links weekly. |
 | `docs/repo_governance/PULL_REQUESTS.md` | **Keep and adapt** | Final-head review procedure that the pull request template refers to. Adapt it if the project uses another automated reviewer. |
@@ -177,12 +178,13 @@ utilities. Keep them in the source template so future repositories receive them.
 3. In that same PR, add meaningful project checks to the workflow. Keep the job
    name **`Repository integrity`**, its coverage of all relevant PRs, the steps
    that set up Node.js and install the configuration parser, the quality tools
-   and actionlint, the **Run repository tests**, Ruff, mypy, actionlint, label
-   automation, binary, test-case and derivation steps, the existing
-   required-document and whitespace checks, and
-   the template-cleanup checks: the template-only section, the issue contact
-   links, the README traffic badges, the changelog, Dependabot's target
-   branches and CodeQL's default branch. Keep `.github/workflows/codeql.yml`: it is not part of the
+   and actionlint, the **Run the repository checks** step and the step that
+   keeps its reports. Add project checks to `tools/check_repository.py`, and
+   keep the checks it already runs: the tests, Ruff, mypy, actionlint, label
+   automation, binaries, VBA layout, test cases, derivations, links, the
+   required documents and white space, and the template-cleanup checks (the
+   template-only section, the issue contact links, the README traffic badges,
+   the changelog, Dependabot's target branches and CodeQL's default branch). Keep `.github/workflows/codeql.yml`: it is not part of the
    setup tooling.
    The remaining tests in `tests/` (label catalogue, issue triage, workflow
    controls, quality gates, Markdown links and traffic history) stay after the

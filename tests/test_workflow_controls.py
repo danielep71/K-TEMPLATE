@@ -198,16 +198,35 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertEqual(artifact['path'], pr_analyze['output'])
         self.assertEqual(artifact['if-no-files-found'], 'error')
 
-    def test_integrity_checks_that_code_scanning_covers_the_default_branch(self):
+    def test_integrity_runs_every_check_with_its_context(self):
         name, job_id = REQUIRED_JOB
         steps = workflows()[name]['jobs'][job_id]['steps']
-        step = next(step for step in steps
-                    if step.get('name') == 'Check that CodeQL runs on the default branch')
-        self.assertEqual(step['env'], {'DEFAULT_BRANCH': '${{ github.event.repository.default_branch }}'})
-        self.assertIn('.github/workflows/codeql.yml', step['run'])
-        # The parser it imports is installed by an earlier step.
-        install = next(i for i, s in enumerate(steps) if s.get('name') == 'Install pinned configuration parser')
-        self.assertLess(install, steps.index(step))
+        step = next(step for step in steps if step.get('name') == 'Run the repository checks')
+        self.assertEqual(step['env'], {
+            'IS_TEMPLATE': '${{ github.event.repository.is_template }}',
+            'DEFAULT_BRANCH': '${{ github.event.repository.default_branch }}',
+            'PR_HEAD_SHA': '${{ github.event.pull_request.head.sha }}'})
+        # The default branch lets the run check that CodeQL covers it.
+        for argument in ('tools/check_repository.py --strict', '--repository "$GITHUB_REPOSITORY"',
+                         '--default-branch "$DEFAULT_BRANCH"', '--template "$IS_TEMPLATE"',
+                         '--summary "$GITHUB_STEP_SUMMARY"'):
+            self.assertIn(argument, step['run'])
+        # The parser, the quality tools and actionlint are installed by earlier steps.
+        position = steps.index(step)
+        for earlier in ('Install pinned configuration parser',
+                        'Install hash-locked Python quality tools',
+                        'Install checksum-verified actionlint'):
+            with self.subTest(step=earlier):
+                self.assertLess(next(i for i, s in enumerate(steps) if s.get('name') == earlier),
+                                position)
+        # The reports are kept whatever the outcome.
+        upload = steps[position + 1]
+        self.assertTrue(upload['uses'].startswith('actions/upload-artifact@'))
+        self.assertEqual(upload['if'], 'always()')
+        self.assertEqual(upload['with']['path'], 'test-results/integrity/')
+        self.assertEqual(upload['with']['if-no-files-found'], 'error')
+        self.assertLessEqual(int(upload['with']['retention-days']), 30)
+        self.assertIn('${{ github.sha }}', upload['with']['name'])
 
     def test_every_pip_install_is_hash_locked(self):
         installs = 0
@@ -232,7 +251,7 @@ class WorkflowControlTests(unittest.TestCase):
 
     def test_jobs_that_run_node_set_it_up_first(self):
         # The repository tests and the issue checker run the label scripts too.
-        uses_node = re.compile(r'\bnode\s|unittest|check_issues\.py')
+        uses_node = re.compile(r'\bnode\s|unittest|check_issues\.py|check_repository\.py')
         versions, jobs = set(), 0
         for name, document in workflows().items():
             for job_id, job in document['jobs'].items():

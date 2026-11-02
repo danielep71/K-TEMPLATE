@@ -60,6 +60,12 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_repository.py`, one command that runs every **Repository
+  integrity** check locally and in CI. It writes a log per check and a
+  `report.json` with the commit, the dirty state and the SHA-256 of every
+  tracked file. A summary of each check appears on the run page, and CI keeps
+  the reports as a 30-day artifact. White space is now checked in every
+  committed file, not only in the pushed changes (#73).
 - `tools/format_vba.py`, which brings exported VBA source into the
   house-style layout with `--write`, and which **Repository integrity** runs
   with `--check`. It changes only line endings, trailing white space,
