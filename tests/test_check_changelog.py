@@ -169,6 +169,16 @@ class ReleaseStateTest(unittest.TestCase):
                            "'Released versions' does not name the newest release [0.2.0]: None")
         self.assertFinding(findings(RELEASED, "0.2.0\n", RELEASING=STATUS_BEFORE),
                            "'`VERSION`' does not name the newest release [0.2.0]")
+        for other in ("10.2.0", "0.2.0.1", "v0.2.00", "0.2.0-rc.1", "0.2.0b"):
+            with self.subTest(other=other):
+                wrong = STATUS_AFTER.replace("0.2.0", other)
+                self.assertFinding(findings(RELEASED, "0.2.0\n", RELEASING=wrong),
+                                   "'Released versions' does not name the newest release")
+        for named in ("0.2.0.", "v0.2.0", "`0.2.0`", "0.2.0 (2026-11-02)"):
+            with self.subTest(named=named):
+                status = STATUS_AFTER.replace("0.2.0, 0.1.0", named).replace(
+                    "| `VERSION` | 0.2.0 |", f"| `VERSION` | {named} |")
+                self.assertEqual(findings(RELEASED, "0.2.0\n", RELEASING=status), [])
         self.assertFinding(findings(UNRELEASED_ONLY, RELEASING=STATUS_AFTER),
                            "'Released versions' must be None before the first release")
         self.assertFinding(findings(UNRELEASED_ONLY, RELEASING=STATUS_AFTER),
