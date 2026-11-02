@@ -21,13 +21,19 @@ reference script is a test tool, never a runtime dependency of the workbook.
 Each comparison has an absolute and a relative tolerance, with the reason for
 them: the source's own rounding, or the precision of `Double` arithmetic.
 
+The [numerical test cases](TEST_CASES.md) record each expected value with its
+reference class (`published`, `independent` or `illustrative`), its source,
+its derivation and its tolerance. Only `published` and `independent` values
+validate a rule.
+
 ## Validation matrix
 
 | Calculation | Independent checks | Evidence | Status |
 | --- | --- | --- | --- |
 | *Illustrative:* `CALC-01` | Hand-computed totals for a synthetic portfolio; empty input; invalid input rejected | Evidence record per release candidate | Not started |
 
-Cover, for each calculation:
+Cover, for each calculation, with the case categories of the
+[test-case format](TEST_CASES.md#categories):
 
 - typical cases and the boundaries of every rule;
 - invalid and missing input, which the [data contract](DATA_CONTRACT.md)

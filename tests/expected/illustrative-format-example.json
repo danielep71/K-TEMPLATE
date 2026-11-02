@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "kind": "test-expected",
+  "fixture": "illustrative-format-example",
+  "outputs": [
+    {
+      "quantity": "illustrative_total_notional_amount",
+      "scope": null,
+      "rule": null,
+      "value": 1000000,
+      "unit": "EUR",
+      "tolerance": {"absolute": 0.000001, "relative": 0.000000001},
+      "reference": {
+        "class": "illustrative",
+        "source": null,
+        "locator": null,
+        "derivation": "Format example only: the sum of the two synthetic notional amounts, 600000 + 400000 EUR. Not a regulatory quantity and not computed by any rule",
+        "script": null,
+        "derived_by": "Daniele Penza",
+        "reviewed_by": null,
+        "date": "2026-11-02"
+      }
+    }
+  ]
+}
