@@ -26,7 +26,9 @@ real calendar date, may differ, and the difference is reported as a note, so
 a reviewed correction stays visible. A
 release whose tag does not exist yet is a note, since the tag is created
 after the changelog is dated; so is a directory that is not a Git checkout,
-where nothing can be compared.
+where nothing can be compared. A vX.Y.Z tag whose CHANGELOG.md released
+[X.Y.Z] fails when the section is no longer in the changelog, so a released
+section cannot be deleted or renamed.
 """
 
 from __future__ import annotations
@@ -240,15 +242,24 @@ def git(root: Path, *args: str) -> str | None:
 
 
 def frozen_problems(root: Path, text: str, released: list[str]) -> tuple[list[str], list[str]]:
-    """Each released section against its content at its tag: findings and notes."""
-    if not released:
-        return [], []
+    """Each released section against its content at its tag: findings and notes.
+
+    A tagged release whose section the changelog no longer holds is a finding
+    too, so that deleting or renaming a section cannot escape the comparison."""
     if git(root, "rev-parse", "--git-dir") is None:
         return [], [f"{CHANGELOG}: not a Git checkout, so released sections were not compared "
-                    "with their tags"]
+                    "with their tags"] if released else []
     findings: list[str] = []
     notes: list[str] = []
     current = sections(text)
+    for tag in sorted((git(root, "tag", "--list", "v*") or "").split()):
+        label = tag[1:]
+        if not re.fullmatch(SEMVER, label) or label in released:
+            continue
+        tagged_text = git(root, "show", f"{tag}:{CHANGELOG}")
+        if tagged_text is not None and label in released_versions(tagged_text):
+            findings.append(f"{CHANGELOG}: [{label}] was released with tag {tag} but its "
+                            "section is gone; a released section is frozen")
     for label in released:
         tag = f"v{label}"
         if git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}") is None:

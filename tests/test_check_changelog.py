@@ -279,6 +279,20 @@ class FrozenSectionTest(unittest.TestCase):
                                          "<reason>' only "
                                          "for a reviewed correction)"])
 
+    def test_a_deleted_or_renamed_release_fails(self) -> None:
+        deleted = RELEASED.replace("## [0.1.0] - 2026-10-30\n\n### Added\n\n- A start.\n\n",
+                                   "").replace(f"[0.1.0]: {TAGS}/v0.1.0\n", "")
+        gone = ("CHANGELOG.md: [0.1.0] was released with tag v0.1.0 but its section is gone; "
+                "a released section is frozen")
+        self.assertEqual(self.frozen(deleted), ([gone], []))
+        renamed = RELEASED.replace("[0.1.0]", "[0.1.1]").replace("/v0.1.0", "/v0.1.1")
+        found, notes = self.frozen(renamed)
+        self.assertEqual(found, [gone])
+        self.assertEqual(notes, ["CHANGELOG.md: [0.1.1] has no tag v0.1.1 yet, so it is not "
+                                 "frozen"])
+        # A tag that no released section ever named is not a release of this changelog.
+        self.assertEqual(self.frozen(tags=("v0.1.0", "v0.2.0", "v9.9.9", "vnext")), ([], []))
+
     def test_a_dated_correction_is_a_note(self) -> None:
         note = "Corrected after release on 2026-11-05: the entry named the wrong file."
         corrected = RELEASED.replace("- A start.\n", f"- A corrected start.\n\n{note}\n")

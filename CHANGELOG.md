@@ -151,8 +151,9 @@ milestones and their pull requests.
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may
-  differ, and the difference is reported as a note. A release without a tag
-  yet, or a copy without Git history, is a note (#172).
+  differ, and the difference is reported as a note. Deleting or renaming a
+  tagged section fails. A release without a tag yet, or a copy without Git
+  history, is a note (#172).
 - The workflow control tests check every `uses:` reference a workflow can
   reach, not only those of job steps. That covers job-level calls of reusable
   workflows, local actions followed into their metadata, and Docker images,
