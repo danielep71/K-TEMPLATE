@@ -10,3 +10,13 @@ snapshot_date,rank,path,title,count,uniques
 2026-11-01,8,/danielep71/MyTemplate/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/AGENTS.md,/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/AGENTS.md,2,2
 2026-11-01,9,/danielep71/MyTemplate/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/README.md,/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/README.md,2,2
 2026-11-01,10,/danielep71/MyTemplate/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/SECURITY.md,/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/SECURITY.md,2,2
+2026-11-02,1,/danielep71/MyTemplate,Overview,8,2
+2026-11-02,2,/danielep71/MyTemplate/milestones,/milestones,8,1
+2026-11-02,3,/danielep71/MyTemplate/milestone/2,/milestone/2,6,1
+2026-11-02,4,/danielep71/MyTemplate/pulls,/pulls,6,1
+2026-11-02,5,/danielep71/MyTemplate/issues,/issues,5,1
+2026-11-02,6,/danielep71/MyTemplate/milestone/3,/milestone/3,4,1
+2026-11-02,7,/danielep71/MyTemplate/milestones/new,/milestones/new,4,1
+2026-11-02,8,/danielep71/MyTemplate/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/docs/setup/REPOSITORY_SETUP.md,/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/docs/setup/REPOSITORY_SETUP.md,3,3
+2026-11-02,9,/danielep71/MyTemplate/branches,/branches,3,1
+2026-11-02,10,/danielep71/MyTemplate/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/.github/PULL_REQUEST_TEMPLATE.md,/blob/d7bfa4ee18d85aa0ab56726cf2b61f56f757a3dd/.github/PULL_REQUEST_TEMPLATE.md,2,2
