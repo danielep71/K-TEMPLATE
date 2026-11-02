@@ -1288,6 +1288,12 @@ Public Function Total( _
         Static Calls As Long
         Const STEP_SIZE As Long = 1
         ReDim Buffer(1 To LIMIT) As Long
+        ReDim Preserve Buffer(1 To LIMIT + 1), Spare$(2)
+        ReDim Items.Values(1 To 3), Items!Keys(1)
+        With Items
+            ReDim .Values(1 To 4)
+        End With
+        Dim Fixed As String * 8, Range2 As Excel.Range, Made As New Collection
         Set Items = New Collection
         For i = 1 To LIMIT Step STEP_SIZE: Buffer(i) = i: Next i
         For Each Extra In Items
@@ -1372,6 +1378,8 @@ IDENTIFIERS_INVALID = {
                               "cannot read the parameter"),
     "unreadable-declaration": ("Public Sub Run()\n        Dim 2nd As Long\nEnd Sub\n",
                                "cannot read the declaration"),
+    "unreadable-redim": ("Public Sub Run()\n        ReDim 3rd(1)\nEnd Sub\n",
+                         "cannot read the declaration"),
     "single-line-if-without-then": ("Public Sub Run()\n        If True x = 1\nEnd Sub\n",
                                     "cannot read the If statement"),
 }

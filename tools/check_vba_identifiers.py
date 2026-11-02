@@ -93,11 +93,14 @@ STATEMENT_WORDS = frozenset("""
     wend while width with write
 """.split())
 # Names a statement may call without a declaration in the project: VBA
-# functions used as statements and the Excel Application methods that VBA
-# resolves unqualified, in every module; a UserForm's own methods in a form;
+# functions used as statements and the methods of Excel's Global object,
+# which VBA resolves unqualified, in every module; a UserForm's own methods in a form;
 # a Worksheet's or Workbook's in a document module (one with VB_Base).
 # Extend the list of the module kind when code calls another one.
-BUILTIN_CALLS = frozenset("calculate doevents inputbox msgbox run sendkeys shell".split())
+BUILTIN_CALLS = frozenset("""
+    calculate ddeexecute ddepoke ddeterminate doevents executeexcel4macro inputbox msgbox run
+    sendkeys shell
+""".split())
 HOST_CALLS = {
     "form": frozenset("""
         hide move printform redoaction repaint scroll setdefaulttaborder show undoaction
@@ -111,11 +114,11 @@ HOST_CALLS = {
 # Built-in statement targets: Mid$(Text, 1, 1) = "x" replaces characters.
 BUILTIN_TARGETS = frozenset({"mid", "mid$", "midb", "midb$"})
 # Properties the host provides without a declaration, assignable unqualified:
-# the Excel globals in every module, a UserForm's own properties in a form,
+# the writable members of Excel's Global object in every module, a UserForm's own properties in a form,
 # and a Worksheet's or Workbook's in a document module (one with VB_Base).
 # Extend the list of the module kind when code assigns another one.
 HOST_TARGETS = {
-    "any": frozenset("activecell cells columns range rows".split()),
+    "any": frozenset("activecell activeprinter cells columns range rows selection".split()),
     "form": frozenset("""
         backcolor bordercolor borderstyle caption cycle drawbuffer enabled font forecolor
         height helpcontextid keepscrollbarsvisible left mousepointer picture
@@ -308,13 +311,28 @@ def module_level(module: Module, line: int, statement: str, block: list[str]) ->
         module.declare(line, name, what, visibility in {"public", "global"})
 
 
+def member_target(item: str) -> bool:
+    """Whether a ReDim target is a member, such as State.Values(1 To 3) or
+    .Values(1 To 3) in a With block: resized, not declared."""
+    head = item.lstrip()
+    bounds = head.find("(")
+    return head.startswith(".") or any(mark in (head[:bounds] if bounds >= 0 else head)
+                                       for mark in ".!")
+
+
 def local_declaration(module: Module, procedure: Procedure, line: int,
                       statement: str) -> bool:
     """Record a Dim, Static, Const or ReDim; whether ``statement`` was one."""
-    match = LOCAL_DECLARATION.match(statement) or REDIM.match(statement)
+    redim = REDIM.match(statement)
+    match = redim or LOCAL_DECLARATION.match(statement)
     if not match:
         return False
-    names = declared_names(match.group("list"))
+    items = match.group("list")
+    if redim:
+        items = ",".join(item for item in top_level_split(items) if not member_target(item))
+        if not items.strip():
+            return True
+    names = declared_names(items)
     if names is None:
         module.findings.append(Finding(module.path, line, "cannot read the declaration "
                                                           f"{statement.strip()!r}"))

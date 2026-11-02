@@ -197,9 +197,11 @@ What they cannot prove:
   `MsgBox` and `DoEvents`, are listed in `BUILTIN_CALLS`, a form's or document
   module's own methods, such as `Hide` or `Protect`, in `HOST_CALLS`, and the
   host properties assignable without a declaration in `HOST_TARGETS`:
-  `Range` and `Cells` anywhere, a UserForm's `Caption` or `Width` in a form,
-  a workbook's `Saved` or a worksheet's `Visible` in a document module.
-  Extend the list when code calls or assigns a built-in it does not know;
+  `Range`, `Cells` and `Selection` anywhere, a UserForm's `Caption` or
+  `Width` in a form, a workbook's `Saved` or a worksheet's `Visible` in a
+  document module. Extend the list when code calls or assigns a built-in it
+  does not know. A procedure of another VBA project that this one references
+  is not seen either; call it qualified by its module;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 
