@@ -51,7 +51,10 @@ from vba_lexer import (
 
 ROOT = Path(__file__).resolve().parents[1]
 NAME = r"[A-Za-z][A-Za-z0-9_]*"
-SUFFIX = r"[%&!#@$]?"
+# A type suffix, as in Total$ or Values!(1); a ! before a name is a member
+# access instead, as in Me!txtAmount or Items!Keys.
+SUFFIX = r"(?:[%&!#@$](?![A-Za-z_]))?"
+MEMBER_MARK = re.compile(r"\.|![A-Za-z_]")
 VISIBILITY = r"(?:(?P<vis>Public|Private|Friend|Global)\s+)?"
 PROC = re.compile(rf"^\s*{VISIBILITY}(?:Static\s+)?(?P<kind>Sub|Function|Property\s+(?:Get|Let|Set))"
                   rf"\s+(?P<name>{NAME}){SUFFIX}\s*(?P<rest>.*)$", re.I)
@@ -316,8 +319,7 @@ def member_target(item: str) -> bool:
     .Values(1 To 3) in a With block: resized, not declared."""
     head = item.lstrip()
     bounds = head.find("(")
-    return head.startswith(".") or any(mark in (head[:bounds] if bounds >= 0 else head)
-                                       for mark in ".!")
+    return MEMBER_MARK.search(head[:bounds] if bounds >= 0 else head) is not None
 
 
 def local_declaration(module: Module, procedure: Procedure, line: int,

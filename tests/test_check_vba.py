@@ -1290,6 +1290,9 @@ Public Function Total( _
         ReDim Buffer(1 To LIMIT) As Long
         ReDim Preserve Buffer(1 To LIMIT + 1), Spare$(2)
         ReDim Items.Values(1 To 3), Items!Keys(1)
+        ReDim Ratios!(1 To 3)
+        Ratios!(1) = 1
+        Items!Count = 3
         With Items
             ReDim .Values(1 To 4)
         End With
@@ -1426,6 +1429,7 @@ class IdentifierTest(unittest.TestCase):
         form = FORM.replace("   OleObjectBlob", "   Begin MSForms.TextBox txtAmount\n   End\n"
                             "   OleObjectBlob") + ("\nPrivate Sub UserForm_Initialize()\n"
                                                     "        txtAmount = \"0\"\n        Hide\n"
+                                                    "        Me!txtAmount = \"1\"\n"
                                                     "End Sub\n")
         files = changed("src/forms/frmRunOptions.frm", FORM, form)
         cls = CLASS + "\nPublic Sub Reset()\n        Amount = 0\nEnd Sub\n"
