@@ -38,7 +38,7 @@ you checked and what you found:
 - [ ] **Third-party claims.** No employer, client or vendor has a claim on the
       content or on the methods it implements.
 - [ ] **History scan.** A scan of every reachable blob found no sensitive
-      material. Commit range, patterns and findings:
+      material. Commit range, pattern categories and redacted findings:
 - [ ] **Workbooks.** Each workbook ever committed was inspected as below.
 - [ ] **Issues and pull requests.** Their text, comments, edit history and
       attachments contain no confidential material.
@@ -73,9 +73,14 @@ Search for at least:
 - real data: portfolio, trade, account or position identifiers, real
   amounts, and any file that is not synthetic.
 
-Record the scanned commit range, the patterns and the findings in the review
-issue. The `traffic-history` branch, when it exists, holds aggregate counts
-only; it is scanned with the rest.
+The review issue becomes public with the repository, so it must not become
+another copy of what the scan looks for. Record in it the scanned commit range,
+the categories of patterns, such as "client names" or "internal host names",
+and each finding redacted to its commit, path and category. Keep the literal
+patterns and any sensitive evidence outside the repository, in a private note
+or channel; a suspected vulnerability goes through the private reporting
+channel in [SECURITY.md](../../SECURITY.md). The `traffic-history` branch,
+when it exists, holds aggregate counts only; it is scanned with the rest.
 
 ## 📗 Workbooks
 
