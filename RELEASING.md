@@ -187,11 +187,36 @@ Deviations: none.
 `Deviations:` is mandatory: write `none`, or list each invariant that was not
 met. Copy results from the runs themselves.
 
+Pushing the tag starts the **Release** workflow
+(`.github/workflows/release.yml`). It stops before building anything if any of
+these fails:
+
+- the tag is annotated and named `vX.Y.Z`;
+- `X.Y.Z` is the newest dated release of `CHANGELOG.md` and the content of
+  `VERSION`;
+- the tagged commit is on the default branch;
+- the message names that commit on the `Candidate` line and has a
+  `Deviations:` line;
+- **Repository integrity** succeeded on the commit.
+
+The workflow then builds `<repository>-X.Y.Z-source.tar.gz` and `SHA256SUMS`
+from the tag with `tools/release.py`; the same tag always gives the same bytes.
+It attests their build provenance with GitHub's OIDC-signed attestation, and
+creates a **draft** release with the tag message and the changelog section as
+notes. A private repository attests only with GitHub Enterprise Cloud and the
+repository variable `RELEASE_ATTESTATIONS` set to `enabled`; otherwise the
+draft is created without an attestation, and its notes say so. To rehearse before tagging, run the workflow by hand on the candidate's
+ref: it checks the changelog and builds the bundle as an artifact, with no
+attestation and no release.
+
 ### 7. Publish and verify
 
-Create the GitHub Release from the tag, titled `vX.Y.Z - <milestone title>`,
-with the changelog section and the evidence summary as notes. Attach only the
-artifacts the certification record lists, with their SHA-256. Then check:
+Review the draft release that the **Release** workflow created. Title it
+`vX.Y.Z - <milestone title>`, and add the evidence summary to its notes.
+Attach any other artifact the certification record lists, such as a built
+workbook, with its SHA-256. Then publish it. When the bundle is attested,
+check that `gh attestation verify <bundle> --repo OWNER/REPOSITORY` succeeds
+for it. Then check that:
 
 - a fresh clone of the tag passes the commands of step 3;
 - the release page names the tag and the candidate SHA;

@@ -31,6 +31,8 @@ WRITE_PERMISSIONS = {
     ('pr-milestones.yml', 'reconcile'): {'pull-requests'},
     ('codeql.yml', 'analyze'): {'security-events'},
     ('scorecard.yml', 'analysis'): {'id-token', 'security-events'},
+    ('release.yml', 'attest'): {'id-token', 'attestations'},
+    ('release.yml', 'draft'): {'contents'},
 }
 PINNED = re.compile(r'^[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}$')
 
