@@ -145,6 +145,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The workflow control tests check every `uses:` reference a workflow can
+  reach, not only those of job steps. That covers job-level calls of reusable
+  workflows, local actions followed into their metadata, and Docker images,
+  which need an `@sha256:` digest. Each remote pin also needs a version comment
+  (#174).
 - What an Excel run must leave as evidence moves from constants in
   `tools/check_excel_run.py` to `.github/excel-evidence-policy.json`: the
   harness, the suite with its counts and certification entry point, the modes

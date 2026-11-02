@@ -8,6 +8,7 @@ are skipped locally and fail in GitHub Actions.
 import os
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -35,6 +36,10 @@ WRITE_PERMISSIONS = {
     ('release.yml', 'draft'): {'contents'},
 }
 PINNED = re.compile(r'^[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}$')
+DOCKER_PINNED = re.compile(r'^docker://[^@\s]+@sha256:[0-9a-f]{64}$')
+# The version a pin stands for, after it on the same line: "# v4.39.1".
+VERSION_COMMENT = r'\s+#\s*v?\d+(\.\d+){0,3}\b'
+ACTION_FILES = ('action.yml', 'action.yaml')
 
 
 def load(path):
@@ -45,8 +50,104 @@ def load(path):
     return document
 
 
+def workflow_paths(root=ROOT):
+    folder = root / '.github/workflows'
+    return sorted([*folder.glob('*.yml'), *folder.glob('*.yaml')])
+
+
 def workflows():
-    return {path.name: load(path) for path in sorted(WORKFLOWS.glob('*.yml'))}
+    return {path.name: load(path) for path in workflow_paths()}
+
+
+def has_version_comment(text, reference, key='uses'):
+    """Whether a ``key:`` line of the raw text pins ``reference`` with a version comment.
+
+    YAML drops comments, so the line is read from the text. A reference written in
+    a form this does not match, such as a flow mapping, has no comment here and
+    fails the check, so the rule fails closed."""
+    quoted = rf'(?P<q>[\'"]?){re.escape(reference)}(?P=q)'
+    return re.search(rf'(?m)^[ \t-]*["\']?{key}["\']?:[ \t]*{quoted}{VERSION_COMMENT}',
+                     text) is not None
+
+
+def reference_problems(where, reference, text, root, seen, key='uses'):
+    """The problems of one reference, following a local action into its metadata."""
+    if not isinstance(reference, str) or not reference:
+        return [f'{where}: uses: is not a reference']
+    if reference.startswith('docker://'):
+        problems = [] if DOCKER_PINNED.match(reference) else [
+            f'{where}: {reference} is not pinned to an @sha256: digest']
+        if not has_version_comment(text, reference, key):
+            problems.append(f'{where}: {reference} has no version comment')
+        return problems
+    if reference.startswith('./'):
+        return local_problems(where, reference, root, seen)
+    problems = [] if PINNED.match(reference) else [
+        f'{where}: {reference} is not pinned to a full commit SHA']
+    if not has_version_comment(text, reference):
+        problems.append(f'{where}: {reference} has no version comment')
+    return problems
+
+
+def local_problems(where, reference, root, seen):
+    """A local reusable workflow must exist; a local action is checked step by step."""
+    target = (root / reference).resolve()
+    if root.resolve() not in target.parents:
+        return [f'{where}: {reference} is outside the repository']
+    workflows_folder = (root / '.github/workflows').resolve()
+    if target.suffix in ('.yml', '.yaml'):
+        if target.parent != workflows_folder:
+            return [f'{where}: {reference} is not in .github/workflows']
+        # It is scanned as a workflow in its own right.
+        return [] if target.is_file() else [f'{where}: {reference} does not exist']
+    metadata = next((target / name for name in ACTION_FILES if (target / name).is_file()), None)
+    if metadata is None:
+        return [f'{where}: {reference} has no action.yml or action.yaml']
+    if metadata in seen:
+        return []  # Already checked, or a cycle: either way, nothing new to read.
+    seen.add(metadata)
+    text = metadata.read_text(encoding='utf-8')
+    label = metadata.relative_to(root.resolve()).as_posix()
+    runs = (load_text(text) or {}).get('runs') or {}
+    problems = []
+    for index, step in enumerate(runs.get('steps') or []):
+        if isinstance(step, dict) and 'uses' in step:
+            problems += reference_problems(f'{label} step {index + 1}', step['uses'], text,
+                                           root, seen)
+    image = runs.get('image')
+    if isinstance(image, str) and image.startswith('docker://'):
+        problems += reference_problems(f'{label} image', image, text, root, seen, 'image')
+    return problems
+
+
+def load_text(text):
+    document = strict_yaml.load(text)
+    if isinstance(document, dict) and True in document:
+        document['on'] = document.pop(True)
+    return document
+
+
+def pin_problems(root=ROOT):
+    """Every uses: reference reachable from the workflows of ``root`` that is not immutable.
+
+    A remote action or reusable workflow is pinned to a full commit SHA and a
+    Docker image to an @sha256: digest, each with a version comment; a local
+    reusable workflow must exist in .github/workflows; a local action is followed
+    into its action.yml, recursively and once."""
+    problems = []
+    seen = set()
+    for path in workflow_paths(root):
+        text = path.read_text(encoding='utf-8')
+        document = load_text(text) or {}
+        for job_id, job in (document.get('jobs') or {}).items():
+            where = f'{path.name} job {job_id}'
+            if 'uses' in job:
+                problems += reference_problems(where, job['uses'], text, root, seen)
+            for index, step in enumerate(job.get('steps') or []):
+                if isinstance(step, dict) and 'uses' in step:
+                    problems += reference_problems(f'{where} step {index + 1}', step['uses'],
+                                                   text, root, seen)
+    return problems
 
 
 @unittest.skipIf(yaml is None and not os.environ.get('GITHUB_ACTIONS'),
@@ -70,21 +171,80 @@ class WorkflowControlTests(unittest.TestCase):
                 strict_yaml.load(path.read_text(encoding='utf-8'))
 
     def test_actions_are_pinned_and_checkouts_drop_credentials(self):
+        self.assertEqual(pin_problems(), [])
         for name, document in workflows().items():
             for job_id, job in document['jobs'].items():
                 for step in job.get('steps', []):
                     if 'uses' not in step:
                         continue
                     with self.subTest(workflow=name, job=job_id, uses=step['uses']):
-                        self.assertRegex(step['uses'], PINNED)
                         if step['uses'].startswith('actions/checkout@'):
                             self.assertIs((step.get('with') or {}).get('persist-credentials'), False)
+
+    def test_pins_cover_every_reachable_reference(self):
+        sha, digest = 'a' * 40, 'b' * 64
+        pinned = f'actions/checkout@{sha} # v7.0.1'
+        cases = {
+            'pinned step, job-level call, local reusable workflow and local action': (
+                {'.github/workflows/ci.yml': f'jobs:\n  build:\n    steps:\n      - uses: {pinned}\n'
+                                             '      - uses: ./.github/actions/setup\n'
+                                             f'  call:\n    uses: owner/repo/.github/workflows/x.yml@{sha} # v1\n'
+                                             '  local:\n    uses: ./.github/workflows/called.yml\n',
+                 '.github/workflows/called.yml': f'jobs:\n  run:\n    steps:\n      - uses: {pinned}\n',
+                 '.github/actions/setup/action.yml': f'runs:\n  using: composite\n  steps:\n    - uses: {pinned}\n'},
+                []),
+            'unpinned job-level call': (
+                {'.github/workflows/ci.yml': 'jobs:\n  call:\n    uses: owner/repo/.github/workflows/x.yml@main # v1\n'},
+                ['ci.yml job call: owner/repo/.github/workflows/x.yml@main is not pinned to a full commit SHA']),
+            'pin without a version comment': (
+                {'.github/workflows/ci.yml': f'jobs:\n  build:\n    steps:\n      - uses: actions/checkout@{sha}\n'},
+                [f'ci.yml job build step 1: actions/checkout@{sha} has no version comment']),
+            'a flow mapping cannot show its comment, so it fails closed': (
+                {'.github/workflows/ci.yml': f'jobs:\n  build:\n    steps:\n      - {{uses: "actions/checkout@{sha}"}} # v7\n'},
+                [f'ci.yml job build step 1: actions/checkout@{sha} has no version comment']),
+            'unpinned step inside a local action': (
+                {'.github/workflows/ci.yml': 'jobs:\n  build:\n    steps:\n      - uses: ./tools/setup\n',
+                 'tools/setup/action.yaml': 'runs:\n  using: composite\n  steps:\n    - uses: actions/checkout@v7 # v7\n'},
+                ['tools/setup/action.yaml step 1: actions/checkout@v7 is not pinned to a full commit SHA']),
+            'Docker tag without a digest, in a step and in an action image': (
+                {'.github/workflows/ci.yml': 'jobs:\n  build:\n    steps:\n      - uses: docker://alpine:3.20 # v3.20\n'
+                                             f'      - uses: docker://alpine@sha256:{digest} # v3.20\n'
+                                             '      - uses: ./box\n',
+                 'box/action.yml': 'runs:\n  using: docker\n  image: docker://alpine:3.20 # v3.20\n'},
+                ['ci.yml job build step 1: docker://alpine:3.20 is not pinned to an @sha256: digest',
+                 'box/action.yml image: docker://alpine:3.20 is not pinned to an @sha256: digest']),
+            'local actions that use each other are read once': (
+                {'.github/workflows/ci.yml': 'jobs:\n  build:\n    steps:\n      - uses: ./a\n',
+                 'a/action.yml': 'runs:\n  using: composite\n  steps:\n    - uses: ./b\n',
+                 'b/action.yml': 'runs:\n  using: composite\n  steps:\n    - uses: ./a\n'},
+                []),
+            'missing or misplaced local references': (
+                {'.github/workflows/ci.yml': 'jobs:\n  a:\n    uses: ./.github/workflows/missing.yml\n'
+                                             '  b:\n    uses: ./other/x.yml\n'
+                                             '  c:\n    steps:\n      - uses: ./no-action\n'
+                                             '      - uses: ./../outside\n'},
+                ['ci.yml job a: ./.github/workflows/missing.yml does not exist',
+                 'ci.yml job b: ./other/x.yml is not in .github/workflows',
+                 'ci.yml job c step 1: ./no-action has no action.yml or action.yaml',
+                 'ci.yml job c step 2: ./../outside is outside the repository']),
+        }
+        for label, (files, expected) in cases.items():
+            with self.subTest(case=label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                for name, text in files.items():
+                    (root / name).parent.mkdir(parents=True, exist_ok=True)
+                    (root / name).write_text(text, encoding='utf-8')
+                self.assertEqual(pin_problems(root), expected)
 
     def test_every_job_has_a_timeout_and_permissions_are_explicit(self):
         for name, document in workflows().items():
             with self.subTest(workflow=name):
                 self.assertIn('permissions', document)
             for job_id, job in document['jobs'].items():
+                # A job that calls a reusable workflow cannot set a timeout; the
+                # jobs of a local one are checked in its own file.
+                if 'uses' in job:
+                    continue
                 with self.subTest(workflow=name, job=job_id):
                     self.assertIsInstance(job.get('timeout-minutes'), int)
 
