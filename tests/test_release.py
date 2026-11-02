@@ -21,6 +21,11 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import release  # noqa: E402
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - installed from .github/requirements.txt
+    yaml = None
+
 CHANGELOG = """# Changelog
 
 ## [Unreleased]
@@ -183,6 +188,25 @@ class WorkflowTest(unittest.TestCase):
                         "gh release create \"$TAG\" --draft --verify-tag"):
             with self.subTest(command=command):
                 self.assertIn(command, text)
+
+    @unittest.skipIf(yaml is None, "needs PyYAML from .github/requirements.txt")
+    def test_a_repository_without_attestations_still_gets_its_draft(self) -> None:
+        assert yaml is not None
+        jobs = yaml.safe_load((ROOT / ".github/workflows/release.yml")
+                              .read_text(encoding="utf-8"))["jobs"]
+        attest, draft = jobs["attest"]["if"], jobs["draft"]["if"]
+        self.assertIn("github.event.repository.private == false", attest)
+        self.assertIn("vars.RELEASE_ATTESTATIONS == 'enabled'", attest)
+        self.assertEqual(jobs["draft"]["needs"], ["build", "attest"])
+        for condition in ("!cancelled()", "needs.build.result == 'success'",
+                          "needs.attest.result == 'success'",
+                          "needs.attest.result == 'skipped'"):
+            with self.subTest(condition=condition):
+                self.assertIn(condition, draft)
+        script = jobs["draft"]["steps"][-1]["run"]
+        self.assertIn('if [ "$ATTESTED" != "success" ]', script)
+        self.assertLess(script.index("no build provenance attestation"),
+                        script.index("gh release create"))
 
 
 if __name__ == "__main__":

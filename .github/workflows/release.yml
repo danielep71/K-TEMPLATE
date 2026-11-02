@@ -16,6 +16,11 @@ name: Release
 # Repository integrity succeeded (tools/release.py). The Excel certification
 # and the distribution review stay records in their issues; the tag message
 # cites them.
+#
+# Attestations are free on a public repository. A private one needs GitHub
+# Enterprise Cloud for them; there, set the repository variable
+# RELEASE_ATTESTATIONS to enabled. Without it a private repository skips the
+# attestation, and the draft release states that its bundle is not attested.
 
 on:
   push:
@@ -116,7 +121,9 @@ jobs:
   attest:
     name: Attest build provenance
     needs: build
-    if: github.event_name == 'push'
+    if: >-
+      github.event_name == 'push' &&
+      (github.event.repository.private == false || vars.RELEASE_ATTESTATIONS == 'enabled')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -139,8 +146,13 @@ jobs:
 
   draft:
     name: Draft the GitHub Release
-    needs: attest
-    if: github.event_name == 'push'
+    needs: [build, attest]
+    # Runs after an attestation, or after a build whose attestation was
+    # skipped because the repository does not support it; never after a
+    # failure.
+    if: >-
+      !cancelled() && github.event_name == 'push' && needs.build.result == 'success' &&
+      (needs.attest.result == 'success' || needs.attest.result == 'skipped')
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -165,11 +177,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          ATTESTED: ${{ needs.attest.result }}
         run: |
           set -euo pipefail
           auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --force origin \
             "refs/tags/$TAG:refs/tags/$TAG"
           python tools/release.py notes "$TAG" > notes.md
+          if [ "$ATTESTED" != "success" ]; then
+            printf '\n%s %s\n' "The source bundle has no build provenance attestation: this" \
+              "private repository does not enable RELEASE_ATTESTATIONS." >> notes.md
+          fi
           gh release create "$TAG" --draft --verify-tag --title "$TAG" \
             --notes-file notes.md dist/*
