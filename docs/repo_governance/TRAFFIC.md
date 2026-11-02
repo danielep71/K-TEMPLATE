@@ -121,7 +121,8 @@ On a public repository, a README can show one with
 `https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/OWNER/REPOSITORY/traffic-history/data/badges/clones.json`.
 Large numbers are shortened (`1.2k`, `11k`). A badge file changes only when its
 value does. Clones include those made by workflow checkouts, so CI activity
-raises the count.
+raises the count; for the same reason they never raise a
+[traffic alert](#-traffic-alert).
 
 The README shows the three badges for this repository. **Repository integrity**
 fails while a README badge reads another repository's `traffic-history` branch:
@@ -196,10 +197,16 @@ After each collection the **Traffic alert** job compares the latest snapshot
 with the one before (`traffic_history.py alert`) and opens one issue, titled
 `Traffic alert: <snapshot date>`, when any of these holds:
 
-- **Views or clones spike:** the 14-day total at least doubles and grows by
-  at least 100 views or 10 clones;
+- **Views spike:** the 14-day view total at least doubles and grows by at
+  least 100 views;
 - **Stars or forks increase;**
 - **New referrer:** a referrer never stored before brings at least 5 views.
+
+Clones never raise an alert. GitHub counts every workflow checkout as a clone,
+so a day of pull requests raises the clone count far more than outside
+interest does, and a clone alert would fire on the repository's own CI. Clones
+are still recorded in `daily.csv` and `snapshots.csv`, shown in the alert
+issue's table and summed in the clones badge.
 
 At most one issue is opened per snapshot date: the job skips a date whose
 issue exists, open or closed. The issue is assigned to the issue-form account,
