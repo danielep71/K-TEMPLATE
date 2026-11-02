@@ -113,12 +113,47 @@ class ApiVersionTests(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
 
 
+NOTICE_FILE = re.compile(r'^([.\w][\w./-]*\.[\w]+|\.[\w]+)$', re.M)
+LICENSES = {'Mozilla Public License 2.0': 'MPL-2.0', 'MIT License': 'MIT'}
+
+
+def notice_entries():
+    """(repository URL, license, file) for every file of every notice section."""
+    notice = (ROOT / 'docs/licenses/THIRD_PARTY_NOTICES.txt').read_text(encoding='utf-8')
+    entries = set()
+    for section in re.split(r'\n(?=The (?:following|target))', notice)[1:]:
+        url = re.search(r'\((https://github\.com/[\w.-]+/[\w.-]+)\)', section).group(1)
+        license_id = next(code for name, code in LICENSES.items()
+                          if name in ' '.join(section.split()))
+        entries |= {(url, license_id, path) for path in NOTICE_FILE.findall(section)}
+    return entries
+
+
 class LicenseNoticeTests(unittest.TestCase):
     def test_every_file_listed_in_the_notice_exists(self):
         notice = (ROOT / 'docs/licenses/THIRD_PARTY_NOTICES.txt').read_text(encoding='utf-8')
-        listed = re.findall(r'^([.\w][\w./-]*\.[\w]+|\.[\w]+)$', notice, re.M)
+        listed = NOTICE_FILE.findall(notice)
         self.assertTrue(listed, 'the notice lists no files')
         self.assertEqual([path for path in listed if not (ROOT / path).is_file()], [])
+
+    def test_provenance_register_agrees_with_the_notice(self):
+        register = json.loads((ROOT / 'docs/licenses/provenance.json').read_text(encoding='utf-8'))
+        self.assertEqual(register['schema_version'], 1)
+        entries = set()
+        for source in register['sources']:
+            with self.subTest(repository=source['repository']):
+                self.assertEqual(set(source), {'repository', 'license', 'revision',
+                                               'revision_note', 'files'})
+                self.assertRegex(source['repository'], r'^https://github\.com/[\w.-]+/[\w.-]+$')
+                revision = source['revision']
+                self.assertTrue(revision is None or re.fullmatch(r'[0-9a-f]{40}', revision),
+                                f'revision {revision!r} is not a full commit SHA or null')
+                self.assertTrue(str(source['revision_note']).strip(),
+                                'explain what the revision is, or why it is not recorded')
+                self.assertEqual(len(source['files']), len(set(source['files'])))
+                entries |= {(source['repository'], source['license'], path)
+                            for path in source['files']}
+        self.assertEqual(entries, notice_entries())
 
 
 class TemplateOnlyContentTests(unittest.TestCase):
