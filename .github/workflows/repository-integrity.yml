@@ -72,117 +72,27 @@ jobs:
             | sha256sum --check --strict
           tar --no-same-owner -xzf "$archive" -C "$validator_dir" actionlint
           echo "$validator_dir" >> "$GITHUB_PATH"
-      - name: Run repository tests
-        run: python -m unittest discover -s tests -v
-      - name: Lint Python tooling (ruff)
-        run: ruff check --no-cache tools tests
-      - name: Type-check Python tooling (mypy, strict)
-        run: mypy --no-incremental
-      - name: Lint workflows (actionlint)
-        run: actionlint -no-color
-      - name: Test label automation
-        run: |
-          node .github/scripts/labels-sync.mjs --self-test
-          node .github/scripts/labels-sync.mjs --mode validate
-          node .github/scripts/labels-drift.mjs --self-test
-          python tools/check_issues.py --check-config
-      - name: Reject template-only content outside the template
+      - name: Run the repository checks
+        # One command runs every check, as locally; it writes per-check logs,
+        # report.json and the job summary under test-results/integrity/.
         env:
           IS_TEMPLATE: ${{ github.event.repository.is_template }}
-        run: |
-          if [[ "$IS_TEMPLATE" != "true" ]] && grep -q 'template-only:start' AGENTS.md; then
-            echo "::error file=AGENTS.md::Delete the template-only section of AGENTS.md, including its markers, in a generated repository."
-            exit 1
-          fi
-      - name: Check that issue contact links point to this repository
-        run: |
-          expected="https://github.com/${GITHUB_REPOSITORY,,}/"
-          failed=0
-          while read -r url; do
-            if [[ "${url,,}" != "$expected"* ]]; then
-              echo "::error file=.github/ISSUE_TEMPLATE/config.yml::Contact link $url does not point to $GITHUB_REPOSITORY; update it after creating a repository from the template."
-              failed=1
-            fi
-          done < <(sed -n -E 's/^[[:space:]]*url:[[:space:]]*"?([^"]+)"?[[:space:]]*$/\1/p' .github/ISSUE_TEMPLATE/config.yml)
-          exit "$failed"
-      - name: Check that README traffic badges read this repository
-        run: |
-          expected="${GITHUB_REPOSITORY,,}"
-          failed=0
-          while read -r repository; do
-            if [[ "${repository,,}" != "$expected" ]]; then
-              echo "::error file=README.md::A traffic badge reads ${repository}; point it at ${GITHUB_REPOSITORY} or remove it."
-              failed=1
-            fi
-          done < <(grep -o -E 'raw\.githubusercontent\.com/[^/]+/[^/]+/traffic-history/' README.md | cut -d/ -f2,3 | sort -u)
-          exit "$failed"
-      - name: Check tracked binary files
-        run: python tools/check_binaries.py
-      - name: Check the house-style layout of VBA source
-        run: python tools/format_vba.py --check
-      - name: Check the numerical test cases
-        run: python tools/check_test_cases.py
-      - name: Compare the derivation scripts with the expected values
-        run: python tools/check_derivations.py
-      - name: Check the changelog and VERSION
-        # The link references must point to this repository, so a generated
-        # repository fails until it replaces the template's.
-        run: python tools/check_changelog.py --repository "$GITHUB_REPOSITORY"
-      - name: Check that Dependabot targets existing branches
-        run: |
-          # fetch-depth: 0 fetches every branch, so each target is a local ref.
-          failed=0
-          while read -r branch; do
-            if ! git rev-parse --verify --quiet "refs/remotes/origin/${branch}" > /dev/null; then
-              echo "::error file=.github/dependabot.yml::target-branch ${branch} does not exist; set it to the active release branch or remove it."
-              failed=1
-            fi
-          done < <(sed -n -E 's/^[[:space:]]*target-branch:[[:space:]]*"?([^"[:space:]]+)"?[[:space:]]*$/\1/p' .github/dependabot.yml | sort -u)
-          exit "$failed"
-      - name: Check that CodeQL runs on the default branch
-        env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Branch filters cannot name the default branch, so codeql.yml lists
-          # it by name; a repository whose default branch is not main must
-          # rename it there, or CodeQL runs only on its weekly schedule.
-          python - <<'PY'
-          import os
-          import sys
-          from pathlib import Path
-
-          sys.path.insert(0, 'tests')
-          from strict_yaml import load
-
-          path = Path('.github/workflows/codeql.yml')
-          if not path.exists():
-              sys.exit(0)
-          document = load(path.read_text(encoding='utf-8'))
-          triggers = document.get('on', document.get(True)) or {}
-          branch = os.environ['DEFAULT_BRANCH']
-          failed = False
-          for event in ('push', 'pull_request'):
-              branches = (triggers.get(event) or {}).get('branches')
-              if branches is not None and branch not in branches:
-                  print(f'::error file={path}::{event} branches {branches} omit the default branch {branch}; add it.')
-                  failed = True
-          sys.exit(1 if failed else 0)
-          PY
-      - name: Validate template contents
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: |
-          test -s README.md
-          test -s LICENSE
-          test -s docs/repo_governance/SETTINGS.md
-          # After a force-push the previous tip is unreachable and was not
-          # fetched; check the head commit alone then.
-          if [[ -n "$BASE_SHA" && ! "$BASE_SHA" =~ ^0+$ ]] \
-              && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git diff --check "$BASE_SHA" HEAD
-          else
-            git show --format= --check HEAD
-          fi
+          python tools/check_repository.py --strict \
+            --repository "$GITHUB_REPOSITORY" \
+            --default-branch "$DEFAULT_BRANCH" \
+            --template "$IS_TEMPLATE" \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - name: Keep the integrity reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: integrity-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: test-results/integrity/
+          if-no-files-found: error
+          retention-days: 30
 
   minimum-python:
     # Not a required check: it confirms the documented Python floor.
