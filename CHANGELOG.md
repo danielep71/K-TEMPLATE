@@ -64,6 +64,9 @@ milestones and their pull requests.
 - A numerical test-case format, `docs/methodology/TEST_CASES.md`, with an
   illustrative case under `tests/fixtures/` and `tests/expected/`, and
   `tools/check_test_cases.py`, which **Repository integrity** runs (#75).
+- `tools/check_binaries.py`, which **Repository integrity** runs: a tracked
+  binary file outside the approved paths fails unless
+  `.github/binary-allowlist.json` lists it with its current SHA-256 (#113).
 
 ### Changed
 
