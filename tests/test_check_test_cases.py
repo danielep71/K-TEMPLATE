@@ -54,9 +54,9 @@ EXPECTED: dict[str, Any] = {"schema_version": 1, "kind": "test-expected", "fixtu
 Edit = Callable[[dict[str, Any], dict[str, Any]], None]
 
 
-def run(edit: Edit | None = None, name: str = "case-one",
-        extra: dict[str, str] | None = None) -> list[str]:
-    """Write the repository, apply edit(fixture, expected), and check it."""
+def write(root: Path, edit: Edit | None = None, name: str = "case-one",
+          extra: dict[str, str] | None = None) -> None:
+    """Write a repository with one case, after applying edit(fixture, expected)."""
     fixture, expected = copy.deepcopy(FIXTURE), copy.deepcopy(EXPECTED)
     if edit is not None:
         edit(fixture, expected)
@@ -66,12 +66,17 @@ def run(edit: Edit | None = None, name: str = "case-one",
              f"tests/fixtures/{name}.json": json.dumps(fixture),
              f"tests/expected/{name}.json": json.dumps(expected)}
     files.update(extra or {})
+    for path, text in files.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_text(text, encoding="utf-8")
+
+
+def run(edit: Edit | None = None, name: str = "case-one",
+        extra: dict[str, str] | None = None) -> list[str]:
+    """Write the repository, apply edit(fixture, expected), and check it."""
     with tempfile.TemporaryDirectory(prefix="test-cases-") as directory:
-        root = Path(directory)
-        for path, text in files.items():
-            (root / path).parent.mkdir(parents=True, exist_ok=True)
-            (root / path).write_text(text, encoding="utf-8")
-        return check_test_cases.check(root)[0]
+        write(Path(directory), edit, name, extra)
+        return check_test_cases.check(Path(directory))[0]
 
 
 def output(expected: dict[str, Any]) -> dict[str, Any]:
@@ -84,10 +89,9 @@ class ValidCasesTest(unittest.TestCase):
         self.assertEqual(run(), [])
 
     def test_repository_cases_pass(self) -> None:
-        findings, fixtures, expected = check_test_cases.check(ROOT)
-        self.assertEqual(findings, [])
-        self.assertGreaterEqual(fixtures, 1)
-        self.assertEqual(fixtures, expected)
+        # Any number of cases, none included: a generated repository removes
+        # the illustrative case and adds its own.
+        self.assertEqual(check_test_cases.check(ROOT)[0], [])
 
     def test_no_cases_pass_without_reading_the_guides(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -300,16 +304,29 @@ class ExpectedTest(FindingTest):
 
 
 class MainTest(unittest.TestCase):
-    def test_verdicts(self) -> None:
-        for directory, code, verdict in ((ROOT, 0, "test-cases: PASS (1 fixture(s)"),):
-            with self.subTest(directory=directory), \
-                    contextlib.redirect_stdout(io.StringIO()) as printed:
-                self.assertEqual(check_test_cases.main(["--root", str(directory)]), code)
-                self.assertIn(verdict, printed.getvalue())
-        with tempfile.TemporaryDirectory() as empty, \
+    def verdict(self, edit: Edit | None = None, empty: bool = False) -> tuple[int, str]:
+        with tempfile.TemporaryDirectory(prefix="test-cases-") as directory, \
                 contextlib.redirect_stdout(io.StringIO()) as printed:
-            self.assertEqual(check_test_cases.main(["--root", empty]), 0)
-            self.assertIn("test-cases: PASS (no test cases found", printed.getvalue())
+            if not empty:
+                write(Path(directory), edit)
+            code = check_test_cases.main(["--root", directory])
+        return code, printed.getvalue()
+
+    def test_pass(self) -> None:
+        code, printed = self.verdict()
+        self.assertEqual(code, 0)
+        self.assertIn("test-cases: PASS (1 fixture(s), 1 expected file(s)", printed)
+
+    def test_fail(self) -> None:
+        code, printed = self.verdict(lambda f, e: f.update(synthetic=False))
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL: tests/fixtures/case-one.json: synthetic is not true", printed)
+        self.assertIn("test-cases: FAIL (1 fixture(s), 1 expected file(s)", printed)
+
+    def test_no_cases(self) -> None:
+        code, printed = self.verdict(empty=True)
+        self.assertEqual(code, 0)
+        self.assertIn("test-cases: PASS (no test cases found", printed)
 
 
 if __name__ == "__main__":
