@@ -53,3 +53,11 @@ tooling, and its GitHub Actions workflows and their configuration.
 - modified copies;
 - ordinary defects without concrete security impact, such as an incorrect
   calculated figure. Report those as issues.
+
+## 📦 Before distribution
+
+Before the repository is made public, a copy is shared or a release is
+published, I record the
+[distribution review](docs/repo_governance/DISTRIBUTION.md): license,
+provenance, a scan of the whole history, the workbooks, and the issue and pull
+request text.
