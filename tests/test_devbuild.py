@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import random
 import shutil
 import struct
@@ -494,6 +495,24 @@ class ProjectSource(unittest.TestCase):
         sheet = decompress(cfb.read("VBA/shInputs")).decode("cp1252")
         self.assertIn("Private Sub Worksheet_Change", sheet)
         self.assertTrue(sheet.startswith('Attribute VB_Name = "shInputs"'))
+
+    def test_a_test_sheet_module_is_left_out_of_production_only(self) -> None:
+        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config["sheets"].append({"tab": "Checks", "code_name": "shChecks", "role": "Test"})
+        checks = (b'Attribute VB_Name = "shChecks"\r\nOption Explicit\r\n'
+                  b"Private Sub Worksheet_Activate()\r\nEnd Sub\r\n")
+        files = {build_workbook.CONFIG: json.dumps(config).encode(),
+                 "src/workbook/shChecks.cls": checks}
+        projects = {}
+        with git_tree(files) as root, tempfile.TemporaryDirectory() as temporary:
+            for configuration in ("production", "development"):
+                target = Path(temporary) / f"{configuration}.xlsm"
+                build_workbook.build(root, configuration, target)
+                with zipfile.ZipFile(target) as package:
+                    projects[configuration] = CompoundFile(package.read("xl/vbaProject.bin")) \
+                        .read("PROJECT").decode("cp1252")
+        self.assertNotIn("shChecks", projects["production"])
+        self.assertIn("Document=shChecks/&H00000000", projects["development"])
 
     def test_a_document_module_in_the_wrong_case_stops_the_build(self) -> None:
         files = {"src/workbook/shINPUTS.cls": SHEET_SOURCE.replace(b"shInputs", b"shINPUTS")}

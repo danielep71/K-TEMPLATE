@@ -403,8 +403,11 @@ def for_configuration(layout: Layout, configuration: str) -> Layout:
 
 def build(root: Path, configuration: str, target: Path) -> Build:
     """Write the workbook to ``target`` and describe what it holds."""
-    layout = for_configuration(load_layout(root), configuration)
-    paths = components(root, layout, configuration)
+    # Document modules are checked against every sheet, Test sheets included,
+    # before the configuration drops what it does not build.
+    complete = load_layout(root)
+    paths = components(root, complete, configuration)
+    layout = for_configuration(complete, configuration)
     commit = git(root, "rev-parse", "HEAD")
     result = Build(commit, git(root, "show", "-s", "--format=%cI", "HEAD"),
                    is_clean(root, layout, configuration), configuration, tuple(paths))
