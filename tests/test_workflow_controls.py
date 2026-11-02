@@ -30,6 +30,9 @@ WRITE_PERMISSIONS = {
     ('traffic-history.yml', 'alert'): {'issues'},
     ('pr-milestones.yml', 'reconcile'): {'pull-requests'},
     ('codeql.yml', 'analyze'): {'security-events'},
+    ('scorecard.yml', 'analysis'): {'id-token', 'security-events'},
+    ('release.yml', 'attest'): {'id-token', 'attestations'},
+    ('release.yml', 'draft'): {'contents'},
 }
 PINNED = re.compile(r'^[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}$')
 
@@ -156,6 +159,21 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertEqual(set(step), {'name', 'env', 'run'})
         self.assertEqual(step['env'], {'GH_TOKEN': '${{ github.token }}'})
         self.assertNotIn('${{', step['run'])
+
+    def test_scorecard_publishes_only_from_the_default_branch_of_a_public_repository(self):
+        document = workflows()['scorecard.yml']
+        self.assertNotIn('pull_request', document['on'])
+        self.assertIn('schedule', document['on'])
+        job = document['jobs']['analysis']
+        self.assertIn('github.event.repository.private == false', job['if'])
+        self.assertIn('github.ref_name == github.event.repository.default_branch', job['if'])
+        # The Scorecard service accepts published results only from a job made
+        # of approved actions, with no run steps.
+        self.assertTrue(all('uses' in step and 'run' not in step for step in job['steps']))
+        self.assertEqual([step['uses'].split('@')[0] for step in job['steps']],
+                         ['actions/checkout', 'ossf/scorecard-action', 'actions/upload-artifact',
+                          'github/codeql-action/upload-sarif'])
+        self.assertIs(job['steps'][1]['with']['publish_results'], True)
 
     def test_code_scanning_covers_each_language_and_skips_when_unavailable(self):
         document = workflows()['codeql.yml']

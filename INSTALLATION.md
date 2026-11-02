@@ -20,8 +20,8 @@ Adapt this section to the project and record the decision in an issue.
 - **References:** only the defaults of the target installation: Visual Basic
   For Applications, the Microsoft Excel 16.0 Object Library, OLE Automation
   and the Microsoft Office 16.0 Object Library. Any other reference needs a
-  reviewed decision, and a change to the `REFERENCES` of
-  `tools/check_excel_run.py`. Before compiling, check **Tools → References**
+  reviewed decision, and a change to the host references of
+  `.github/excel-evidence-policy.json`. Before compiling, check **Tools → References**
   for entries marked *MISSING*.
 - **Python** is used for repository tooling and for deriving reference values,
   never by the workbook.
@@ -170,17 +170,19 @@ TEST_Examples.RunExampleTests
 It runs the example suite through `TEST_Harness` and writes one record per
 line. A passing run ends with:
 
+<!-- BEGIN generated: example-suite-results -->
 ```text
 RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=12; assertions=27; failures=0; cleanup=PASS; recovery=NONE
 ```
 
-Anything else, or the error *Suite examples did not pass*, is a failure. Two
-more entry points show the failure paths and are expected to fail:
+Anything else, or the error *Suite examples did not pass*, is a failure.
+Two more entry points show the failure paths and are expected to fail:
 
 | Entry point | Expected end |
 | --- | --- |
 | `TEST_Examples.RunExampleTestsWithInjectedFailure` | `RESULT=FAIL`, `operation=FAIL`, `completeness=COMPLETE`, `failures=1`, then *Suite examples did not pass* |
 | `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=11`, `assertions=25`, `failures=1`, then *Suite examples did not pass* |
+<!-- END generated: example-suite-results -->
 
 - **Complete log.** The Immediate window keeps only its last 200 lines. To
   keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`

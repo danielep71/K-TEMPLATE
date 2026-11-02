@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -22,6 +23,7 @@ import unittest
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Any
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
@@ -31,7 +33,10 @@ sys.path.insert(0, str(SOURCE / "tools" / "devbuild"))
 import build_workbook  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
-from check_excel_run import EXAMPLES, HARNESS, Suite, components, read_suite  # noqa: E402
+from check_excel_run import Suite, components, read_suite  # noqa: E402
+
+# The policy of the working tree; make_repository commits it with the modules.
+POLICY = check_excel_run.working_policy(SOURCE)
 
 MODULES = sorted((SOURCE / "tests/modules").glob("*.bas"))
 # A synthetic form and its binary resources, which the VBE exports as a pair.
@@ -41,9 +46,16 @@ FORM = {"src/forms/frmFixture.frm": b'VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E
         "src/forms/frmFixture.frx": b"\x00\x01\r\n\x02\n\xff binary"}
 
 
-def make_repository() -> tuple[Path, str]:
-    """A temporary repository whose one commit holds the working tree's modules."""
+def make_repository(policy: bytes | None = None, *,
+                    with_policy: bool = True) -> tuple[Path, str]:
+    """A temporary repository whose one commit holds the working tree's modules and
+    evidence policy, or ``policy`` in its place, or no policy at all."""
     root = Path(tempfile.mkdtemp(prefix="excel-run-repository-"))
+    if with_policy:
+        target = root / check_excel_run.POLICY
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(policy if policy is not None
+                           else (SOURCE / check_excel_run.POLICY).read_bytes())
     for module in MODULES:
         target = root / module.relative_to(SOURCE)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -73,7 +85,7 @@ HOST = ("windows=Windows 11 Pro 24H2, OS build 26100.4061\n"
         "compile=PASS\n")
 UNCHANGED = "CLEANUP=PASS; detail=Excel state unchanged (Calculation, DisplayAlerts, " \
             "EnableEvents, ScreenUpdating, Workbooks, ActiveWindow)"
-FAILED = check_excel_run.test_failed_number(components(ROOT, COMMIT)[Path(HARNESS).name]) \
+FAILED = check_excel_run.test_failed_number(components(ROOT, COMMIT)[Path(POLICY.harness).name]) \
     if COMMIT else None
 
 
@@ -83,7 +95,7 @@ def tearDownModule() -> None:
 
 
 def suite() -> Suite:
-    return read_suite(components(ROOT, COMMIT)[Path(EXAMPLES).name])
+    return read_suite(components(ROOT, COMMIT)[Path(POLICY.suite_source).name])
 
 
 def run_log(mode: str) -> list[str]:
@@ -132,7 +144,7 @@ def run_log(mode: str) -> list[str]:
 def certification_log() -> list[str]:
     """The records TEST_Harness writes for TEST_Examples.CertifyExamples."""
     lines = ["CERTIFY=examples; started=2026-10-24 17:00:00"]
-    for mode in check_excel_run.LOGS:
+    for mode in POLICY.logs:
         normal = mode == "NORMAL"
         complete = "INCOMPLETE" if mode == "SKIPPED_CASE" else "COMPLETE"
         lines.append(f"MODE={mode}; expected={'PASS' if normal else 'FAIL'}; "
@@ -151,9 +163,9 @@ def evidence(change: Callable[[Path], None] | None = None) -> Iterator[Path]:
         for name, data in components(ROOT, COMMIT).items():
             exported = data if name.endswith(".frx") else data.replace(b"\n", b"\r\n")
             (folder / "exported" / name).write_bytes(exported)
-        for mode, filename in check_excel_run.LOGS.items():
+        for mode, filename in POLICY.logs.items():
             (folder / filename).write_bytes(("\r\n".join(run_log(mode)) + "\r\n").encode())
-        (folder / check_excel_run.CERTIFICATION).write_bytes(
+        (folder / POLICY.certification).write_bytes(
             ("\r\n".join(certification_log()) + "\r\n").encode())
         (folder / "host.txt").write_text(HOST, encoding="utf-8")
         if change:
@@ -220,7 +232,7 @@ class BindingTest(unittest.TestCase):
         def extra_export(folder: Path, _: Path) -> None:
             (folder / "exported/Extra.bas").write_bytes(b"x")
         def bad_manifest(folder: Path, _: Path) -> None:
-            (folder / check_excel_run.MANIFEST).write_text('{"format": "other"}', "utf-8")
+            (folder / POLICY.manifest).write_text('{"format": "other"}', "utf-8")
         cases = {"changed after the export": changed_export, "but export-manifest.json records":
                  changed_workbook, "is not recorded": extra_export,
                  "not a valid export manifest": bad_manifest}
@@ -315,10 +327,10 @@ class EvidenceTest(unittest.TestCase):
         self.assertFinding(truncate, "examples.log: incomplete log")
         self.assertFinding(lambda folder: (folder / "skipped.log").unlink(), "skipped.log: missing")
         def empty(folder: Path) -> None:
-            for filename in check_excel_run.LOGS.values():
+            for filename in POLICY.logs.values():
                 (folder / filename).write_bytes(b"")
         found = findings(empty)
-        for filename in check_excel_run.LOGS.values():
+        for filename in POLICY.logs.values():
             self.assertIn(f"{filename}: incomplete log: no record", found)
         self.assertFinding(edit("examples.log", "CASE=text-exact\r\n", ""),
                            "expected CASE=text-exact")
@@ -349,7 +361,7 @@ class EvidenceTest(unittest.TestCase):
             edit("examples.log", "cleanup=PASS; recovery=NONE",
                  "cleanup=FAIL; recovery=REQUIRED")(folder)
         self.assertFinding(dirty, "CLEANUP=FAIL, expected CLEANUP=PASS")
-        for filename in check_excel_run.LOGS.values():
+        for filename in POLICY.logs.values():
             with self.subTest(log=filename):
                 self.assertFinding(edit(filename, "RECOVERY=NONE\r\n",
                                         "RECOVERY=REQUIRED; reason=unsafe host state\r\n"),
@@ -409,7 +421,7 @@ class EvidenceTest(unittest.TestCase):
                                     "did not run")
 
     def test_certification_log(self) -> None:
-        log = check_excel_run.CERTIFICATION
+        log = POLICY.certification
         self.assertFinding(lambda folder: (folder / log).unlink(), f"{log}: missing")
         self.assertFinding(edit(log, "CERTIFICATION=PASS", "CERTIFICATION=FAIL"),
                            "CERTIFICATION=FAIL")
@@ -437,15 +449,15 @@ class EvidenceTest(unittest.TestCase):
     def test_the_harness_must_define_its_failure_number(self) -> None:
         found = check_excel_run.Evidence()
         with evidence() as folder:
-            check_excel_run.check_certification(folder, None, found)
-        self.assertEqual(found.findings, [f"{HARNESS}: no ERR_TEST_FAILED constant"])
+            check_excel_run.check_certification(folder, None, found, POLICY)
+        self.assertEqual(found.findings, [f"{POLICY.harness}: no ERR_TEST_FAILED constant"])
 
     def test_environment(self) -> None:
         self.assertFinding(edit("injected.log", "build=17928", "build=18000"),
                            "different hosts")
         self.assertFinding(edit("examples.log", "build=17928; ", ""), "lacks build")
         def bitness(folder: Path) -> None:
-            for name in check_excel_run.LOGS.values():
+            for name in POLICY.logs.values():
                 edit(name, "office=64-bit", "office=32-bit")(folder)
         self.assertFinding(bitness, "not the supported target")
 
@@ -470,15 +482,114 @@ class SuiteTest(unittest.TestCase):
         self.assertEqual(examples.injected_expected, "0.76")
 
     def test_the_entry_point_saves_the_logs_the_checker_reads(self) -> None:
-        source = (ROOT / EXAMPLES).read_text(encoding="ascii")
+        source = (ROOT / POLICY.suite_source).read_text(encoding="ascii")
         saved = re.findall(r'CertifyMode "(\w+)", (True|False), Folder & "\\([\w.]+)"', source)
-        self.assertEqual({mode: log for mode, _, log in saved}, check_excel_run.LOGS)
+        self.assertEqual({mode: log for mode, _, log in saved}, POLICY.logs)
         self.assertEqual({mode for mode, must, _ in saved if must == "True"},
-                         set(check_excel_run.MUST_PASS))
-        self.assertIn(f'EndCertification Folder & "\\{check_excel_run.CERTIFICATION}"', source)
+                         set(POLICY.must_pass))
+        self.assertIn(f'EndCertification Folder & "\\{POLICY.certification}"', source)
 
     def test_failed_number_is_the_harness_constant(self) -> None:
         self.assertEqual(FAILED, -2147221504 + 4065)
+
+    def test_the_policy_matches_the_suite_and_the_host_policy(self) -> None:
+        examples = suite()
+        self.assertEqual((POLICY.expected_cases, POLICY.expected_assertions),
+                         (examples.expected_cases, examples.expected_assertions))
+        source = (SOURCE / POLICY.suite_source).read_text(encoding="ascii")
+        self.assertIn(f"Public Sub {POLICY.entry_point}(", source)
+        self.assertIn(f'CertifyMode "{next(iter(POLICY.must_pass))}"', source)
+        self.assertRegex(source, rf'Const SUITE_NAME\s+As String = "{POLICY.suite}"')
+        installation = (SOURCE / "INSTALLATION.md").read_text(encoding="utf-8")
+        self.assertIn(f"TEST_Examples.{POLICY.entry_point}", installation)
+        for reference in POLICY.references:
+            self.assertIn(reference, installation)
+        # The installation guide tells the reader which files to leave in the
+        # evidence folder, so it must name each one the policy names.
+        for name in (*POLICY.logs.values(), POLICY.certification, POLICY.host, POLICY.manifest,
+                     f"{POLICY.exported}\\"):
+            with self.subTest(file=name):
+                self.assertIn(f"`{name}", installation)
+        self.assertIn(POLICY.office, installation)
+
+
+Change = Callable[[dict[str, Any]], object]
+
+
+def policy_text(change: Change) -> str:
+    data = json.loads((SOURCE / check_excel_run.POLICY).read_text(encoding="utf-8"))
+    change(data)
+    return json.dumps(data)
+
+
+class PolicyTest(unittest.TestCase):
+    def test_the_working_policy_is_valid(self) -> None:
+        self.assertEqual(POLICY.must_pass, frozenset({"NORMAL"}))
+        self.assertEqual(list(POLICY.logs), list(check_excel_run.MODE_KINDS))
+
+    def test_a_malformed_policy_is_rejected(self) -> None:
+        def mode(index: int, key: str, value: object) -> Change:
+            def apply(data: dict[str, Any]) -> None:
+                data["modes"][index][key] = value
+            return apply
+        def section(name: str, key: str, value: object) -> Change:
+            def apply(data: dict[str, Any]) -> None:
+                data[name][key] = value
+            return apply
+        cases: dict[str, Change] = {
+            "schema_version": lambda data: data.update(schema_version=2),
+            "modes must be": mode(1, "mode", "OTHER"),
+            "only NORMAL must pass": mode(1, "must_pass", True),
+            "must_pass is true or false": mode(0, "must_pass", "yes"),
+            "distinct and named": mode(1, "log", "examples.log"),
+            "plain names": section("evidence", "host_record", "../host.txt"),
+            "inside the repository": section("suite", "source", "/tmp/TEST_Examples.bas"),
+            "positive integer": section("suite", "expected_cases", 0),
+            "listed once each": section("host", "references", []),
+            "host office": section("host", "office", "ARM"),
+            "KeyError": lambda data: data.pop("harness"),
+        }
+        for text, change in cases.items():
+            with self.subTest(text=text), self.assertRaises(check_excel_run.PolicyError) as raised:
+                check_excel_run.parse_policy(policy_text(change))
+            self.assertIn(text, str(raised.exception))
+        with self.assertRaises(check_excel_run.PolicyError):
+            check_excel_run.parse_policy("not json")
+
+    @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+    def test_the_commit_policy_judges_the_evidence(self) -> None:
+        def run(root: Path, commit: str) -> list[str]:
+            try:
+                with evidence() as folder:
+                    return check_excel_run.check(root, commit, folder).findings
+            finally:
+                shutil.rmtree(root, ignore_errors=True)
+        missing = run(*make_repository(with_policy=False))
+        self.assertEqual(len(missing), 1)
+        self.assertIn(f"{check_excel_run.POLICY}: missing at", missing[0])
+        malformed = run(*make_repository(b"{}"))
+        self.assertEqual(len(malformed), 1)
+        self.assertIn(check_excel_run.POLICY, malformed[0])
+        counts = run(*make_repository(policy_text(
+            lambda data: data["suite"].update(expected_cases=13)).encode()))
+        self.assertTrue(any("EXPECTED_CASES is 12, but" in item for item in counts), counts)
+        entry = run(*make_repository(policy_text(
+            lambda data: data["suite"].update(
+                certification_entry_point="CertifyOther")).encode()))
+        self.assertTrue(any("no Public Sub CertifyOther" in item for item in entry), entry)
+        for key, name in (("harness", "TEST_Harness.bas"), ("suite", "TEST_Examples.bas")):
+            with self.subTest(moved=key):
+                path = f"does-not-exist/{name}"
+                def moved(data: dict[str, Any], key: str = key, path: str = path) -> None:
+                    if key == "harness":
+                        data["harness"] = path
+                    else:
+                        data["suite"]["source"] = path
+                found = run(*make_repository(policy_text(moved).encode()))
+                self.assertIn(f"{path}: not in commit", " ".join(found))
+        logs = run(*make_repository(policy_text(
+            lambda data: data["modes"][2].update(log="other.log")).encode()))
+        self.assertIn("other.log: missing", logs)
 
 
 if __name__ == "__main__":

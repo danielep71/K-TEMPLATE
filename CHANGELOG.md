@@ -60,6 +60,22 @@ milestones and their pull requests.
 
 ### Added
 
+- A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
+  the changelog, `VERSION`, the default branch, the tag message and
+  **Repository integrity**. It builds a reproducible source bundle with its
+  checksums, attests their build provenance, and drafts the GitHub Release.
+  A private repository attests only when the repository variable
+  `RELEASE_ATTESTATIONS` is `enabled`, with GitHub Enterprise Cloud; otherwise
+  the draft says that the bundle is not attested. A manual run rehearses a
+  ref without attesting or releasing (#161).
+- `tools/render_docs.py`, which renders documentation facts the code already
+  knows into marked blocks: the list of **Repository integrity** checks in
+  `CONTRIBUTING.md` and the example suite's expected results in
+  `INSTALLATION.md`. **Repository integrity** fails while a block is stale
+  (#163).
+- An OpenSSF Scorecard workflow, which scores the default branch's
+  supply-chain posture weekly and on each push to it. It publishes to code
+  scanning and the Scorecard service on public repositories only (#164).
 - `tools/devbuild/build_workbook.py`, which builds a macro-enabled workbook
   from the source of one commit, with the sheets, code names and defined
   names of the workbook contract, a build stamp, and a VBA project written
@@ -129,6 +145,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- What an Excel run must leave as evidence moves from constants in
+  `tools/check_excel_run.py` to `.github/excel-evidence-policy.json`: the
+  harness, the suite with its counts and certification entry point, the modes
+  and their logs, the evidence files, the references and the Office bitness.
+  The check reads the policy of the candidate commit, rejects a missing or
+  malformed one, and fails when the suite disagrees with it (#160).
 - `tools/check_changelog.py` also fails when the prose describes another
   release state than the changelog: the "No version has been released"
   sentence, the *Current status* of `RELEASING.md`, placeholder lines such as
