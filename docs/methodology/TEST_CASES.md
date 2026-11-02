@@ -154,6 +154,30 @@ numerical-validation references.
   value is printed there. Test output reports `illustrative` results
   separately and never as validation.
 
+<a id="derivation-scripts"></a>
+
+## Derivation scripts
+
+A script under `tests/derivations/` computes expected values from the
+documented method, written from the contracts and never from the code under
+test. An output names it in `reference.script`, and
+`python tools/check_derivations.py`, which **Repository integrity** runs,
+compares the two:
+
+- it runs each named script once per case, as
+  `python -I tests/derivations/<name>.py tests/fixtures/<case-id>.json`;
+- the script prints one JSON object, `{"outputs": [...]}`, whose items have the
+  `quantity` and `scope` of an expected output and its `value` or `text`;
+- every output that names the script must appear in what it prints, and match
+  within the output's [tolerance](#tolerance), or exactly for a text.
+
+A failing script, output that is not JSON, a missing quantity or a mismatch
+fails the check. A match shows only that the script and the expected file
+agree: the value stays `illustrative`, because the project derived it. The
+scripts use the Python standard library only and are never a runtime
+dependency of the workbook. `tests/derivations/illustrative_total.py` shows
+the format for `illustrative-format-example`.
+
 <a id="tolerance"></a>
 
 ## Tolerance
@@ -257,5 +281,7 @@ It does not check:
 
 - whether an input key or a quantity name belongs to the contracts;
 - that an `invalid` case has no numeric output for what it rejects;
-- any value: nothing is computed or compared. Running the cases is the job
-  of a VBA test harness in Excel, not of this check.
+- any value: nothing is computed or compared. `tools/check_derivations.py`
+  compares the values that a [derivation script](#derivation-scripts) computes,
+  and running the cases on the workbook is the job of a VBA test harness in
+  Excel.

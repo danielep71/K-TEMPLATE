@@ -14,8 +14,8 @@
         "class": "illustrative",
         "source": null,
         "locator": null,
-        "derivation": "Format example only: the sum of the two synthetic notional amounts, 600000 + 400000 EUR. Not a regulatory quantity and not computed by any rule",
-        "script": null,
+        "derivation": "Format example only: the sum of the two synthetic notional amounts, 600000 + 400000 EUR, computed by tests/derivations/illustrative_total.py. Not a regulatory quantity and not computed by any rule",
+        "script": "tests/derivations/illustrative_total.py",
         "derived_by": "Daniele Penza",
         "reviewed_by": null,
         "date": "2026-11-02"

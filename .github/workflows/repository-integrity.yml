@@ -118,6 +118,8 @@ jobs:
           exit "$failed"
       - name: Check the numerical test cases
         run: python tools/check_test_cases.py
+      - name: Compare the derivation scripts with the expected values
+        run: python tools/check_derivations.py
       - name: Check the changelog and VERSION
         # The link references must point to this repository, so a generated
         # repository fails until it replaces the template's.
