@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "description": "What an Excel run of the VBA harness must leave as evidence, read by tools/check_excel_run.py from the commit it checks, and by tools/render_docs.py. tests/test_check_excel_run.py keeps it equal to the example suite, its certification entry point and the host policy of INSTALLATION.md.",
+  "harness": "tests/modules/TEST_Harness.bas",
+  "suite": {
+    "name": "examples",
+    "source": "tests/modules/TEST_Examples.bas",
+    "certification_entry_point": "CertifyExamples",
+    "expected_cases": 12,
+    "expected_assertions": 27
+  },
+  "modes": [
+    {"mode": "NORMAL", "log": "examples.log", "must_pass": true},
+    {"mode": "INJECTED_FAILURE", "log": "injected.log", "must_pass": false},
+    {"mode": "SKIPPED_CASE", "log": "skipped.log", "must_pass": false}
+  ],
+  "evidence": {
+    "certification_log": "certification.log",
+    "exported": "exported",
+    "host_record": "host.txt",
+    "export_manifest": "export-manifest.json"
+  },
+  "host": {
+    "references": [
+      "Visual Basic For Applications",
+      "Microsoft Excel 16.0 Object Library",
+      "OLE Automation",
+      "Microsoft Office 16.0 Object Library"
+    ],
+    "office": "64-bit"
+  }
+}

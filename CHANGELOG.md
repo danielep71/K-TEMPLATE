@@ -137,6 +137,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- What an Excel run must leave as evidence moves from constants in
+  `tools/check_excel_run.py` to `.github/excel-evidence-policy.json`: the
+  harness, the suite with its counts and certification entry point, the modes
+  and their logs, the evidence files, the references and the Office bitness.
+  The check reads the policy of the candidate commit, rejects a missing or
+  malformed one, and fails when the suite disagrees with it (#160).
 - `tools/check_changelog.py` also fails when the prose describes another
   release state than the changelog: the "No version has been released"
   sentence, the *Current status* of `RELEASING.md`, placeholder lines such as
