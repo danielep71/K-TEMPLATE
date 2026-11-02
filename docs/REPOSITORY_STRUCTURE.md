@@ -36,6 +36,13 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
   `src/workbook/Template.xlsx`, a macro-free template, and the copies under
   `docs/methodology/sources/`. A built workbook is saved outside the checkout
   or under `test-results/`.
+- **No unreviewed binaries.** **Repository integrity** runs
+  `tools/check_binaries.py`, which fails on any tracked file that
+  `.gitattributes` treats as binary, or that contains a NUL byte, outside those
+  paths and the `.frx` beside its `.frm`. To keep another binary, such as an
+  image for the documentation, review it and add its path, SHA-256 and reason
+  to `.github/binary-allowlist.json`; a later change to the file fails until
+  the entry is updated.
 - **Forms.** A form's `.frx` stays beside its `.frm`.
 
 ## Dependencies

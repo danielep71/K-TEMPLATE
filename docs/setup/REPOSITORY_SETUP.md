@@ -135,6 +135,7 @@ inherited policies may impose additional restrictions.
 
 | File or setting | Action in the new repository | Reason / dependency |
 | --- | --- | --- |
+| `tools/check_binaries.py`, `tests/test_check_binaries.py`, `.github/binary-allowlist.json` | **Keep** | Fails **Repository integrity** on a tracked binary outside the approved paths. Add a reviewed binary, such as a documentation image, to the allowlist with its SHA-256 and reason. |
 | `.gitattributes`, `.gitignore`, `.editorconfig` | **Keep** | Line-ending, binary-file, ignore and editor rules for workbooks, exported VBA source and regulatory source copies. Adjust them only with a layout change that needs it. |
 | `.github/labels.json`, `.github/scripts/`, `.github/ISSUE_TEMPLATE/`, the label, triage and milestone workflows, `tools/check_issues.py` | **Keep** | Ongoing label and issue automation; see *Initialize issue labels* above. |
 | `AGENTS.md` | **Adapt** | Delete the template-only section first; keep the remaining instructions that still apply to the project. |
@@ -176,8 +177,8 @@ utilities. Keep them in the source template so future repositories receive them.
    name **`Repository integrity`**, its coverage of all relevant PRs, the steps
    that set up Node.js and install the configuration parser, the quality tools
    and actionlint, the **Run repository tests**, Ruff, mypy, actionlint, label
-   automation, test-case and derivation steps, the existing required-document
-   and whitespace checks, and
+   automation, binary, test-case and derivation steps, the existing
+   required-document and whitespace checks, and
    the template-cleanup checks: the template-only section, the issue contact
    links, the README traffic badges, the changelog, Dependabot's target
    branches and CodeQL's default branch. Keep `.github/workflows/codeql.yml`: it is not part of the
