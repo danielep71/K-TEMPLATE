@@ -96,7 +96,8 @@ milestones and their pull requests.
   release state than the changelog: the "No version has been released"
   sentence, the *Current status* of `RELEASING.md`, placeholder lines such as
   `TBD`, and a "Release Candidate" mention or unchecked task in the README
-  (#131).
+  (#131). A status row must name the newest release as a whole version
+  number, so `10.2.0` does not pass for `0.2.0` (#142).
 - The pull request template has an *Excel run* block for changes that need
   Excel: the commit, host, compile result, suite, evidence, and a completion
   state that is `PASS`, `FAIL`, `INCOMPLETE` or `NOT RUN`.

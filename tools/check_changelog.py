@@ -46,6 +46,9 @@ NO_RELEASE = "No version has been released"
 PLACEHOLDER = re.compile(r"^\s*(?:[-*]\s+)?[_*]*(?:tbd|todo|nothing yet|\.\.\.)[_*.]*\s*$",
                          re.I | re.M)
 UNCHECKED_TASK = re.compile(r"^\s*[-*+]\s+\[ \]\s", re.M)
+# A whole version number, optionally after "v", and not part of a longer one
+# such as 10.2.0, 0.2.0.1 or 0.2.0-rc.1; a full stop after it ends a sentence.
+VERSION_TOKEN = re.compile(rf"(?<![\w.])v?({SEMVER})(?![\w-]|\.\d)")
 STATUS_ROW = re.compile(r"^\|\s*(Released versions|`VERSION`)\s*\|(.*)\|\s*$", re.M)
 
 
@@ -166,7 +169,7 @@ def releasing_problems(root: Path, released: list[str]) -> list[str]:
         cell = rows.get(name)
         if cell is None:
             problems.append(f"{RELEASING}: Current status has no '{name}' row")
-        elif released and released[0] not in cell:
+        elif released and released[0] not in VERSION_TOKEN.findall(cell):
             problems.append(f"{RELEASING}: Current status '{name}' does not name the newest "
                             f"release [{released[0]}]: {cell}")
         elif not released and name == "Released versions" and cell != "None":
