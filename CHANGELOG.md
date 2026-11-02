@@ -60,6 +60,14 @@ milestones and their pull requests.
 
 ### Added
 
+- A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
+  the changelog, `VERSION`, the default branch, the tag message and
+  **Repository integrity**. It builds a reproducible source bundle with its
+  checksums, attests their build provenance, and drafts the GitHub Release.
+  A private repository attests only when the repository variable
+  `RELEASE_ATTESTATIONS` is `enabled`, with GitHub Enterprise Cloud; otherwise
+  the draft says that the bundle is not attested. A manual run rehearses a
+  ref without attesting or releasing (#161).
 - `tools/render_docs.py`, which renders documentation facts the code already
   knows into marked blocks: the list of **Repository integrity** checks in
   `CONTRIBUTING.md` and the example suite's expected results in
