@@ -4,8 +4,9 @@ These conventions apply to every VBA component of the workbook. The
 [repository structure](REPOSITORY_STRUCTURE.md) says where each kind of
 component lives and which may call which; the
 [installation guide](../INSTALLATION.md) says how source moves between the
-repository and Excel. The template itself holds no VBA, so the examples below
-name no existing component.
+repository and Excel. The template holds only the
+[VBA test harness](methodology/TEST_HARNESS.md) and its example suite in
+`tests/modules/`, so the examples below name no existing component.
 
 ## Naming and visibility
 
@@ -75,7 +76,9 @@ implements. Comments explain invariants and reasons, not obvious assignments.
   default.
 
 Errors raised by the project use named `ERR_` constants, allocated once in one
-documented range: `vbObjectError + 2048` through `vbObjectError + 4095`.
+documented range: `vbObjectError + 2048` through `vbObjectError + 4063`. The
+range `vbObjectError + 4064` through `vbObjectError + 4095` is reserved for the
+test harness and its example suite (`TEST_Harness`, `TEST_Examples`).
 `Err.Source` names the component and procedure. A message describes the
 condition without repeating confidential input. Error codes distinguish
 invalid input, unsupported scope, numerical failure, and host or cleanup

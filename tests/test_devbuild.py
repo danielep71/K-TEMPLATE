@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import random
 import shutil
 import struct
@@ -246,8 +247,10 @@ class Layout(unittest.TestCase):
     layout = build_workbook.load_layout(ROOT)
 
     def test_sheets_and_names_match_the_workbook_contract(self) -> None:
-        sheets = [(row[1].strip("`"), row[2].strip("`")) for row in contract_rows("Sheets")]
-        self.assertEqual([(sheet.tab, sheet.code_name) for sheet in self.layout.sheets], sheets)
+        sheets = [(row[1].strip("`"), row[2].strip("`"), row[3].strip("`"))
+                  for row in contract_rows("Sheets")]
+        self.assertEqual([(sheet.tab, sheet.code_name, sheet.role)
+                          for sheet in self.layout.sheets], sheets)
         names = [(row[0], row[1]) for row in contract_rows("Defined names")]
         self.assertEqual([(item.name, item.sheet) for item in self.layout.names], names)
 
@@ -279,6 +282,15 @@ class Layout(unittest.TestCase):
             "stamp commit": build_workbook.Layout(
                 base.workbook_code_name, base.sheets, base.names,
                 {**base.stamp, "commit": "missing"}, base.configurations),
+            "has role 'Scratch'": build_workbook.Layout(
+                base.workbook_code_name,
+                (*base.sheets, build_workbook.Sheet("Scratch", "shScratch", "Scratch")),
+                base.names, base.stamp, base.configurations),
+            "on a Test sheet": build_workbook.Layout(
+                base.workbook_code_name,
+                (*base.sheets, build_workbook.Sheet("Checks", "shChecks", "Test")),
+                (*base.names, build_workbook.DefinedName("test_commit", "shChecks", "A1", "")),
+                {**base.stamp, "commit": "test_commit"}, base.configurations),
             "not a valid name": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
                 (*base.names, build_workbook.DefinedName("AB12", "shInputs", "A1", "")),
@@ -289,6 +301,25 @@ class Layout(unittest.TestCase):
                 problems = build_workbook.layout_problems(layout)
                 self.assertTrue(any(expected in problem for problem in problems), problems)
         self.assertEqual(build_workbook.layout_problems(base), [])
+
+    def test_test_sheets_are_built_only_in_development(self) -> None:
+        base = self.layout
+        layout = build_workbook.Layout(
+            base.workbook_code_name,
+            (*base.sheets, build_workbook.Sheet("Checks", "shChecks", "Test")),
+            (*base.names, build_workbook.DefinedName("Checks_Results", "shChecks", "A3", "")),
+            base.stamp, base.configurations)
+        self.assertEqual(build_workbook.layout_problems(layout), [])
+        development = build_workbook.for_configuration(layout, "development")
+        production = build_workbook.for_configuration(layout, "production")
+        self.assertIn("shChecks", [sheet.code_name for sheet in development.sheets])
+        self.assertEqual(production.sheets, base.sheets)
+        self.assertEqual(production.names, base.names)
+        package = build_workbook.package(
+            production, build_workbook.Build("0" * 40, "t", True, "production", ()), b"")
+        with zipfile.ZipFile(io.BytesIO(package)) as archive:
+            book = archive.read("xl/workbook.xml").decode()
+        self.assertNotIn("Checks", book)
 
 
 @contextlib.contextmanager
@@ -463,6 +494,24 @@ class ProjectSource(unittest.TestCase):
         sheet = decompress(cfb.read("VBA/shInputs")).decode("cp1252")
         self.assertIn("Private Sub Worksheet_Change", sheet)
         self.assertTrue(sheet.startswith('Attribute VB_Name = "shInputs"'))
+
+    def test_a_test_sheet_module_is_left_out_of_production_only(self) -> None:
+        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config["sheets"].append({"tab": "Checks", "code_name": "shChecks", "role": "Test"})
+        checks = (b'Attribute VB_Name = "shChecks"\r\nOption Explicit\r\n'
+                  b"Private Sub Worksheet_Activate()\r\nEnd Sub\r\n")
+        files = {build_workbook.CONFIG: json.dumps(config).encode(),
+                 "src/workbook/shChecks.cls": checks}
+        projects = {}
+        with git_tree(files) as root, tempfile.TemporaryDirectory() as temporary:
+            for configuration in ("production", "development"):
+                target = Path(temporary) / f"{configuration}.xlsm"
+                build_workbook.build(root, configuration, target)
+                with zipfile.ZipFile(target) as package:
+                    projects[configuration] = CompoundFile(package.read("xl/vbaProject.bin")) \
+                        .read("PROJECT").decode("cp1252")
+        self.assertNotIn("shChecks", projects["production"])
+        self.assertIn("Document=shChecks/&H00000000", projects["development"])
 
     def test_a_document_module_in_the_wrong_case_stops_the_build(self) -> None:
         files = {"src/workbook/shINPUTS.cls": SHEET_SOURCE.replace(b"shInputs", b"shINPUTS")}

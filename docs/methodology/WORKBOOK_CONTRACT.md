@@ -159,8 +159,9 @@ with the run ID and the time of the operation that set it.
 The build writes, from one commit:
 
 - the sheets of [Sheets](#sheets), in order, with their tab and code names;
-- every defined name, the formats, the data validation of the input areas and
-  the print areas;
+- every defined name;
+- once a decision here defines them, the formats, the data validation of the
+  input areas and the print areas;
 - the build stamp on the reference sheet: the commit, its committer time
   (not the clock, so that a rebuild is byte-identical) and the configuration.
   A working tree with changes is stamped as not evidence-grade;
@@ -172,9 +173,11 @@ module or example; a development build adds them.
 
 `tools/devbuild/build_workbook.py` builds the sheets, code names, defined
 names, stamp and VBA project. It reads them from
-`tools/devbuild/workbook.json`, which must match the tables above. Formats,
-data validation and print areas are not built yet: add them to the builder
-when a decision here defines them. The
+`tools/devbuild/workbook.json`, whose sheets, roles and names must match the
+tables above. It leaves the `Test` sheets and their names out of every
+configuration but `development`. Formats, data validation and print areas
+are not built yet: add them to the builder when a decision here defines
+them. The
 [installation guide](../../INSTALLATION.md#building-a-workbook-from-source)
 says how to run it.
 

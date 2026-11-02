@@ -213,7 +213,7 @@ macro-security level and no *Trust access to the VBA project object model*.
    [building a workbook from source](#building-a-workbook-from-source). Use
    [importing VBA into Excel](#%EF%B8%8F-importing-vba-into-excel) only if the
    project has forms or the build fails. Then only the source identity is
-   checked, not the binding of step 8.
+   checked, not the binding of steps 7 and 9.
 4. **Compile** with **Debug → Compile VBAProject**.
 5. **Certify.** In the Immediate window type, with the full path of the
    folder and no trailing backslash:
