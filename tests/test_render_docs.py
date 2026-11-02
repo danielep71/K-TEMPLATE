@@ -130,6 +130,12 @@ class RepositoryTest(unittest.TestCase):
     def test_commands_are_shown_as_typed(self) -> None:
         self.assertEqual(render_docs.shown_command([sys.executable, "-m", "x"]), "python -m x")
         self.assertEqual(render_docs.shown_command(["/usr/bin/node", "a.mjs"]), "node a.mjs")
+        # The same table on Windows, whose executables carry a suffix.
+        self.assertEqual(render_docs.shown_command([r"C:\Program Files\nodejs\node.exe", "a.mjs"]),
+                         "node a.mjs")
+        self.assertEqual(render_docs.shown_command([r"C:\tools\actionlint.EXE", "-no-color"]),
+                         "actionlint -no-color")
+        self.assertEqual(render_docs.shown_command(["git", "diff"]), "git diff")
 
 
 if __name__ == "__main__":
