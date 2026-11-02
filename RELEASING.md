@@ -59,7 +59,9 @@ A version may be published only when:
    release branch into the default branch;
 2. the changelog section for the version is dated and matches what the
    candidate contains;
-3. **Repository integrity** passes on the candidate, and every CodeQL alert
+3. **Repository integrity** passes on the candidate, including the
+   [static checks](docs/VBA_HOUSE_STYLE.md#static-checks) of its VBA source,
+   and every CodeQL alert
    open on the default branch has been fixed or assessed in the
    certification record;
 4. the candidate's VBA is imported, compiled and run in Excel on the

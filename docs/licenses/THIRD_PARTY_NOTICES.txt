@@ -83,6 +83,13 @@ tests/test_check_changelog.py
 tests/test_check_test_cases.py
 tests/fixtures/illustrative-format-example.json
 tests/expected/illustrative-format-example.json
+tools/vba_lexer.py
+tools/check_vba_source.py
+tools/check_vba_conditionals.py
+tools/check_vba_jumps.py
+tools/check_vba_public_api.py
+tools/check_vba_dependencies.py
+tests/test_check_vba.py
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications replace project-specific names with a <REGIME> placeholder,
@@ -94,7 +101,11 @@ gates and a certification record in place of the Excel-run checker, and the
 changelog check also verifies that the link references point to the checked
 repository. The test-case format and its check replace the counterparty,
 netting-set, hedge and regime model with datasets and records, and check
-calculations, datasets and sources against the methodology guides.
+calculations, datasets and sources against the methodology guides. The VBA
+static checks read the facade prefix from the house style's naming table
+instead of a fixed project prefix, name example modules EX_, allow the
+macro-free src/workbook/Template.xlsx, and point to the house style for their
+limits; their tests use synthetic DEMO_ components.
 
 The following file was adapted from danielep71/K-FRTB-SA
 (https://github.com/danielep71/K-FRTB-SA) under the MIT License:

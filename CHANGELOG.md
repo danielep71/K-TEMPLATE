@@ -60,6 +60,17 @@ milestones and their pull requests.
 
 ### Added
 
+- Five static checks of exported VBA source, which **Repository integrity**
+  runs:
+  - placement, names, encoding, options, layout and storage;
+  - `#If` structure and `PtrSafe` in each compilation environment;
+  - procedure-local jump targets;
+  - visibility and the public API inventory, including a public name in two
+    modules;
+  - the dependency direction.
+
+  The [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what they
+  cannot prove (#70).
 - `tools/check_repository.py`, one command that runs every **Repository
   integrity** check locally and in CI. It writes a log per check and a
   `report.json` with the commit, the dirty state and the SHA-256 of every

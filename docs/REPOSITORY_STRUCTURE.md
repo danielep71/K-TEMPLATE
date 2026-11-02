@@ -65,6 +65,10 @@ calls back the other way, so there are no cycles.
   ([validation plan](methodology/VALIDATION_PLAN.md#independent-reference-values)).
 - Repository tooling is not a second implementation of the calculation.
 
+The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations,
+the role prefixes and this dependency direction by name, and match the
+inventory below against `src/modules/`.
+
 ## Public API inventory
 
 [PUBLIC_API.txt](PUBLIC_API.txt) lists the supported declarations; in the
