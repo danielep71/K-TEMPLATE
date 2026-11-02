@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Check CHANGELOG.md and VERSION against the rules of RELEASING.md.
 
-Static: it reads the two files and never tags, publishes or compares a
-release. CHANGELOG.md starts with an ``## [Unreleased]`` section; each release
+It never tags or publishes a release. CHANGELOG.md starts with an ``## [Unreleased]`` section; each release
 heading is ``## [X.Y.Z] - YYYY-MM-DD`` with a real date, newest first by
 version and date, with a link reference to its tag's release page. VERSION
 does not exist before the first dated release; from then on it holds one
@@ -18,6 +17,16 @@ It also checks that the prose agrees with that state:
   and no VERSION before the first release, and the newest one after it;
 - README.md, when present, holds no "Release Candidate" and no unchecked
   task-list item.
+
+A released section is frozen: once its tag vX.Y.Z exists, the section, from
+its heading to the next level-2 heading, must equal that section in
+CHANGELOG.md at the tag. Only line endings are normalised. A section that
+holds a dated note "Corrected after release on YYYY-MM-DD: <reason>", with a
+real calendar date, may differ, and the difference is reported as a note, so
+a reviewed correction stays visible. A
+release whose tag does not exist yet is a note, since the tag is created
+after the changelog is dated; so is a directory that is not a Git checkout,
+where nothing can be compared.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ import argparse
 import datetime
 import itertools
 import re
+import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -49,6 +59,9 @@ UNCHECKED_TASK = re.compile(r"^\s*[-*+]\s+\[ \]\s", re.M)
 # A whole version number, optionally after "v", and not part of a longer one
 # such as 10.2.0, 0.2.0.1 or 0.2.0-rc.1; a full stop after it ends a sentence.
 VERSION_TOKEN = re.compile(rf"(?<![\w.])v?({SEMVER})(?![\w-]|\.\d)")
+# The line that marks a reviewed change to a released section.
+CORRECTION = re.compile(r"^Corrected after release on (\d{4}-\d{2}-\d{2}): \S.*$")
+LINK_REFERENCE = re.compile(r"^\[[^\]]+\]: \S+$")
 STATUS_ROW = re.compile(r"^\|\s*(Released versions|`VERSION`)\s*\|(.*)\|\s*$", re.M)
 
 
@@ -195,16 +208,91 @@ def readme_problems(root: Path) -> list[str]:
     return problems
 
 
+def sections(text: str) -> dict[str, tuple[int, list[str]]]:
+    """Each version section's first line number and its lines, from its heading to
+    the next level-2 heading, without trailing blank lines or link references."""
+    lines = text.replace("\r\n", "\n").split("\n")
+    found: dict[str, tuple[int, list[str]]] = {}
+    label: str | None = None
+    for number, line in enumerate(lines, start=1):
+        if line.startswith("## "):
+            match = VERSION_HEADING.fullmatch(line)
+            label = match.group(1) if match else None
+            if label is not None and label not in found:
+                found[label] = (number, [])
+            elif label is not None:
+                label = None  # A duplicate heading: check_changelog reports it.
+        if label is not None:
+            found[label][1].append(line)
+    for _, body in found.values():
+        while body and (not body[-1].strip() or LINK_REFERENCE.match(body[-1])):
+            body.pop()
+    return found
+
+
+def git(root: Path, *args: str) -> str | None:
+    try:
+        completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
+                                   text=True, encoding="utf-8", check=False)
+    except OSError:
+        return None
+    return completed.stdout if completed.returncode == 0 else None
+
+
+def frozen_problems(root: Path, text: str, released: list[str]) -> tuple[list[str], list[str]]:
+    """Each released section against its content at its tag: findings and notes."""
+    if not released:
+        return [], []
+    if git(root, "rev-parse", "--git-dir") is None:
+        return [], [f"{CHANGELOG}: not a Git checkout, so released sections were not compared "
+                    "with their tags"]
+    findings: list[str] = []
+    notes: list[str] = []
+    current = sections(text)
+    for label in released:
+        tag = f"v{label}"
+        if git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}") is None:
+            notes.append(f"{CHANGELOG}: [{label}] has no tag {tag} yet, so it is not frozen")
+            continue
+        tagged_text = git(root, "show", f"{tag}:{CHANGELOG}")
+        tagged = sections(tagged_text).get(label) if tagged_text is not None else None
+        if tagged is None:
+            findings.append(f"{CHANGELOG}: [{label}] is not in {CHANGELOG} at its tag {tag}")
+            continue
+        start, lines = current[label]
+        if lines == tagged[1]:
+            continue
+        correction = next((line for line in lines if (match := CORRECTION.fullmatch(line))
+                           and valid_date(match.group(1))), None)
+        if correction is not None:
+            notes.append(f"{CHANGELOG}: [{label}] differs from its tag {tag}: {correction}")
+            continue
+        offset = next((index for index, (now, then) in enumerate(zip(lines, tagged[1],
+                                                                       strict=False))
+                       if now != then), min(len(lines), len(tagged[1])))
+        findings.append(f"{CHANGELOG}:{start + offset}: [{label}] differs from its content at "
+                        f"tag {tag}; a released section is frozen (add 'Corrected after "
+                        "release on YYYY-MM-DD: <reason>' only for a reviewed correction)")
+    return findings, notes
+
+
 def check(root: Path, repository: str | None = None) -> tuple[list[str], int]:
+    findings, released, _ = check_with_notes(root, repository)
+    return findings, released
+
+
+def check_with_notes(root: Path,
+                     repository: str | None = None) -> tuple[list[str], int, list[str]]:
     path = root / CHANGELOG
     if not path.is_file():
-        return [f"{CHANGELOG} is missing"], 0
+        return [f"{CHANGELOG} is missing"], 0, []
     text = path.read_text(encoding="utf-8")
     released = released_versions(text)
+    frozen, notes = frozen_problems(root, text, released)
     findings = (check_changelog(text, repository) + check_version(root, released)
                 + changelog_state_problems(text, released) + releasing_problems(root, released)
-                + readme_problems(root))
-    return findings, len(released)
+                + readme_problems(root) + frozen)
+    return findings, len(released), notes
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -213,12 +301,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repository", metavar="OWNER/REPOSITORY",
                         help="require every link reference to point into this repository")
     args = parser.parse_args(argv)
-    findings, released = check(args.root.resolve(), args.repository)
+    findings, released, notes = check_with_notes(args.root.resolve(), args.repository)
+    for note in notes:
+        print(f"NOTE: {note}")
     for finding in findings:
         print(f"FAIL: {finding}")
     status = "FAIL" if findings else "PASS"
-    print(f"changelog: {status} ({released} dated release(s); format, VERSION and release "
-          "state only, nothing published)")
+    print(f"changelog: {status} ({released} dated release(s); format, VERSION, release state "
+          "and frozen released sections, nothing published)")
     return 1 if findings else 0
 
 
