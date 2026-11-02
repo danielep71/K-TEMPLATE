@@ -27,8 +27,10 @@ neither a commit log nor release evidence. **No version has been released.**
 ### Date and version rules
 
 `python tools/check_changelog.py` checks the headings, dates, order, link
-references and `VERSION`; **Repository integrity** also checks that every link
-reference points to this repository. What a version number means is checked
+references and `VERSION`, and that this introduction, the *Current status* of
+[RELEASING.md](RELEASING.md#current-status) and the README describe the same
+release state; **Repository integrity** also checks that every link reference
+points to this repository. What a version number means is checked
 in review.
 
 | Rule | Standard |
@@ -81,6 +83,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/check_changelog.py` also fails when the prose describes another
+  release state than the changelog: the "No version has been released"
+  sentence, the *Current status* of `RELEASING.md`, placeholder lines such as
+  `TBD`, and a "Release Candidate" mention or unchecked task in the README
+  (#131).
 - `docs/licenses/provenance.json` records the source repository, license and
   revision of each adapted file, or why the revision is not recorded; a test
   keeps it in step with the third-party notice (#116).

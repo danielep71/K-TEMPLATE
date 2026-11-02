@@ -84,7 +84,13 @@ In a task pull request into the release branch:
 - keep an empty `## [Unreleased]` section, with its link reference changed to
   `https://github.com/OWNER/REPOSITORY/compare/vX.Y.Z...HEAD`;
 - create `VERSION`, or update it, to `X.Y.Z`;
-- update *Current status* above.
+- update *Current status* above, and remove the changelog's "No version has
+  been released" sentence for the first release.
+
+`tools/check_changelog.py` fails until these agree with the newest release. It
+also fails on a placeholder line, such as `TBD`, in a changelog section, and
+on a "Release Candidate" mention or an unchecked task-list item in
+`README.md`.
 
 ### 2. Integrate and freeze the candidate
 
