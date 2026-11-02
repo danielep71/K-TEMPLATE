@@ -17,9 +17,10 @@ workbooks, such as SA-CCR, SFT, FRTB, LCR, and NSFR. It provides:
 - quality gates: Ruff, strict mypy and actionlint, plus tests that hold the
   workflows to pinned actions, explicit permissions and the required check, and
   link checks: relative links and anchors on every change, external links weekly;
-- a security policy, CodeQL code scanning of the Python, JavaScript and
-  workflow code, Dependabot updates for the pinned Actions and the
-  hash-locked Python dependencies, and optional daily traffic collection.
+- a security policy, a review to record before distribution, CodeQL code
+  scanning of the Python, JavaScript and workflow code, Dependabot updates for
+  the pinned Actions and the hash-locked Python dependencies, and optional
+  daily traffic collection.
 
 ## 🚀 Start a new repository
 
@@ -52,6 +53,12 @@ GitHub copies files from a template, not its settings. In order:
 
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
 [JSON configuration](docs/setup/repository-settings.json) describe the baseline.
+
+## 📐 Methodology
+
+The [methodology guides](docs/methodology/README.md) record the sources, the
+data contract, the calculation contracts and the validation plan of the
+workbook built from this repository.
 
 ## 🧭 Repository governance
 

@@ -140,8 +140,10 @@ inherited policies may impose additional restrictions.
 | `AGENTS.md` | **Adapt** | Delete the template-only section first; keep the remaining instructions that still apply to the project. |
 | `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` | **Keep and adapt** | The contribution entry point and the Contributor Covenant 2.1 by reference, both shown in GitHub's community profile. Adapt the checks and reporting contact to the project. |
 | `SECURITY.md` | **Keep and adapt** | Names the private reporting channel and response targets. Adjust supported versions and scope to the project. |
+| `docs/repo_governance/DISTRIBUTION.md` | **Keep and adapt** | The review to record before making the repository public, sharing a copy or publishing a release, with the full-history scan. Add the project's own search patterns. |
 | `README.md` | **Adapt** | Replace the MyTemplate title and introduction with the project's purpose, installation and usage. Keep or replace setup links deliberately. |
 | `LICENSE` | **Keep or replace** | MPL-2.0 by default. The integrity workflow requires a non-empty `LICENSE`. |
+| `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts and validation plan. Replace each illustrative row with the project's entries as decisions are taken. |
 | `docs/licenses/` | **Keep** | Notice and license texts for the files listed in `THIRD_PARTY_NOTICES.txt`, which keep the license the notice states for them (MPL-2.0 or MIT) whatever license you choose. If you remove a listed file, remove it from the notice too. |
 | `docs/repo_governance/SETTINGS.md` | **Keep and maintain** | Records the adopted baseline. The integrity workflow explicitly requires this file. |
 | `docs/setup/repository-settings.json` | **Keep** | Enables future drift checks and reapplication. The setup tests read this file. |
