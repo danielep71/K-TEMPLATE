@@ -36,10 +36,16 @@ scripts and the pinned configuration parser for the workflow control tests:
 
 ```sh
 python -m pip install --require-hashes -r .github/requirements.txt
-python -m unittest discover -s tests
-python tools/check_links.py
-python tools/format_vba.py --check
+python tools/check_repository.py
 ```
+
+The second command runs every check of **Repository integrity**, the tests
+included, and writes a log for each, `report.json` and `summary.md` under
+`test-results/integrity/`, which Git ignores. A check whose tool or GitHub
+context is missing locally, such as Ruff or the default branch, is reported as
+skipped; `--strict` fails it instead, as CI does. To run a single check, use
+its own command, for example `python -m unittest discover -s tests` or
+`python tools/format_vba.py --check`.
 
 `python tools/format_vba.py --write` fixes what the last command reports;
 re-import a rewritten module into the VBE before committing

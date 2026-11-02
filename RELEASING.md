@@ -109,15 +109,14 @@ From a clean clone of the candidate:
 ```sh
 git switch --detach FULL_SHA
 git status --short
-python -m unittest discover -s tests
-python tools/check_changelog.py
-python tools/check_test_cases.py
-python tools/check_derivations.py
-python tools/format_vba.py --check
-python tools/check_links.py
+python tools/check_repository.py --strict --repository OWNER/REPOSITORY \
+  --default-branch DEFAULT_BRANCH --template false
 ```
 
-`git status --short` must print nothing. Confirm that **Repository
+Use `--template true` in the template repository itself. `git status --short`
+must print nothing, and `test-results/integrity/report.json` must name
+`FULL_SHA` with `"dirty": false` and `"status": "pass"`; keep it with the
+certification record. Confirm that **Repository
 integrity** is green on the same SHA on the default branch, and review the
 open alerts under **Security → Code scanning**.
 
