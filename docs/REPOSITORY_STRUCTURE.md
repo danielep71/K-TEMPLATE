@@ -24,7 +24,8 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `src/forms/` | UserForms, each `.frm` with its `.frx` | Reserved |
 | `tests/` | Python tests of the repository tooling (`test_*.py`) | Present |
 | `tests/modules/` | VBA test modules | Reserved |
-| `tests/fixtures/`, `tests/expected/` | Synthetic inputs and independently derived expected results | Reserved |
+| `tests/fixtures/`, `tests/expected/` | Synthetic inputs and expected results in the [test-case format](methodology/TEST_CASES.md) | Present, with one illustrative case |
+| `tests/derivations/` | Scripts that compute expected values from the documented method | Reserved |
 | `tools/` | Repository checks, setup and build tooling, in Python | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
 | `test-results/` | Disposable output of local and CI runs | Ignored by Git |

@@ -75,9 +75,14 @@ RELEASING.md
 docs/PUBLIC_API.txt
 docs/REPOSITORY_STRUCTURE.md
 docs/VBA_HOUSE_STYLE.md
+docs/methodology/TEST_CASES.md
 docs/release/CLOSEOUT.md
 tools/check_changelog.py
+tools/check_test_cases.py
 tests/test_check_changelog.py
+tests/test_check_test_cases.py
+tests/fixtures/illustrative-format-example.json
+tests/expected/illustrative-format-example.json
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications replace project-specific names with a <REGIME> placeholder,
@@ -87,7 +92,9 @@ recording of an Excel run out. The release guide and the records are made
 generic, with the distribution review and the CodeQL assessment as release
 gates and a certification record in place of the Excel-run checker, and the
 changelog check also verifies that the link references point to the checked
-repository.
+repository. The test-case format and its check replace the counterparty,
+netting-set, hedge and regime model with datasets and records, and check
+calculations, datasets and sources against the methodology guides.
 
 The following file was adapted from danielep71/K-FRTB-SA
 (https://github.com/danielep71/K-FRTB-SA) under the MIT License:

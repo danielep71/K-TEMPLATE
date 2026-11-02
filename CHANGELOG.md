@@ -61,5 +61,8 @@ milestones and their pull requests.
 - A release process: [RELEASING.md](RELEASING.md), this changelog, a release
   certification record and a milestone closeout record under `docs/release/`,
   and `tools/check_changelog.py`, which **Repository integrity** runs (#69).
+- A numerical test-case format, `docs/methodology/TEST_CASES.md`, with an
+  illustrative case under `tests/fixtures/` and `tests/expected/`, and
+  `tools/check_test_cases.py`, which **Repository integrity** runs (#75).
 
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main

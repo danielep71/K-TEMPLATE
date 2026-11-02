@@ -145,7 +145,8 @@ inherited policies may impose additional restrictions.
 | `LICENSE` | **Keep or replace** | MPL-2.0 by default. The integrity workflow requires a non-empty `LICENSE`. |
 | `docs/VBA_HOUSE_STYLE.md`, `docs/REPOSITORY_STRUCTURE.md`, `docs/PUBLIC_API.txt`, `INSTALLATION.md` | **Keep and adapt** | VBA naming, contracts, errors and cleanup; component locations and dependency direction; the supported API inventory; import and export. Replace `<REGIME>` with the project's short name, and adapt the host policy. |
 | `RELEASING.md`, `CHANGELOG.md`, `docs/release/`, `tools/check_changelog.py`, `tests/test_check_changelog.py` | **Keep and adapt** | The release process, the changelog, and the certification and closeout records. Replace the changelog's entries and its link references with the new repository's: **Repository integrity** fails while a link reference points to another repository. Do not create `VERSION` before the first release. |
-| `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts and validation plan. Replace each illustrative row with the project's entries as decisions are taken. |
+| `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts, validation plan and the numerical test-case format. Replace each illustrative row with the project's entries as decisions are taken. |
+| `tests/fixtures/`, `tests/expected/`, `tools/check_test_cases.py`, `tests/test_check_test_cases.py` | **Keep and adapt** | The numerical test cases and their format check, which **Repository integrity** runs. Remove the `illustrative-format-example` case when you replace the illustrative entries of the methodology guides it uses. |
 | `docs/licenses/` | **Keep** | Notice and license texts for the files listed in `THIRD_PARTY_NOTICES.txt`, which keep the license the notice states for them (MPL-2.0 or MIT) whatever license you choose. If you remove a listed file, remove it from the notice too. |
 | `docs/repo_governance/SETTINGS.md` | **Keep and maintain** | Records the adopted baseline. The integrity workflow explicitly requires this file. |
 | `docs/setup/repository-settings.json` | **Keep** | Enables future drift checks and reapplication. The setup tests read this file. |
@@ -174,8 +175,9 @@ utilities. Keep them in the source template so future repositories receive them.
 3. In that same PR, add meaningful project checks to the workflow. Keep the job
    name **`Repository integrity`**, its coverage of all relevant PRs, the steps
    that set up Node.js and install the configuration parser, the quality tools
-   and actionlint, the **Run repository tests**, Ruff, mypy, actionlint and label
-   automation steps, the existing required-document and whitespace checks, and
+   and actionlint, the **Run repository tests**, Ruff, mypy, actionlint, label
+   automation and test-case steps, the existing required-document and
+   whitespace checks, and
    the template-cleanup checks: the template-only section, the issue contact
    links, the README traffic badges, the changelog, Dependabot's target
    branches and CodeQL's default branch. Keep `.github/workflows/codeql.yml`: it is not part of the

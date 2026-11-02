@@ -116,6 +116,8 @@ jobs:
             fi
           done < <(grep -o -E 'raw\.githubusercontent\.com/[^/]+/[^/]+/traffic-history/' README.md | cut -d/ -f2,3 | sort -u)
           exit "$failed"
+      - name: Check the numerical test cases
+        run: python tools/check_test_cases.py
       - name: Check the changelog and VERSION
         # The link references must point to this repository, so a generated
         # repository fails until it replaces the template's.
