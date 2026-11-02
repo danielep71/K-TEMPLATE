@@ -54,6 +54,35 @@ Each run of a check in Excel records:
 A check that was not run is recorded as `NOT RUN` with the reason. It is
 never a pass.
 
+<a id="host-behaviour"></a>
+
+## Host behaviour
+
+The code relies on how Excel and the VBE behave: which settings an operation
+changes, how a name is re-cased, what an import needs, how a window or an
+event behaves. Such behaviour can differ by Excel build, channel, bitness and
+policy. Record each behaviour that the code or a guide relies on here, with
+whether it was measured:
+
+| ID | Behaviour | Status | Probe | Host | Date | Result | Issue |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| *Illustrative:* `HB-01` | The VBE re-cases every use of a name to its latest spelling | `assumed` | — | — | — | — | Link |
+
+- **Status:** `measured` when a probe ran on the named host and its output is
+  kept; `assumed` otherwise.
+- **Probe:** a `TEST_` procedure under `tests/modules/` that observes the
+  behaviour and prints what it saw, run with the VBA test harness. A
+  measurement found by hand names the steps instead.
+- **Host:** the Excel product, version and build, its channel and bitness,
+  and the Windows version, as in the [evidence record](#evidence-record).
+- **Result:** what was observed, and the model it supports. A measurement
+  holds for the named host only; it is never generalised to others.
+
+A guide that states host behaviour the code relies on cites its `HB-` entry.
+An `assumed` entry is listed under *Limits* in the
+[release certification](../release/RELEASE_CERTIFICATION.md) until it is
+measured.
+
 ## Open decisions
 
 | Decision | Options | Issue |

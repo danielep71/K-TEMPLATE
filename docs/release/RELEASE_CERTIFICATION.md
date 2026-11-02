@@ -68,8 +68,9 @@ What was checked by hand, by whom, against which independent values. Write
 ### Limits
 
 What this certification does not cover, such as hosts not tested,
-calculations without independent reference values, or sources not yet
-verified.
+calculations without independent reference values, sources not yet
+verified, or host behaviour still `assumed` in the validation plan's
+[host behaviour register](../methodology/VALIDATION_PLAN.md#host-behaviour).
 
 ### Sign-off
 
