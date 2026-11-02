@@ -116,6 +116,10 @@ jobs:
             fi
           done < <(grep -o -E 'raw\.githubusercontent\.com/[^/]+/[^/]+/traffic-history/' README.md | cut -d/ -f2,3 | sort -u)
           exit "$failed"
+      - name: Check the changelog and VERSION
+        # The link references must point to this repository, so a generated
+        # repository fails until it replaces the template's.
+        run: python tools/check_changelog.py --repository "$GITHUB_REPOSITORY"
       - name: Check that Dependabot targets existing branches
         run: |
           # fetch-depth: 0 fetches every branch, so each target is a local ref.

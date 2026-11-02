@@ -1,0 +1,79 @@
+# 🏅 Release certification
+
+The record that one candidate commit was checked, built, run and accepted
+before a version is published. Copy the template below into an issue for the
+release, fill it in from the runs themselves, and close the issue only when
+every row holds evidence or a recorded deviation. [RELEASING.md](../../RELEASING.md)
+says when each part is due.
+
+Write `NOT RUN` with the reason for anything that was not done. A row left
+empty or marked `NOT RUN` is never a pass.
+
+## Template
+
+```markdown
+## Release certification: vX.Y.Z
+
+### Candidate
+
+| Item | Value |
+| --- | --- |
+| Version | X.Y.Z |
+| Candidate commit | Full 40-character SHA of the integration merge commit |
+| Integration and sync pull requests | #N, #N |
+| Changelog section | `## [X.Y.Z] - YYYY-MM-DD`, matches the candidate: yes or no |
+| Clean checkout | `git status --short` printed nothing: yes or no |
+
+### Environment
+
+| Item | Value |
+| --- | --- |
+| Excel | Product, version and build, from **File → Account → About Excel** |
+| Bitness | 64-bit or 32-bit |
+| Windows | Edition, version and build, from `winver` |
+| References | The boxes ticked in **Tools → References** |
+| Python, Git | Versions used for the repository checks |
+
+### Static gates
+
+| Gate | Result | Evidence |
+| --- | --- | --- |
+| Repository integrity on the candidate | PASS or FAIL | Run link |
+| Repository checks from a clean clone (RELEASING.md step 3) | PASS or FAIL | Output summary |
+| CodeQL alerts open on the default branch | None, or each with its assessment | Alert links |
+
+### Regression evidence
+
+| Item | Result | Evidence |
+| --- | --- | --- |
+| Debug → Compile VBAProject | PASS or the error reported | Host record |
+| Regression cases (validation plan) | Number run, passed, failed | Log or evidence folder |
+| Failure paths: invalid input, cleanup after an error | PASS or FAIL | Log lines |
+
+### Manual validation
+
+What was checked by hand, by whom, against which independent values. Write
+`None` if nothing was.
+
+### Artifacts
+
+| File | SHA-256 | Built from |
+| --- | --- | --- |
+| None, or each file attached to the GitHub Release | | Candidate commit |
+
+### Deviations
+
+`None`, or each release invariant not met, why, and my decision to accept it.
+
+### Limits
+
+What this certification does not cover, such as hosts not tested,
+calculations without independent reference values, or sources not yet
+verified.
+
+### Sign-off
+
+- Certified by: name, date
+- Distribution review: #N, closed
+- Decision to publish: recorded here, with the date
+```

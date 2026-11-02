@@ -30,8 +30,10 @@ GitHub copies files from a template, not its settings. In order:
 2. Delete the template-only section of `AGENTS.md`, with its markers, point
    the two contact links in `.github/ISSUE_TEMPLATE/config.yml` and the
    traffic badges at the top of this README to the new repository, or remove
-   the badges, and set `target-branch` in `.github/dependabot.yml` to its
-   release branch or remove it. **Repository integrity** fails until you do.
+   the badges, set `target-branch` in `.github/dependabot.yml` to its
+   release branch or remove it, and replace the entries and the link
+   references of `CHANGELOG.md` with the new repository's. **Repository
+   integrity** fails until you do.
 3. Enable Actions and let **Repository integrity** pass on the default branch.
 4. Apply and verify the settings baseline, as the
    [repository setup guide](docs/setup/REPOSITORY_SETUP.md) describes. It
@@ -64,6 +66,13 @@ The [settings reference](docs/repo_governance/SETTINGS.md) and its
   points.
 - The [installation guide](INSTALLATION.md) moves source between the
   repository and Excel.
+
+## 🚀 Releases
+
+[RELEASING.md](RELEASING.md) describes how a version is prepared, certified
+and published; [CHANGELOG.md](CHANGELOG.md) records the changes. Closing a
+milestone follows the [closeout record](docs/release/CLOSEOUT.md), and each
+release the [certification record](docs/release/RELEASE_CERTIFICATION.md).
 
 ## 📐 Methodology
 
