@@ -54,6 +54,17 @@ GitHub copies files from a template, not its settings. In order:
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
 [JSON configuration](docs/setup/repository-settings.json) describe the baseline.
 
+## 🧩 VBA development
+
+- The [repository structure](docs/REPOSITORY_STRUCTURE.md) says where each VBA
+  component lives and which may call which.
+- The [house style](docs/VBA_HOUSE_STYLE.md) covers naming, contracts, errors
+  and cleanup.
+- The [public API inventory](docs/PUBLIC_API.txt) lists the supported entry
+  points.
+- The [installation guide](INSTALLATION.md) moves source between the
+  repository and Excel.
+
 ## 📐 Methodology
 
 The [methodology guides](docs/methodology/README.md) record the sources, the

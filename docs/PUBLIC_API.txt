@@ -1,0 +1,3 @@
+# Supported public VBA API inventory.
+# No supported declarations exist yet.
+# Format and change policy: docs/REPOSITORY_STRUCTURE.md, "Public API inventory".
