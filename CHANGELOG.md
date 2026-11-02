@@ -73,6 +73,9 @@ milestones and their pull requests.
 
 ### Changed
 
+- `docs/licenses/provenance.json` records the source repository, license and
+  revision of each adapted file, or why the revision is not recorded; a test
+  keeps it in step with the third-party notice (#116).
 - **Repository integrity** proves that actionlint rejects an invalid workflow,
   and the workflow control tests reject duplicate YAML keys in the workflows,
   Dependabot's configuration and the issue forms (#114).
