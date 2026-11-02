@@ -81,6 +81,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The pull request template has an *Excel run* block for changes that need
+  Excel: the commit, host, compile result, suite, evidence, and a completion
+  state that is `PASS`, `FAIL`, `INCOMPLETE` or `NOT RUN`.
+  [PULL_REQUESTS.md](docs/repo_governance/PULL_REQUESTS.md#excel-run) defines
+  the states (#134).
 - `docs/licenses/provenance.json` records the source repository, license and
   revision of each adapted file, or why the revision is not recorded; a test
   keeps it in step with the third-party notice (#116).
