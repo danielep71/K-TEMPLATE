@@ -79,6 +79,15 @@ class BinaryCheckTest(unittest.TestCase):
         self.assertFinding(self.repository({}, listed),
                            "docs/assets/preview.png is not a tracked file")
 
+    def test_allowlisted_file_replaced_by_text_still_fails(self) -> None:
+        # Not marked binary in .gitattributes, so only its NUL bytes made it binary.
+        original = b"\0\1\2payload"
+        entry = {"sha256": hashlib.sha256(original).hexdigest(), "reason": "Reviewed payload"}
+        listed = {"schema_version": 1, "files": {"payload.bin": entry}}
+        self.assertEqual(self.repository({"payload.bin": original}, listed), [])
+        self.assertFinding(self.repository({"payload.bin": b"plain text now\n"}, listed),
+                           "payload.bin: content changed since it was allowlisted")
+
     def test_malformed_allowlist(self) -> None:
         for allowlist, text in (([], "needs schema_version 1"),
                                 ({"schema_version": 2, "files": {}}, "needs schema_version 1"),

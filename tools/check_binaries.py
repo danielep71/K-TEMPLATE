@@ -103,16 +103,19 @@ def check(root: Path) -> tuple[list[str], int]:
         path = root / name
         if not path.is_file():
             continue
+        # An allowlisted file is checked against its recorded hash whatever its
+        # content is now, so a replacement never passes by no longer looking binary.
+        if name in allowed:
+            binaries += 1
+            if sha256(path) != allowed[name]:
+                findings.append(f"{name}: content changed since it was allowlisted; review it "
+                                f"and update its sha256 in {ALLOWLIST.as_posix()}")
+            continue
         declared = attributes.get(name) == "unset"
         if not declared and not has_nul(path):
             continue
         binaries += 1
         if approved(name, tracked):
-            continue
-        if name in allowed:
-            if sha256(path) != allowed[name]:
-                findings.append(f"{name}: content changed since it was allowlisted; review it "
-                                f"and update its sha256 in {ALLOWLIST.as_posix()}")
             continue
         kind = "binary file" if declared else "binary content in a file treated as text"
         findings.append(f"{name}: {kind} outside the approved paths; remove it, or review it "
