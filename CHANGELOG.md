@@ -81,6 +81,10 @@ milestones and their pull requests.
 
 ### Changed
 
+- `INSTALLATION.md` explains how to upgrade to a new revision by rebuilding
+  the workbook and carrying its inputs across, how to diagnose common import
+  and run failures, and what removing the workbook's components leaves
+  behind (#132).
 - `docs/licenses/provenance.json` records the source repository, license and
   revision of each adapted file, or why the revision is not recorded; a test
   keeps it in step with the third-party notice (#116).

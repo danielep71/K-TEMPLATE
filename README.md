@@ -65,7 +65,7 @@ The [settings reference](docs/repo_governance/SETTINGS.md) and its
 - The [public API inventory](docs/PUBLIC_API.txt) lists the supported entry
   points.
 - The [installation guide](INSTALLATION.md) moves source between the
-  repository and Excel.
+  repository and Excel, and covers upgrades, troubleshooting and removal.
 
 ## 🚀 Releases
 
