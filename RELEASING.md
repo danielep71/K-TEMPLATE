@@ -66,8 +66,9 @@ A version may be published only when:
    certification record;
 4. the candidate's VBA is imported, compiled and run in Excel on the
    [supported host](INSTALLATION.md#%EF%B8%8F-host-policy), the run is
-   [recorded](INSTALLATION.md#recording-an-excel-run) and passes
-   `tools/check_excel_run.py` against the candidate, and the result is in
+   [recorded](INSTALLATION.md#recording-an-excel-run) from a workbook built
+   from the candidate, and passes `tools/check_excel_run.py` with a
+   `VERIFIED` binding, and the result is in
    the [release certification](docs/release/RELEASE_CERTIFICATION.md);
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
@@ -133,15 +134,22 @@ describes, run the regression cases of the
 [validation plan](docs/methodology/VALIDATION_PLAN.md), and fill in the
 record from the runs themselves.
 
+Build the development workbook from the candidate with
+`tools/devbuild/build_workbook.py`
+([building a workbook from source](INSTALLATION.md#building-a-workbook-from-source)).
 Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md)
 as [recording an Excel run](INSTALLATION.md#recording-an-excel-run)
-describes, then check the evidence folder against the candidate:
+describes, with the export bound to the workbook by
+`tools/devbuild/export_manifest.py`. Then check the evidence folder against
+the candidate:
 
 ```sh
-python tools/check_excel_run.py test-results/excel-run --commit CANDIDATE_SHA
+python tools/check_excel_run.py test-results/excel-run --commit CANDIDATE_SHA \
+  --workbook test-results/build/Workbook-development.xlsm --require-binding
 ```
 
-It must end with `excel-run: PASS`. This check is a release gate, not a
+It must end with `Binding: VERIFIED` and `excel-run: PASS`: the export came
+from a clean build of the candidate, and the run is consistent with it. This check is a release gate, not a
 **Repository integrity** step, because the evidence exists only for a
 candidate. If a case or the check fails, fix it through a task pull request
 and start again at step 2.

@@ -96,6 +96,18 @@
       ]
     },
     {
+      "repository": "https://github.com/danielep71/K-IRRBB-NMDs",
+      "license": "MPL-2.0",
+      "revision": "f703c7ab6bff207b5ce5917af8368cb24ea23f13",
+      "revision_note": "The main branch as inspected when the files were adapted",
+      "files": [
+        "tools/devbuild/vba_project.py",
+        "tools/devbuild/build_workbook.py",
+        "tools/devbuild/lo_smoke.py",
+        "tests/test_devbuild.py"
+      ]
+    },
+    {
       "repository": "https://github.com/danielep71/K-FRTB-SA",
       "license": "MIT",
       "revision": null,

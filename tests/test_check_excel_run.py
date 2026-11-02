@@ -19,13 +19,18 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
 
+sys.path.insert(0, str(SOURCE / "tools" / "devbuild"))
+
+import build_workbook  # noqa: E402
 import check_excel_run  # noqa: E402
+import export_manifest  # noqa: E402
 from check_excel_run import EXAMPLES, HARNESS, Suite, components, read_suite  # noqa: E402
 
 MODULES = sorted((SOURCE / "tests/modules").glob("*.bas"))
@@ -46,6 +51,9 @@ def make_repository() -> tuple[Path, str]:
     for name, data in FORM.items():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(data)
+    config = root / check_excel_run.BUILD_CONFIG
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_bytes((SOURCE / check_excel_run.BUILD_CONFIG).read_bytes())
     for command in (["init", "-q"], ["add", "-A"],
                     ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                      "-c", "commit.gpgsign=false",
@@ -164,6 +172,96 @@ def edit(path: str, old: str, new: str) -> Callable[[Path], None]:
 def findings(change: Callable[[Path], None] | None = None) -> list[str]:
     with evidence(change) as folder:
         return check_excel_run.check(ROOT, COMMIT, folder).findings
+
+
+def workbook_bytes(commit: str, clean: bool = True) -> bytes:
+    """A workbook as tools/devbuild/build_workbook.py packages it, stamped with ``commit``."""
+    layout = build_workbook.load_layout(SOURCE)
+    build = build_workbook.Build(commit, "2026-11-02T10:00:00+01:00", clean, "development", ())
+    return build_workbook.package(layout, build, b"not a VBA project")
+
+
+@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+class BindingTest(unittest.TestCase):
+    def bound(self, change: Callable[[Path, Path], None] | None = None, *, workbook: bool = True,
+              manifest: bool = True, require: bool = False,
+              data: bytes | None = None) -> check_excel_run.Evidence:
+        with evidence() as folder:
+            path = folder.parent / f"{folder.name}-Workbook.xlsm"
+            path.write_bytes(workbook_bytes(COMMIT) if data is None else data)
+            try:
+                if manifest:
+                    export_manifest.write(path, folder)
+                if change:
+                    change(folder, path)
+                return check_excel_run.check(ROOT, COMMIT, folder, path if workbook else None,
+                                             require)
+            finally:
+                path.unlink(missing_ok=True)
+
+    def test_verified(self) -> None:
+        result = self.bound()
+        self.assertEqual((result.binding, result.findings), ("VERIFIED", []))
+
+    def test_unverified_without_a_manifest_or_a_workbook(self) -> None:
+        for options in ({"manifest": False}, {"workbook": False}):
+            with self.subTest(**options):
+                result = self.bound(**options)  # type: ignore[arg-type]
+                self.assertEqual((result.binding, result.findings), ("UNVERIFIED", []))
+                self.assertTrue(result.binding_notes)
+        required = self.bound(manifest=False, require=True)
+        self.assertTrue(any("--require-binding" in item for item in required.findings))
+
+    def test_fail_on_any_mismatch(self) -> None:
+        def changed_export(folder: Path, _: Path) -> None:
+            (folder / "exported/TEST_Harness.bas").write_bytes(b"changed")
+        def changed_workbook(_: Path, path: Path) -> None:
+            path.write_bytes(workbook_bytes(COMMIT) + b" ")
+        def extra_export(folder: Path, _: Path) -> None:
+            (folder / "exported/Extra.bas").write_bytes(b"x")
+        def bad_manifest(folder: Path, _: Path) -> None:
+            (folder / check_excel_run.MANIFEST).write_text('{"format": "other"}', "utf-8")
+        cases = {"changed after the export": changed_export, "but export-manifest.json records":
+                 changed_workbook, "is not recorded": extra_export,
+                 "not a valid export manifest": bad_manifest}
+        for text, change in cases.items():
+            with self.subTest(text=text):
+                result = self.bound(change)
+                self.assertEqual(result.binding, "FAIL")
+                self.assertTrue(any(text in item for item in result.findings), result.findings)
+
+    def test_the_stamp_must_name_the_commit_of_a_clean_build(self) -> None:
+        for data, text in ((workbook_bytes(COMMIT, clean=False), "NOT evidence-grade"),
+                           (workbook_bytes("0" * 40), "0" * 40)):
+            with self.subTest(text=text):
+                result = self.bound(data=data)
+                self.assertEqual(result.binding, "FAIL")
+                self.assertTrue(any("build stamp" in item and text in item
+                                    for item in result.findings), result.findings)
+
+    def test_the_stamp_is_read_from_shared_strings_after_excel_saves(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            source = zipfile.ZipFile(io.BytesIO(workbook_bytes(COMMIT)))
+            parts = {name: source.read(name) for name in source.namelist()}
+            sheet = parts["xl/worksheets/sheet1.xml"].decode()
+            inline = f'<c r="B3" t="inlineStr"><is><t xml:space="preserve">{COMMIT}</t></is></c>'
+            self.assertIn(inline, sheet)
+            parts["xl/worksheets/sheet1.xml"] = sheet.replace(
+                inline, '<c r="B3" t="s"><v>0</v></c>').encode()
+            parts["xl/sharedStrings.xml"] = (
+                '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                f"<si><t>{COMMIT}</t></si></sst>").encode()
+            path = Path(temporary) / "Saved.xlsm"
+            with zipfile.ZipFile(path, "w") as package:
+                for name, data in parts.items():
+                    package.writestr(name, data)
+            self.assertEqual(check_excel_run.read_stamp(path, "build_commit"), COMMIT)
+            self.assertIsNone(check_excel_run.read_stamp(path, "no_such_name"))
+
+    def test_report_states_the_binding(self) -> None:
+        with evidence() as folder, contextlib.redirect_stdout(io.StringIO()) as output:
+            check_excel_run.main([str(folder), "--commit", COMMIT, "--root", str(ROOT)])
+        self.assertIn("Binding: UNVERIFIED", output.getvalue())
 
 
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")

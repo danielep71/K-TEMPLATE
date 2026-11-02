@@ -113,6 +113,7 @@ line by line, apart from `started` and `ENVIRONMENT`.
 | `certification.log` | `EndCertification` |
 | `exported/` | You: every VBA component exported back from the workbook after the run, each form with its `.frx` |
 | `host.txt` | You: `windows=`, `references=` and `compile=` |
+| `export-manifest.json` | `tools/devbuild/export_manifest.py`: the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
 
 `tools/check_excel_run.py` holds the layout, the modes, the supported
 references and the required Office bitness as constants at its top. Change

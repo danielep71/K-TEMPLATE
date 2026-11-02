@@ -48,7 +48,8 @@ below says why it is hidden.
 
 | # | Tab name | Code name | Role | Code writes | Content |
 | ---: | --- | --- | --- | --- | --- |
-| *Illustrative:* 1 | `Inputs` | `shInputs` | Input | No | Reporting date and run settings ([areas](#areas)) |
+| *Illustrative:* 1 | `Readme` | `shReadme` | Reference | Build only | What the workbook is, its limits, and the build stamp |
+| *Illustrative:* 2 | `Inputs` | `shInputs` | Input | No | Reporting date and run settings ([areas](#areas)) |
 
 - **Code name:** `sh` plus the role, as the house style requires. The
   workbook's own document module is `ThisWorkbook`.
@@ -82,6 +83,9 @@ State the layout every sheet shares. A common default:
 
 | Name | Sheet | Refers to | Written by |
 | --- | --- | --- | --- |
+| *Illustrative:* `build_commit` | `shReadme` | The commit the workbook was built from | The build |
+| *Illustrative:* `build_time` | `shReadme` | The commit's committer time | The build |
+| *Illustrative:* `build_configuration` | `shReadme` | `production` or `development` | The build |
 | *Illustrative:* `cfg_reporting_date` | `shInputs` | The value cell of the reporting date | Users |
 
 - Every name is workbook-scoped and visible, and refers to one cell of this
@@ -91,6 +95,8 @@ State the layout every sheet shares. A common default:
 - **Table anchors:** `<Sheet>_<Table>`, on a table's first header cell. No
   table is named `Status`, so an anchor never collides with a status line.
 - **State:** `Run_Status` and the status line of each sheet that code writes.
+- **Build stamp:** `build_commit`, `build_time` and `build_configuration`, on
+  the reference sheet.
 - The build creates every name. Before an operation, the adapter checks that
   each name it uses exists and refers to the expected sheet; a missing or
   moved name stops the operation before any calculation.
@@ -155,12 +161,22 @@ The build writes, from one commit:
 - the sheets of [Sheets](#sheets), in order, with their tab and code names;
 - every defined name, the formats, the data validation of the input areas and
   the print areas;
-- the commit and the build time, in a reference sheet;
+- the build stamp on the reference sheet: the commit, its committer time
+  (not the clock, so that a rebuild is byte-identical) and the configuration.
+  A working tree with changes is stamped as not evidence-grade;
 - the VBA components of that commit, as the
   [installation guide](../../INSTALLATION.md) lists them.
 
 It writes no data and no results. A production build has no `Test` sheet, test
 module or example; a development build adds them.
+
+`tools/devbuild/build_workbook.py` builds the sheets, code names, defined
+names, stamp and VBA project. It reads them from
+`tools/devbuild/workbook.json`, which must match the tables above. Formats,
+data validation and print areas are not built yet: add them to the builder
+when a decision here defines them. The
+[installation guide](../../INSTALLATION.md#building-a-workbook-from-source)
+says how to run it.
 
 ## Decisions
 

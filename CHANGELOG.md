@@ -60,6 +60,16 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/devbuild/build_workbook.py`, which builds a macro-enabled workbook
+  from the source of one commit, with the sheets, code names and defined
+  names of the workbook contract, a build stamp, and a VBA project written
+  from source, so it needs no *Trust access to the VBA project object model*.
+  A rebuild is byte-identical, and a working tree with changes is stamped as
+  not evidence-grade. `tools/devbuild/export_manifest.py` and
+  `check_excel_run.py --workbook` bind an export to the workbook it came from
+  (`VERIFIED`, `FAIL` or `UNVERIFIED`), and a release requires `VERIFIED`. An
+  optional LibreOffice smoke test runs the harness certification as an early
+  warning, never as evidence (#100).
 - A VBA test harness and an example suite in `tests/modules/`, with a
   certification entry point. It refuses state left by an earlier run,
   reports completeness apart from the verdict, and checks that Excel's state,
