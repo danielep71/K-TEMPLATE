@@ -38,7 +38,7 @@ WRITE_PERMISSIONS = {
 PINNED = re.compile(r'^[\w.-]+/[\w.-]+(/[\w./-]+)?@[0-9a-f]{40}$')
 DOCKER_PINNED = re.compile(r'^docker://[^@\s]+@sha256:[0-9a-f]{64}$')
 # The version a pin stands for, after it on the same line: "# v4.39.1".
-VERSION_COMMENT = r'\s+#\s*v?\d+(\.\d+){0,3}\b'
+VERSION_COMMENT = r'[ \t]+#[ \t]*v?\d+(\.\d+){0,3}\b'
 ACTION_FILES = ('action.yml', 'action.yaml')
 
 
@@ -59,32 +59,42 @@ def workflows():
     return {path.name: load(path) for path in workflow_paths()}
 
 
-def has_version_comment(text, reference, key='uses'):
-    """Whether a ``key:`` line of the raw text pins ``reference`` with a version comment.
+class Source:
+    """The raw text of one workflow or action file, with the uses: lines read so far.
 
-    YAML drops comments, so the line is read from the text. A reference written in
-    a form this does not match, such as a flow mapping, has no comment here and
-    fails the check, so the rule fails closed."""
-    quoted = rf'(?P<q>[\'"]?){re.escape(reference)}(?P=q)'
-    return re.search(rf'(?m)^[ \t-]*["\']?{key}["\']?:[ \t]*{quoted}{VERSION_COMMENT}',
-                     text) is not None
+    YAML drops comments, so each reference's version comment is read from its own
+    line of the raw text, occurrence by occurrence: the n-th time a reference is
+    parsed, the n-th line that writes it must carry the comment. A reference
+    written in a form this does not match, such as a flow mapping, has fewer such
+    lines than occurrences and fails the check, so the rule fails closed."""
+
+    def __init__(self, text):
+        self.text = text
+        self.seen = {}
+
+    def has_version_comment(self, reference, key='uses'):
+        quoted = rf'(?P<q>[\'"]?){re.escape(reference)}(?P=q)'
+        lines = re.finditer(rf'(?m)^[ \t-]*["\']?{key}["\']?:[ \t]*{quoted}(?P<rest>[^\n]*)$',
+                            self.text)
+        commented = [re.match(VERSION_COMMENT, line['rest']) is not None for line in lines]
+        index = self.seen.get((key, reference), 0)
+        self.seen[(key, reference)] = index + 1
+        return index < len(commented) and commented[index]
 
 
-def reference_problems(where, reference, text, root, seen, key='uses'):
+def reference_problems(where, reference, source, root, seen, key='uses'):
     """The problems of one reference, following a local action into its metadata."""
     if not isinstance(reference, str) or not reference:
-        return [f'{where}: uses: is not a reference']
+        return [f'{where}: {key}: is not a reference']
+    if reference.startswith('./'):
+        return local_problems(where, reference, root, seen)
     if reference.startswith('docker://'):
         problems = [] if DOCKER_PINNED.match(reference) else [
             f'{where}: {reference} is not pinned to an @sha256: digest']
-        if not has_version_comment(text, reference, key):
-            problems.append(f'{where}: {reference} has no version comment')
-        return problems
-    if reference.startswith('./'):
-        return local_problems(where, reference, root, seen)
-    problems = [] if PINNED.match(reference) else [
-        f'{where}: {reference} is not pinned to a full commit SHA']
-    if not has_version_comment(text, reference):
+    else:
+        problems = [] if PINNED.match(reference) else [
+            f'{where}: {reference} is not pinned to a full commit SHA']
+    if not source.has_version_comment(reference, key):
         problems.append(f'{where}: {reference} has no version comment')
     return problems
 
@@ -92,7 +102,8 @@ def reference_problems(where, reference, text, root, seen, key='uses'):
 def local_problems(where, reference, root, seen):
     """A local reusable workflow must exist; a local action is checked step by step."""
     target = (root / reference).resolve()
-    if root.resolve() not in target.parents:
+    # ./ is an action at the repository root, which is inside it.
+    if target != root.resolve() and root.resolve() not in target.parents:
         return [f'{where}: {reference} is outside the repository']
     workflows_folder = (root / '.github/workflows').resolve()
     if target.suffix in ('.yml', '.yaml'):
@@ -106,17 +117,17 @@ def local_problems(where, reference, root, seen):
     if metadata in seen:
         return []  # Already checked, or a cycle: either way, nothing new to read.
     seen.add(metadata)
-    text = metadata.read_text(encoding='utf-8')
+    source = Source(metadata.read_text(encoding='utf-8'))
     label = metadata.relative_to(root.resolve()).as_posix()
-    runs = (load_text(text) or {}).get('runs') or {}
+    runs = (load_text(source.text) or {}).get('runs') or {}
     problems = []
     for index, step in enumerate(runs.get('steps') or []):
         if isinstance(step, dict) and 'uses' in step:
-            problems += reference_problems(f'{label} step {index + 1}', step['uses'], text,
+            problems += reference_problems(f'{label} step {index + 1}', step['uses'], source,
                                            root, seen)
     image = runs.get('image')
     if isinstance(image, str) and image.startswith('docker://'):
-        problems += reference_problems(f'{label} image', image, text, root, seen, 'image')
+        problems += reference_problems(f'{label} image', image, source, root, seen, 'image')
     return problems
 
 
@@ -137,16 +148,16 @@ def pin_problems(root=ROOT):
     problems = []
     seen = set()
     for path in workflow_paths(root):
-        text = path.read_text(encoding='utf-8')
-        document = load_text(text) or {}
+        source = Source(path.read_text(encoding='utf-8'))
+        document = load_text(source.text) or {}
         for job_id, job in (document.get('jobs') or {}).items():
             where = f'{path.name} job {job_id}'
             if 'uses' in job:
-                problems += reference_problems(where, job['uses'], text, root, seen)
+                problems += reference_problems(where, job['uses'], source, root, seen)
             for index, step in enumerate(job.get('steps') or []):
                 if isinstance(step, dict) and 'uses' in step:
                     problems += reference_problems(f'{where} step {index + 1}', step['uses'],
-                                                   text, root, seen)
+                                                   source, root, seen)
     return problems
 
 
@@ -202,6 +213,17 @@ class WorkflowControlTests(unittest.TestCase):
             'a flow mapping cannot show its comment, so it fails closed': (
                 {'.github/workflows/ci.yml': f'jobs:\n  build:\n    steps:\n      - {{uses: "actions/checkout@{sha}"}} # v7\n'},
                 [f'ci.yml job build step 1: actions/checkout@{sha} has no version comment']),
+            'a repeated reference needs its own comment, on its own line': (
+                {'.github/workflows/ci.yml': f'jobs:\n  build:\n    steps:\n      - uses: {pinned}\n'
+                                             f'      - uses: actions/checkout@{sha}\n'
+                                             f'      - uses: actions/checkout@{sha}\n'
+                                             '        # v7.0.1\n'},
+                [f'ci.yml job build step 2: actions/checkout@{sha} has no version comment',
+                 f'ci.yml job build step 3: actions/checkout@{sha} has no version comment']),
+            'an action at the repository root': (
+                {'.github/workflows/ci.yml': 'jobs:\n  build:\n    steps:\n      - uses: ./\n',
+                 'action.yml': 'runs:\n  using: composite\n  steps:\n    - uses: actions/checkout@v7 # v7\n'},
+                ['action.yml step 1: actions/checkout@v7 is not pinned to a full commit SHA']),
             'unpinned step inside a local action': (
                 {'.github/workflows/ci.yml': 'jobs:\n  build:\n    steps:\n      - uses: ./tools/setup\n',
                  'tools/setup/action.yaml': 'runs:\n  using: composite\n  steps:\n    - uses: actions/checkout@v7 # v7\n'},
