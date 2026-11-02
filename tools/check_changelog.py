@@ -11,8 +11,9 @@ must also point into that GitHub repository.
 
 It also checks that the prose agrees with that state:
 
-- CHANGELOG.md says "No version has been released" exactly while it has no
-  dated release, and no section holds a placeholder line such as TBD;
+- the introduction of CHANGELOG.md, before its first level-2 heading, says
+  "No version has been released" exactly while it has no dated release, and
+  no version section holds a placeholder line such as TBD;
 - the *Current status* table of RELEASING.md, when present, names no release
   and no VERSION before the first release, and the newest one after it;
 - README.md, when present, holds no "Release Candidate" and no unchecked
@@ -130,12 +131,19 @@ def check_version(root: Path, released: list[str]) -> list[str]:
 
 
 def changelog_state_problems(text: str, released: list[str]) -> list[str]:
-    """The changelog's own release statement, and placeholders in its sections."""
+    """The introduction's release statement, and placeholders in version sections.
+
+    Only the introduction is read for the statement, so that an entry or a
+    policy section may quote it without contradicting a release.
+    """
     problems = []
-    if released and NO_RELEASE in text:
-        problems.append(f"{CHANGELOG}: says '{NO_RELEASE}' but releases [{released[0]}]")
-    if not released and NO_RELEASE not in text:
-        problems.append(f"{CHANGELOG}: has no dated release but does not say '{NO_RELEASE}'")
+    introduction = re.split(r"^## ", text, maxsplit=1, flags=re.M)[0]
+    if released and NO_RELEASE in introduction:
+        problems.append(f"{CHANGELOG}: the introduction says '{NO_RELEASE}' but the changelog "
+                        f"releases [{released[0]}]")
+    if not released and NO_RELEASE not in introduction:
+        problems.append(f"{CHANGELOG}: has no dated release but its introduction does not say "
+                        f"'{NO_RELEASE}'")
     first = VERSION_HEADING.search(text)
     sections = text[first.start():] if first else ""
     for line in PLACEHOLDER.findall(sections):

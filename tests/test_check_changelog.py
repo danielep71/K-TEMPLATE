@@ -141,9 +141,20 @@ class ReleaseStateTest(unittest.TestCase):
         self.assertFinding(findings(RELEASED.replace("# Changelog\n", "# Changelog\n\n"
                                                      "No version has been released.\n"),
                                     "0.2.0\n"),
-                           "says 'No version has been released' but releases [0.2.0]")
+                           "the introduction says 'No version has been released' but the "
+                           "changelog releases [0.2.0]")
         self.assertFinding(findings(UNRELEASED_ONLY.replace("No version has been released.", "")),
-                           "does not say 'No version has been released'")
+                           "its introduction does not say 'No version has been released'")
+
+    def test_release_statement_is_read_from_the_introduction_only(self) -> None:
+        # An entry may quote the statement after the first release; the
+        # statement outside the introduction does not count before it either.
+        quoted = "- The check reads the 'No version has been released' sentence.\n"
+        self.assertEqual(findings(RELEASED.replace("- A fix.\n", "- A fix.\n" + quoted),
+                                  "0.2.0\n"), [])
+        moved = UNRELEASED_ONLY.replace("No version has been released.\n\n", "").replace(
+            "- A change.\n", "- A change.\n" + quoted)
+        self.assertFinding(findings(moved), "its introduction does not say")
 
     def test_placeholder_lines(self) -> None:
         for line in ("- TBD", "_Nothing yet._", "- TODO", "..."):
