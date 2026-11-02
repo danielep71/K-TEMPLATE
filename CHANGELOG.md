@@ -148,6 +148,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- A sixth static check of exported VBA source, `tools/check_vba_identifiers.py`,
+  runs in **Repository integrity**. In each compilation environment, it fails
+  when a procedure assigns a name that nothing declares, when a statement
+  calls a procedure that no module provides, or when a declaration is named
+  like a VBA keyword, such as `Dim Empty()`. A statement it cannot read is a
+  finding (#173).
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may

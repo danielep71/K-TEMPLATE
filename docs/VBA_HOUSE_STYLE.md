@@ -168,7 +168,7 @@ compiles nor checks the other rules of this guide.
 
 ## Static checks
 
-**Repository integrity** runs five static checks on every tracked `.bas`,
+**Repository integrity** runs six static checks on every tracked `.bas`,
 `.cls` and `.frm` file. Each also runs on its own, for example
 `python tools/check_vba_source.py`; with no VBA source, each passes and says
 it examined no component.
@@ -180,6 +180,7 @@ it examined no component.
 | `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target is a label of the same procedure, in each environment; no label is defined twice in a procedure |
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
+| `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
 
 What they cannot prove:
 
@@ -189,6 +190,13 @@ What they cannot prove:
   or 64-bit host;
 - a private procedure name may repeat across modules, as VBA allows; only a
   public name in two standard modules is a collision;
+- the identifier check reads neither member access (`x.y = 1`, `.y` in a
+  `With` block) nor qualified calls (`Module.Name`, `obj.Method`), nor calls
+  inside an expression (`x = Helper(1)`), and it does not see the controls of
+  a worksheet, which a document module may name. Its built-in callees, such as
+  `MsgBox`, `DoEvents` and a form's `Hide`, are listed in `BUILTIN_CALLS`;
+  extend that list when a built-in it does not know is called as a
+  statement;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 

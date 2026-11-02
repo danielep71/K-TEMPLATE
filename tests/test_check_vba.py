@@ -24,6 +24,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import check_vba_conditionals  # noqa: E402
 import check_vba_dependencies  # noqa: E402
+import check_vba_identifiers  # noqa: E402
 import check_vba_jumps  # noqa: E402
 import check_vba_public_api  # noqa: E402
 import check_vba_source  # noqa: E402
@@ -1269,19 +1270,169 @@ class LexerTest(unittest.TestCase):
         self.assertEqual(logical_units(["x = 1 + _", "  2"]), [(1, 2, "code", "x = 1 + 2")])
 
 
+IDENTIFIERS_VALID = {
+    "declarations-of-every-kind": """Private mCount As Long, mNames() As String
+Private Const LIMIT As Long = 3
+Private Enum Slot
+    [_First] = 0
+    slA = 1
+End Enum
+
+Public Function Total( _
+    ByVal Value As Long, _
+    Optional ByRef Label As String = "a, b", _
+    Optional ByVal Extra As Variant) _
+    As Long
+
+        Dim i As Long, Items As Collection
+        Static Calls As Long
+        Const STEP_SIZE As Long = 1
+        ReDim Buffer(1 To LIMIT) As Long
+        Set Items = New Collection
+        For i = 1 To LIMIT Step STEP_SIZE: Buffer(i) = i: Next i
+        For Each Extra In Items
+        Next Extra
+        If Value > 0 Then mCount = slA Else mCount = LIMIT
+        Mid$(Label, 1, 1) = "z"
+        Calls = Calls + 1
+        Total = Value
+End Function
+""",
+    "calls-of-every-kind": """Public Sub Run()
+        Helper 1
+        Call Helper(2)
+        Call TEST_Other.Thing(3)
+        TEST_Other.Thing 4
+        Debug.Print "Undeclared = 1"
+        Err.Raise 5
+        MsgBox "x"
+        DoEvents
+        Shared
+Retry:
+        On Error GoTo Retry
+End Sub
+
+Private Sub Helper(ByVal Value As Long)
+        With Application
+            .StatusBar = Value
+        End With
+        Application.StatusBar = False
+End Sub
+""",
+    "a-declaration-in-each-active-branch": """Public Sub Run()
+#If VBA7 Then
+        Dim Handle As LongPtr
+#Else
+        Dim Handle As Long
+#End If
+        Handle = 0
+End Sub
+""",
+}
+IDENTIFIERS_INVALID = {
+    "undeclared-assignment": ("Public Sub Run()\n        Total = 1\nEnd Sub\n",
+                              "Total is assigned in Run but not declared"),
+    "undeclared-set": ("Public Sub Run()\n        Set Items = Nothing\nEnd Sub\n",
+                       "Items is assigned in Run but not declared"),
+    "undeclared-loop-counter": ("Public Sub Run()\n        For i = 1 To 2\n        Next i\n"
+                                "End Sub\n", "i is assigned in Run but not declared"),
+    "assignment-after-then": ("Public Sub Run()\n        If True Then Missing = 1\nEnd Sub\n",
+                              "Missing is assigned in Run but not declared"),
+    "a-declaration-only-in-an-inactive-branch": (
+        "Public Sub Run()\n#If Not VBA7 Then\n        Dim Legacy As Long\n#End If\n"
+        "        Legacy = 1\nEnd Sub\n",
+        "Legacy is assigned in Run but not declared [vba7-win32, vba7-win64]"),
+    "a-renamed-private-helper": (
+        "Public Sub Run()\n        OldHelper 1\nEnd Sub\n\n"
+        "Private Sub NewHelper(ByVal Value As Long)\nEnd Sub\n",
+        "OldHelper is called in Run but no procedure of that name is reachable"),
+    "an-explicit-call-to-nothing": ("Public Sub Run()\n        Call Gone(1)\nEnd Sub\n",
+                                    "Gone is called in Run"),
+    "dim-empty": ("Public Sub Run()\n        Dim Empty() As Long\nEnd Sub\n",
+                  "variable Empty is named like the VBA keyword Empty"),
+    "keyword-parameter": ("Public Sub Run(ByVal Date As Long)\nEnd Sub\n",
+                          "parameter Date is named like the VBA keyword Date"),
+    "keyword-module-name": ("Private Name As String\n",
+                            "variable Name is named like the VBA keyword Name"),
+    "keyword-enum-member": ("Private Enum Slot\n    Error = 1\nEnd Enum\n",
+                            "Enum member Error is named like the VBA keyword Error"),
+    "unreadable-parameters": ("Public Sub Run(ByVal 1st As Long)\nEnd Sub\n",
+                              "cannot read the parameter"),
+    "unreadable-declaration": ("Public Sub Run()\n        Dim 2nd As Long\nEnd Sub\n",
+                               "cannot read the declaration"),
+    "single-line-if-without-then": ("Public Sub Run()\n        If True x = 1\nEnd Sub\n",
+                                    "cannot read the If statement"),
+}
+OTHER = """Attribute VB_Name = "TEST_Other"
+Option Explicit
+Option Private Module
+
+Public Shared As Long
+
+Public Sub Thing(ByVal Value As Long)
+End Sub
+
+Public Sub Shared()
+End Sub
+"""
+
+
+class IdentifierTest(unittest.TestCase):
+    def test_valid_fixtures_pass(self) -> None:
+        self.assertEqual(run_check(check_vba_identifiers.check, VALID), [])
+        for name, body in IDENTIFIERS_VALID.items():
+            with self.subTest(name=name):
+                files = {**standalone(module(body)), "tests/modules/TEST_Other.bas": OTHER}
+                self.assertEqual(run_check(check_vba_identifiers.check, files), [])
+
+    def test_invalid_fixtures_fail(self) -> None:
+        for name, (body, text) in IDENTIFIERS_INVALID.items():
+            with self.subTest(name=name):
+                findings = run_check(check_vba_identifiers.check, standalone(module(body)))
+                self.assertTrue(any(text in item for item in findings), findings)
+
+    def test_public_names_of_other_standard_modules_resolve(self) -> None:
+        caller = module("Public Sub Run()\n        Shared = 1\n        Thing 2\nEnd Sub\n")
+        files = {**standalone(caller), "tests/modules/TEST_Other.bas": OTHER}
+        self.assertEqual(run_check(check_vba_identifiers.check, files), [])
+        private = OTHER.replace("Public Sub Thing", "Private Sub Thing")
+        files["tests/modules/TEST_Other.bas"] = private
+        self.assertEqual(run_check(check_vba_identifiers.check, files),
+                         ["tests/modules/TEST_Fixture.bas:6: Thing is called in Run but no "
+                          "procedure of that name is reachable [vba6-win32, vba7-win32, "
+                          "vba7-win64]"])
+
+    def test_form_controls_and_class_properties_count_as_declared(self) -> None:
+        form = FORM.replace("   OleObjectBlob", "   Begin MSForms.TextBox txtAmount\n   End\n"
+                            "   OleObjectBlob") + ("\nPrivate Sub UserForm_Initialize()\n"
+                                                    "        txtAmount = \"0\"\n        Hide\n"
+                                                    "End Sub\n")
+        files = changed("src/forms/frmRunOptions.frm", FORM, form)
+        cls = CLASS + "\nPublic Sub Reset()\n        Amount = 0\nEnd Sub\n"
+        files = changed("src/classes/CCalculationResult.cls", CLASS, cls, files)
+        self.assertEqual(run_check(check_vba_identifiers.check, files), [])
+
+    def test_counts_components_and_procedures(self) -> None:
+        with repository(VALID) as root:
+            _, components, procedures = check_vba_identifiers.check(root)
+        self.assertEqual((components, procedures), (7, 6))
+
+
 class MainTest(unittest.TestCase):
     def test_every_gate_exits_0_when_valid_and_1_when_invalid(self) -> None:
         # Each gate has its own defect here: no Option Explicit, an unknown
-        # #If symbol, a jump to a missing label, an implicit public function
-        # and a core module that reaches the host.
-        invalid = standalone(module("Private Sub First()\n        GoTo Lost\nEnd Sub\n"
+        # #If symbol, a jump to a missing label, an implicit public function,
+        # a core module that reaches the host and an undeclared assignment.
+        invalid = standalone(module("Private Sub First()\n        GoTo Lost\n"
+                                    "        Undeclared = 1\nEnd Sub\n"
                                     "Function Implicit()\nEnd Function\n#If Mac Then\n#End If\n"))
         invalid["tests/modules/TEST_Fixture.bas"] = \
             str(invalid["tests/modules/TEST_Fixture.bas"]).replace("Option Explicit\n", "")
         invalid["src/core/CORE_Fixture.bas"] = core_module(
             'Private Sub Warn()\n        MsgBox "x"\nEnd Sub\n')
         mains = (check_vba_source.main, check_vba_conditionals.main, check_vba_jumps.main,
-                 check_vba_public_api.main, check_vba_dependencies.main)
+                 check_vba_public_api.main, check_vba_dependencies.main,
+                 check_vba_identifiers.main)
         for files, expected in ((VALID, 0), (invalid, 1)):
             with repository(files) as root:
                 for main in mains:
