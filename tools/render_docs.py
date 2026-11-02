@@ -10,8 +10,8 @@ A generated block sits between two markers in a Markdown file:
 Each NAME has a renderer here that computes the block from the repository:
 
 - example-suite-results, in INSTALLATION.md: what the example suite's runs
-  end with, read from tests/modules/TEST_Examples.bas by the same code that
-  checks Excel-run evidence (tools/check_excel_run.py);
+  end with, read from the suite that .github/excel-evidence-policy.json names
+  by the same code that checks Excel-run evidence (tools/check_excel_run.py);
 - integrity-checks, in CONTRIBUTING.md: the checks that
   tools/check_repository.py runs, in order, with what each runs.
 
@@ -52,27 +52,29 @@ class Block:
 
 def example_suite_results(root: Path) -> str:
     """The passing RESULT line and the expected end of each failure mode."""
-    source = (root / check_excel_run.EXAMPLES).read_bytes()
+    policy = check_excel_run.working_policy(root)
+    source = (root / policy.suite_source).read_bytes()
     suite = check_excel_run.read_suite(source)
     text = source.decode("ascii", errors="replace").replace("\r\n", "\n")
     entry_points = {mode: name for name, mode in ENTRY_POINT.findall(text)}
-    plans = check_excel_run.plans(suite)
-    passing = next(plan for plan in plans if plan.mode in check_excel_run.MUST_PASS)
+    plans = check_excel_run.plans(suite, policy)
+    passing = next(plan for plan in plans if plan.mode in policy.must_pass)
+    module = Path(policy.suite_source).stem
     line = "; ".join(f"{key}={passing.result[key]}" for key in RESULT_ORDER)
     rows = []
     for plan in plans:
-        if plan.mode in check_excel_run.MUST_PASS:
+        if plan.mode in policy.must_pass:
             continue
         shown = ["RESULT", "operation", "completeness"]
         shown += [key for key in ("cases", "assertions")
                   if plan.result[key] != passing.result[key]]
         shown.append("failures")
         fields = ", ".join(f"`{key}={plan.result[key]}`" for key in shown)
-        rows.append(f"| `TEST_Examples.{entry_points[plan.mode]}` | {fields}, then *Suite "
-                    f"{check_excel_run.SUITE} did not pass* |")
+        rows.append(f"| `{module}.{entry_points[plan.mode]}` | {fields}, then *Suite "
+                    f"{policy.suite} did not pass* |")
     return "\n".join([
         "```text", line, "```", "",
-        f"Anything else, or the error *Suite {check_excel_run.SUITE} did not pass*, is a "
+        f"Anything else, or the error *Suite {policy.suite} did not pass*, is a "
         "failure.",
         f"{COUNTS.get(len(rows), str(len(rows)))} more entry points show the failure paths "
         "and are expected to fail:", "",

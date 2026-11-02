@@ -20,8 +20,8 @@ Adapt this section to the project and record the decision in an issue.
 - **References:** only the defaults of the target installation: Visual Basic
   For Applications, the Microsoft Excel 16.0 Object Library, OLE Automation
   and the Microsoft Office 16.0 Object Library. Any other reference needs a
-  reviewed decision, and a change to the `REFERENCES` of
-  `tools/check_excel_run.py`. Before compiling, check **Tools → References**
+  reviewed decision, and a change to the host references of
+  `.github/excel-evidence-policy.json`. Before compiling, check **Tools → References**
   for entries marked *MISSING*.
 - **Python** is used for repository tooling and for deriving reference values,
   never by the workbook.

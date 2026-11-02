@@ -115,9 +115,32 @@ line by line, apart from `started` and `ENVIRONMENT`.
 | `host.txt` | You: `windows=`, `references=` and `compile=` |
 | `export-manifest.json` | `tools/devbuild/export_manifest.py`: the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
 
-`tools/check_excel_run.py` holds the layout, the modes, the supported
-references and the required Office bitness as constants at its top. Change
-them there, together with the suite and this guide.
+## Evidence policy
+
+[`.github/excel-evidence-policy.json`](../../.github/excel-evidence-policy.json)
+holds what an Excel run must leave as evidence:
+
+- `harness` and `suite`: the harness module, the suite's name, source module
+  and certification entry point, and the case and assertion counts it
+  declares as `EXPECTED_CASES` and `EXPECTED_ASSERTIONS`;
+- `modes`: the three modes in run order, the log each one saves and whether
+  it must pass (only `NORMAL`);
+- `evidence`: the names of the certification log, the export folder, the host
+  record and the export manifest in the evidence folder;
+- `host`: the exact references and the required Office bitness.
+
+`tools/check_excel_run.py` reads the policy from the candidate commit, so a
+run is judged by the policy of the commit it names, and rejects a policy that
+is missing or malformed. It reads the harness and the suite at the exact paths
+the policy names, and fails when the commit has no file there, or when the
+suite's counts or entry point differ from the policy. The same policy is read
+by `tools/devbuild/export_manifest.py`, for the names of the export folder and
+the manifest, and by `tools/render_docs.py`, for the expected results in the
+installation guide. `tests/test_check_excel_run.py` keeps the policy equal to
+the suite, to the host policy of the installation guide and to the evidence
+files the guide names. To change a mode, a file name, a reference or the
+bitness, change the policy together with the suite, the installation guide
+and this guide.
 
 ## What it proves
 
