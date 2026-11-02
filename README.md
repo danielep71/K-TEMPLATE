@@ -17,6 +17,13 @@ workbooks, such as SA-CCR, SFT, FRTB, LCR, and NSFR. It provides:
 - quality gates: Ruff, strict mypy and actionlint, plus tests that hold the
   workflows to pinned actions, explicit permissions and the required check, and
   link checks: relative links and anchors on every change, external links weekly;
+- static checks of exported VBA source and a layout formatter, run on every
+  change;
+- a VBA test harness with a certification entry point, and an offline check
+  that the evidence of an Excel run matches one commit;
+- a build of a macro-enabled workbook from the source of one commit, without
+  *Trust access to the VBA project object model*, with the export bound to the
+  workbook it came from;
 - a security policy, a review to record before distribution, CodeQL code
   scanning of the Python, JavaScript and workflow code, Dependabot updates for
   the pinned Actions and the hash-locked Python dependencies, and optional
