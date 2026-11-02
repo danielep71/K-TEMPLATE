@@ -88,6 +88,15 @@ milestones and their pull requests.
   sentence, the *Current status* of `RELEASING.md`, placeholder lines such as
   `TBD`, and a "Release Candidate" mention or unchecked task in the README
   (#131).
+- The pull request template has an *Excel run* block for changes that need
+  Excel: the commit, host, compile result, suite, evidence, and a completion
+  state that is `PASS`, `FAIL`, `INCOMPLETE` or `NOT RUN`.
+  [PULL_REQUESTS.md](docs/repo_governance/PULL_REQUESTS.md#excel-run) defines
+  the states (#134).
+- `INSTALLATION.md` explains how to upgrade to a new revision by rebuilding
+  the workbook and carrying its inputs across, how to diagnose common import
+  and run failures, and what removing the workbook's components leaves
+  behind (#132).
 - `docs/licenses/provenance.json` records the source repository, license and
   revision of each adapted file, or why the revision is not recorded; a test
   keeps it in step with the third-party notice (#116).
