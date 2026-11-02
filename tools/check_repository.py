@@ -240,7 +240,13 @@ def run_check(check: Check, context: Context, strict: bool) -> Result:
         status = "fail" if strict else "skip"
         return Result(check.name, status, check.command, None, check.missing, check.missing)
     if check.function is not None:
-        findings = check.function(context)
+        try:
+            findings = check.function(context)
+        except Exception as error:  # noqa: BLE001 - reported as a failed check, not raised
+            # A malformed file must fail its check, not stop the run before the
+            # other checks, the report and the summary are written.
+            detail = f"{type(error).__name__}: {error}"
+            return Result(check.name, "fail", None, 1, "raised an error", detail)
         log = "\n".join(annotate(finding) for finding in findings)
         return Result(check.name, "fail" if findings else "pass", None, 1 if findings else 0,
                       f"{len(findings)} finding(s)" if findings else "", log)

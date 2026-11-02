@@ -180,6 +180,20 @@ class RunTest(RepositoryTest):
         self.assertEqual((out / "summary.md").read_text(encoding="utf-8"),
                          text.removeprefix("before\n"))
 
+    def test_a_check_that_raises_fails_and_the_run_continues(self) -> None:
+        self.commit({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
+                     ".github/workflows/codeql.yml": "on:\n  push: {}\n  push: {}\n"})
+        listed = [Check("codeql-default-branch", function=check_repository.codeql_default_branch),
+                  Check("after", [sys.executable, "-c", "print('ran')"])]
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 1)
+        statuses = {check["name"]: check["status"]
+                    for check in report["checks"]}  # type: ignore[attr-defined]
+        self.assertEqual(statuses, {"codeql-default-branch": "fail", "after": "pass"})
+        log = (self.root / "test-results/integrity/codeql-default-branch.log").read_text("utf-8")
+        self.assertIn("duplicate key", log)
+        self.assertIn("codeql-default-branch: FAIL (raised an error)", printed)
+
     def test_missing_context_is_skipped_unless_strict(self) -> None:
         self.commit()
         listed = [Check("needs-node", ["node"], missing="node is not on PATH")]
