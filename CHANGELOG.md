@@ -68,4 +68,10 @@ milestones and their pull requests.
   binary file outside the approved paths fails unless
   `.github/binary-allowlist.json` lists it with its current SHA-256 (#113).
 
+### Changed
+
+- **Repository integrity** proves that actionlint rejects an invalid workflow,
+  and the workflow control tests reject duplicate YAML keys in the workflows,
+  Dependabot's configuration and the issue forms (#114).
+
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
