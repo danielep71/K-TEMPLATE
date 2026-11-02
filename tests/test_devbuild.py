@@ -538,6 +538,29 @@ class Manifest(unittest.TestCase):
                 self.assertEqual(export_manifest.main([str(workbook), str(folder)]), 1)
             self.assertIn("holds no exported file", output.getvalue())
 
+    def test_manifest_follows_the_evidence_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            data = json.loads(export_manifest.POLICY.read_text(encoding="utf-8"))
+            self.assertEqual(export_manifest.layout(),
+                             (data["evidence"]["exported"], data["evidence"]["export_manifest"]))
+            data["evidence"].update(exported="export", export_manifest="binding.json")
+            policy = folder / "policy.json"
+            policy.write_text(json.dumps(data), encoding="utf-8")
+            (folder / "export").mkdir()
+            (folder / "export/A.bas").write_bytes(b"a")
+            workbook = folder / "W.xlsm"
+            workbook.write_bytes(b"workbook")
+            path = export_manifest.write(workbook, folder, policy)
+            self.assertEqual(path, folder / "binding.json")
+            self.assertEqual(set(check_excel_run.load_manifest(path)[1]), {"A.bas"})
+            data["evidence"]["export_manifest"] = "../binding.json"
+            policy.write_text(json.dumps(data), encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(export_manifest.main([str(workbook), str(folder), "--policy",
+                                                       str(policy)]), 1)
+            self.assertIn("not a plain file name", output.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

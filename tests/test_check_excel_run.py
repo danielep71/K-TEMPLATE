@@ -504,6 +504,12 @@ class SuiteTest(unittest.TestCase):
         self.assertIn(f"TEST_Examples.{POLICY.entry_point}", installation)
         for reference in POLICY.references:
             self.assertIn(reference, installation)
+        # The installation guide tells the reader which files to leave in the
+        # evidence folder, so it must name each one the policy names.
+        for name in (*POLICY.logs.values(), POLICY.certification, POLICY.host, POLICY.manifest,
+                     f"{POLICY.exported}\\"):
+            with self.subTest(file=name):
+                self.assertIn(f"`{name}", installation)
         self.assertIn(POLICY.office, installation)
 
 

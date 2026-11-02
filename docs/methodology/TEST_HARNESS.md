@@ -133,12 +133,14 @@ holds what an Excel run must leave as evidence:
 run is judged by the policy of the commit it names, and rejects a policy that
 is missing or malformed. It reads the harness and the suite at the exact paths
 the policy names, and fails when the commit has no file there, or when the
-suite's counts or entry point differ from the policy. `tools/render_docs.py` renders the expected results in
-the installation guide from the same policy, and
-`tests/test_check_excel_run.py` keeps the policy equal to the suite and to
-the host policy of the installation guide. To change a mode, a file name, a
-reference or the bitness, change the policy together with the suite and this
-guide.
+suite's counts or entry point differ from the policy. The same policy is read
+by `tools/devbuild/export_manifest.py`, for the names of the export folder and
+the manifest, and by `tools/render_docs.py`, for the expected results in the
+installation guide. `tests/test_check_excel_run.py` keeps the policy equal to
+the suite, to the host policy of the installation guide and to the evidence
+files the guide names. To change a mode, a file name, a reference or the
+bitness, change the policy together with the suite, the installation guide
+and this guide.
 
 ## What it proves
 
