@@ -28,6 +28,21 @@ Resolves #
 - [ ] Ruff, strict mypy and actionlint pass in `Repository integrity`
 - [ ] Other checks specific to this change:
 
+### 🧪 Excel run
+
+<!-- Keep this block when the pull request changes VBA source, a workbook
+layout or a test case that runs in Excel; delete it otherwise. Only PASS with
+every case run counts as a pass. Rules: docs/repo_governance/PULL_REQUESTS.md. -->
+
+| Item | Result |
+| --- | --- |
+| Exact commit | <!-- Full SHA of the source imported --> |
+| Excel build and bitness, Windows version | |
+| `Debug → Compile VBAProject` | <!-- PASS / FAIL / NOT RUN, with a reason --> |
+| Suite and mode | |
+| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN --> |
+| Evidence | <!-- Where the log or evidence folder is --> |
+
 ## 🔎 Final-head review
 
 <!-- After the last push, compare the reviewed commit with the current head.

@@ -31,6 +31,30 @@ instead of reviewing. Before merging a pull request I authored:
 If the review fails, is unavailable or does not finish, I leave the pull
 request open and record what blocks it.
 
+<a id="excel-run"></a>
+
+## 🧪 Excel run
+
+CI cannot run Excel. A pull request that changes VBA source, a workbook layout
+or a test case that runs in Excel keeps the template's *Excel run* block, and
+records a run on the exact commit of the pull request:
+
+- the commit, the Excel build and bitness, and the Windows version;
+- whether **Debug → Compile VBAProject** passed;
+- the suite and its mode, and where the log is;
+- the completion state:
+
+| State | Meaning |
+| --- | --- |
+| `PASS` | Every case and assertion ran and passed |
+| `FAIL` | At least one case or assertion failed |
+| `INCOMPLETE` | Some case did not run, for example because it was skipped or the run stopped. It is not a pass, even if every case that ran passed ([completeness policy](../methodology/TEST_CASES.md#completeness-policy)) |
+| `NOT RUN` | No Excel run was made; the *Not validated* section says why |
+
+A push to VBA source after the run makes it stale, like a review. Record a new
+run, or state `NOT RUN` for the new head. A pull request that changes none of
+these files deletes the block.
+
 ## 🌿 Release branches
 
 While a release branch such as `release/1.2.0` is active, the work for that

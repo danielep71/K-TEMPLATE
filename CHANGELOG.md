@@ -81,6 +81,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The pull request template has an *Excel run* block for changes that need
+  Excel: the commit, host, compile result, suite, evidence, and a completion
+  state that is `PASS`, `FAIL`, `INCOMPLETE` or `NOT RUN`.
+  [PULL_REQUESTS.md](docs/repo_governance/PULL_REQUESTS.md#excel-run) defines
+  the states (#134).
 - `INSTALLATION.md` explains how to upgrade to a new revision by rebuilding
   the workbook and carrying its inputs across, how to diagnose common import
   and run failures, and what removing the workbook's components leaves
