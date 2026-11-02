@@ -29,6 +29,11 @@ import check_excel_run  # noqa: E402
 from check_excel_run import EXAMPLES, HARNESS, Suite, components, read_suite  # noqa: E402
 
 MODULES = sorted((SOURCE / "tests/modules").glob("*.bas"))
+# A synthetic form and its binary resources, which the VBE exports as a pair.
+FORM = {"src/forms/frmFixture.frm": b'VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} '
+                                    b'frmFixture\n   OleObjectBlob   =   "frmFixture.frx":0000\n'
+                                    b'End\nAttribute VB_Name = "frmFixture"\nOption Explicit\n',
+        "src/forms/frmFixture.frx": b"\x00\x01\r\n\x02\n\xff binary"}
 
 
 def make_repository() -> tuple[Path, str]:
@@ -38,6 +43,9 @@ def make_repository() -> tuple[Path, str]:
         target = root / module.relative_to(SOURCE)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(module.read_bytes().replace(b"\r\n", b"\n"))
+    for name, data in FORM.items():
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
     for command in (["init", "-q"], ["add", "-A"],
                     ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                      "-c", "commit.gpgsign=false",
@@ -133,7 +141,8 @@ def evidence(change: Callable[[Path], None] | None = None) -> Iterator[Path]:
         folder = Path(temporary)
         (folder / "exported").mkdir()
         for name, data in components(ROOT, COMMIT).items():
-            (folder / "exported" / name).write_bytes(data.replace(b"\n", b"\r\n"))
+            exported = data if name.endswith(".frx") else data.replace(b"\n", b"\r\n")
+            (folder / "exported" / name).write_bytes(exported)
         for mode, filename in check_excel_run.LOGS.items():
             (folder / filename).write_bytes(("\r\n".join(run_log(mode)) + "\r\n").encode())
         (folder / check_excel_run.CERTIFICATION).write_bytes(
@@ -189,6 +198,17 @@ class EvidenceTest(unittest.TestCase):
         def extra(folder: Path) -> None:
             (folder / "exported/Module1.bas").write_bytes(b"x")
         self.assertFinding(extra, "Module1.bas: not a VBA component of the commit")
+
+    def test_form_resources_are_compared_byte_for_byte(self) -> None:
+        self.assertEqual(components(ROOT, COMMIT)["frmFixture.frx"], FORM["src/forms/frmFixture.frx"])
+        self.assertFinding(lambda folder: (folder / "exported/frmFixture.frx").unlink(),
+                           "frmFixture.frx: not exported")
+        def normalized(folder: Path) -> None:
+            path = folder / "exported/frmFixture.frx"
+            path.write_bytes(path.read_bytes().replace(b"\r\n", b"\n"))
+        self.assertFinding(normalized, "frmFixture.frx: differs from frmFixture.frx")
+        self.assertFinding(edit("exported/frmFixture.frm", "Option Explicit",
+                                "Option Explicit\r\n'edit"), "frmFixture.frm: differs")
 
     def test_incomplete_logs(self) -> None:
         def truncate(folder: Path) -> None:

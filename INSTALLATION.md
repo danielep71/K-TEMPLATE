@@ -178,8 +178,8 @@ macro-security level and no *Trust access to the VBA project object model*.
    not pass* after writing its log.
 6. **Export the modules back.** In the VBE, right-click each component →
    **Export File**, into `exported\`, under its own name. Export every VBA
-   component of the commit, the test modules included. Do not edit the
-   exported files.
+   component of the commit, the test modules included; a form exports as its
+   `.frm` with its `.frx`. Do not edit the exported files.
 7. **Write `host.txt`** in the folder:
 
    ```text
@@ -210,7 +210,7 @@ macro-security level and no *Trust access to the VBA project object model*.
 
 | It fails when | Because |
 | --- | --- |
-| An exported module differs from the commit's file, or one is missing or extra | The workbook was not built from that commit |
+| An exported module differs from the commit's file line for line, a form's `.frx` differs byte for byte, or one is missing or extra | The workbook was not built from that commit |
 | A log is missing or empty, does not end with `RESULT`, holds more than one run, or a line is not a `KEY=value` record | The log is incomplete |
 | A record is missing, extra or out of the order in which the commit's suite writes it, or an unexpected error (`ERROR`) is logged | The run did not execute the suite as written |
 | The normal run is `INCOMPLETE` | A mandatory case or assertion did not run |

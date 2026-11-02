@@ -111,7 +111,7 @@ line by line, apart from `started` and `ENVIRONMENT`.
 | --- | --- |
 | `examples.log`, `injected.log`, `skipped.log` | `CertifyExamples`, one per mode |
 | `certification.log` | `EndCertification` |
-| `exported/` | You: every VBA component exported back from the workbook after the run |
+| `exported/` | You: every VBA component exported back from the workbook after the run, each form with its `.frx` |
 | `host.txt` | You: `windows=`, `references=` and `compile=` |
 
 `tools/check_excel_run.py` holds the layout, the modes, the supported

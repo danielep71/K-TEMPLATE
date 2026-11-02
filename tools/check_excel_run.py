@@ -8,7 +8,8 @@ and the supported host are configured once, in the constants below, and
 docs/methodology/TEST_HARNESS.md describes them:
 
 - source identity: the modules exported back from the workbook equal, line
-  for line, the commit's VBA components, and none is missing or extra;
+  for line, the commit's VBA components, each form's .frx equals the
+  commit's byte for byte, and none is missing or extra;
 - the three logs saved with TEST_Harness.SaveLog: each holds, record for
   record, what the commit's suite writes in its mode (no record missing,
   extra or out of order, no ERROR), with cleanup PASS and no recovery: the
@@ -41,6 +42,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VBA_SUFFIXES = (".bas", ".cls", ".frm")
+# A form's binary resources, exported beside its .frm and compared byte for byte.
+RESOURCE_SUFFIXES = (".frx",)
 
 # Configuration: the suite, its modes and the evidence layout.
 HARNESS = "tests/modules/TEST_Harness.bas"
@@ -113,9 +116,11 @@ def git(root: Path, *args: str) -> bytes:
 
 
 def components(root: Path, commit: str) -> dict[str, bytes]:
-    """The commit's VBA components, by file name, with LF line ends."""
+    """The commit's VBA components and form resources, by file name, as Git stores
+    them: text components with LF line ends, resources byte for byte."""
     listed = git(root, "ls-tree", "-r", "-z", "--name-only", commit).split(b"\0")
-    paths = [item.decode("utf-8") for item in listed if item.decode("utf-8").endswith(VBA_SUFFIXES)]
+    paths = [item.decode("utf-8") for item in listed
+             if item.decode("utf-8").lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)]
     return {Path(path).name: git(root, "show", f"{commit}:{path}") for path in paths}
 
 
@@ -187,7 +192,14 @@ def check_sources(root: Path, commit: str, folder: Path, evidence: Evidence) -> 
         if name not in present:
             evidence.findings.append(f"{EXPORTED}/{name}: not exported from the workbook")
             continue
-        actual = present[name].read_bytes().replace(b"\r\n", b"\n")
+        actual = present[name].read_bytes()
+        if name.lower().endswith(RESOURCE_SUFFIXES):
+            if actual != data:
+                evidence.findings.append(f"{EXPORTED}/{name}: differs from {name} at "
+                                         f"{commit[:12]} (binary resource, compared byte for "
+                                         "byte)")
+            continue
+        actual = actual.replace(b"\r\n", b"\n")
         if actual != data:
             evidence.findings.append(f"{EXPORTED}/{name}: differs from {name} at {commit[:12]} "
                                      f"(first difference at line {first_difference(actual, data)})")
