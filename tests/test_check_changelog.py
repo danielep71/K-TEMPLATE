@@ -21,7 +21,8 @@ import check_changelog  # noqa: E402
 REPOSITORY = "example/repository"
 TAGS = f"https://github.com/{REPOSITORY}/releases/tag"
 UNRELEASED_ONLY = (
-    "# Changelog\n\n## Policy\n\nText.\n\n## [Unreleased]\n\n### Added\n\n- A change.\n\n"
+    "# Changelog\n\nNo version has been released.\n\n## Policy\n\nText.\n\n"
+    "## [Unreleased]\n\n### Added\n\n- A change.\n\n"
     f"[Unreleased]: https://github.com/{REPOSITORY}/commits/main\n"
 )
 RELEASED = (
@@ -32,14 +33,31 @@ RELEASED = (
 )
 
 
+STATUS_BEFORE = ("# Releasing\n\n## 🧭 Current status\n\n| Item | State |\n| --- | --- |\n"
+                 "| Released versions | None |\n"
+                 "| `VERSION` | Does not exist yet; it is created when the first release is "
+                 "prepared |\n\n## 🏷️ Versioning\n\n| Item | Convention |\n| --- | --- |\n"
+                 "| `VERSION` | One line |\n")
+STATUS_AFTER = (STATUS_BEFORE.replace("| Released versions | None |",
+                                      "| Released versions | 0.2.0, 0.1.0 |")
+                .replace("Does not exist yet; it is created when the first release is prepared",
+                         "0.2.0"))
+
+
 def findings(changelog: str | None, version: str | None = None,
-             repository: str | None = None) -> list[str]:
+             repository: str | None = None, **files: str) -> list[str]:
+    """Check a directory holding the given CHANGELOG.md, VERSION and other files.
+
+    files maps RELEASING and README to the text of RELEASING.md and README.md.
+    """
     with tempfile.TemporaryDirectory(prefix="changelog-") as temporary:
         root = Path(temporary)
         if changelog is not None:
             (root / "CHANGELOG.md").write_text(changelog, encoding="utf-8")
         if version is not None:
             (root / "VERSION").write_text(version, encoding="utf-8")
+        for name, text in files.items():
+            (root / f"{name}.md").write_text(text, encoding="utf-8")
         return check_changelog.check(root, repository)[0]
 
 
@@ -107,6 +125,64 @@ class ChangelogTest(unittest.TestCase):
                                    "to other/project", "0.2.0\n", "other/project")
         copied = UNRELEASED_ONLY.replace(REPOSITORY, "example/repository-template")
         self.assertFinding(copied, "does not point to example/repository", None, REPOSITORY)
+
+
+class ReleaseStateTest(unittest.TestCase):
+    def assertFinding(self, found: list[str], text: str) -> None:
+        self.assertTrue(any(text in item for item in found), found)
+
+    def test_consistent_state_passes(self) -> None:
+        readme = "# Project\n\n- [x] Done\n"
+        self.assertEqual(findings(UNRELEASED_ONLY, RELEASING=STATUS_BEFORE, README=readme), [])
+        self.assertEqual(findings(RELEASED, "0.2.0\n", RELEASING=STATUS_AFTER, README=readme),
+                         [])
+
+    def test_changelog_release_statement(self) -> None:
+        self.assertFinding(findings(RELEASED.replace("# Changelog\n", "# Changelog\n\n"
+                                                     "No version has been released.\n"),
+                                    "0.2.0\n"),
+                           "the introduction says 'No version has been released' but the "
+                           "changelog releases [0.2.0]")
+        self.assertFinding(findings(UNRELEASED_ONLY.replace("No version has been released.", "")),
+                           "its introduction does not say 'No version has been released'")
+
+    def test_release_statement_is_read_from_the_introduction_only(self) -> None:
+        # An entry may quote the statement after the first release; the
+        # statement outside the introduction does not count before it either.
+        quoted = "- The check reads the 'No version has been released' sentence.\n"
+        self.assertEqual(findings(RELEASED.replace("- A fix.\n", "- A fix.\n" + quoted),
+                                  "0.2.0\n"), [])
+        moved = UNRELEASED_ONLY.replace("No version has been released.\n\n", "").replace(
+            "- A change.\n", "- A change.\n" + quoted)
+        self.assertFinding(findings(moved), "its introduction does not say")
+
+    def test_placeholder_lines(self) -> None:
+        for line in ("- TBD", "_Nothing yet._", "- TODO", "..."):
+            with self.subTest(line=line):
+                self.assertFinding(findings(UNRELEASED_ONLY.replace("- A change.", line)),
+                                   f"placeholder line in a version section: {line}")
+        # A placeholder word inside a sentence is not a placeholder line.
+        self.assertEqual(findings(UNRELEASED_ONLY.replace("- A change.", "- Remove a TODO.")), [])
+
+    def test_releasing_current_status(self) -> None:
+        self.assertFinding(findings(RELEASED, "0.2.0\n", RELEASING=STATUS_BEFORE),
+                           "'Released versions' does not name the newest release [0.2.0]: None")
+        self.assertFinding(findings(RELEASED, "0.2.0\n", RELEASING=STATUS_BEFORE),
+                           "'`VERSION`' does not name the newest release [0.2.0]")
+        self.assertFinding(findings(UNRELEASED_ONLY, RELEASING=STATUS_AFTER),
+                           "'Released versions' must be None before the first release")
+        self.assertFinding(findings(UNRELEASED_ONLY, RELEASING=STATUS_AFTER),
+                           "'`VERSION`' must say it does not exist before the first release")
+        self.assertFinding(findings(UNRELEASED_ONLY, RELEASING=STATUS_BEFORE.replace(
+            "| Released versions | None |\n", "")), "Current status has no 'Released versions' row")
+        self.assertFinding(findings(UNRELEASED_ONLY, RELEASING="# Releasing\n"),
+                           "RELEASING.md: has no Current status section")
+
+    def test_readme_release_state(self) -> None:
+        self.assertFinding(findings(UNRELEASED_ONLY, README="Badge: Release_Candidate\n"),
+                           "README.md: mentions a Release Candidate")
+        self.assertFinding(findings(UNRELEASED_ONLY, README="## Release\n\n- [ ] Tag it\n"),
+                           "README.md: holds an unchecked task-list item")
 
 
 class VersionTest(unittest.TestCase):
