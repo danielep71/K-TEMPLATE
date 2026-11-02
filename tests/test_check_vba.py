@@ -992,6 +992,15 @@ DEPENDENCY_INVALID = {
     "create-object-from-variable": (CORE_PATH,
                                     in_procedure("        Debug.Print CreateObject(ProgId)"),
                                     "CreateObject creates an object no check can see"),
+    "create-object-concatenated": (CORE_PATH, in_procedure(
+        '        Set Seen = CreateObject("Scripting.Dictionary" & Suffix)'),
+        "CreateObject creates an object no check can see"),
+    "create-object-statement-concatenated": (CORE_PATH, in_procedure(
+        '        CreateObject "Scripting.Dictionary" & Suffix'),
+        "CreateObject creates an object no check can see"),
+    "create-object-on-a-server": (CORE_PATH, in_procedure(
+        '        Set Seen = CreateObject("Scripting.Dictionary", Server)'),
+        "CreateObject creates an object no check can see"),
     "create-object-statement": (CORE_PATH, in_procedure('        CreateObject "Word.Application"'),
                                 "CreateObject creates an object no check can see"),
     "get-object-statement": (CORE_PATH, in_procedure('        GetObject , "Excel.Application"'),
