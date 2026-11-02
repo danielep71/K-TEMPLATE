@@ -144,6 +144,7 @@ inherited policies may impose additional restrictions.
 | `README.md` | **Adapt** | Replace the MyTemplate title and introduction with the project's purpose, installation and usage. Keep or replace setup links deliberately. |
 | `LICENSE` | **Keep or replace** | MPL-2.0 by default. The integrity workflow requires a non-empty `LICENSE`. |
 | `docs/VBA_HOUSE_STYLE.md`, `docs/REPOSITORY_STRUCTURE.md`, `docs/PUBLIC_API.txt`, `INSTALLATION.md` | **Keep and adapt** | VBA naming, contracts, errors and cleanup; component locations and dependency direction; the supported API inventory; import and export. Replace `<REGIME>` with the project's short name, and adapt the host policy. |
+| `RELEASING.md`, `CHANGELOG.md`, `docs/release/`, `tools/check_changelog.py`, `tests/test_check_changelog.py` | **Keep and adapt** | The release process, the changelog, and the certification and closeout records. Replace the changelog's entries and its link references with the new repository's: **Repository integrity** fails while a link reference points to another repository. Do not create `VERSION` before the first release. |
 | `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts and validation plan. Replace each illustrative row with the project's entries as decisions are taken. |
 | `docs/licenses/` | **Keep** | Notice and license texts for the files listed in `THIRD_PARTY_NOTICES.txt`, which keep the license the notice states for them (MPL-2.0 or MIT) whatever license you choose. If you remove a listed file, remove it from the notice too. |
 | `docs/repo_governance/SETTINGS.md` | **Keep and maintain** | Records the adopted baseline. The integrity workflow explicitly requires this file. |
@@ -176,8 +177,8 @@ utilities. Keep them in the source template so future repositories receive them.
    and actionlint, the **Run repository tests**, Ruff, mypy, actionlint and label
    automation steps, the existing required-document and whitespace checks, and
    the template-cleanup checks: the template-only section, the issue contact
-   links, the README traffic badges, Dependabot's target branches and CodeQL's
-   default branch. Keep `.github/workflows/codeql.yml`: it is not part of the
+   links, the README traffic badges, the changelog, Dependabot's target
+   branches and CodeQL's default branch. Keep `.github/workflows/codeql.yml`: it is not part of the
    setup tooling.
    The remaining tests in `tests/` (label catalogue, issue triage, workflow
    controls, quality gates, Markdown links and traffic history) stay after the
