@@ -163,6 +163,12 @@ is not part of this baseline: the CodeQL workflow
 default setup off, which would reject the workflow's results. On a private
 repository the workflow needs GitHub Code Security and the repository variable
 `CODE_SCANNING` set to `enabled`; without them it skips the analysis.
+The OpenSSF Scorecard workflow (`.github/workflows/scorecard.yml`) scores the
+default branch's supply-chain posture weekly and on each push to it. It
+publishes the results to the Scorecard service and to code scanning, and it is
+skipped on a private repository. A low check there, such as branch protection
+or signed releases, points to a setting of this baseline or of the release
+process; it is not a required check.
 `Protect main` targets `~DEFAULT_BRANCH`, so it follows the default branch under
 any name. The script matches rulesets by name: renaming one in the configuration
 creates a new ruleset and leaves the old one in place.
