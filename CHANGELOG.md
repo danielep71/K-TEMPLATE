@@ -67,6 +67,9 @@ milestones and their pull requests.
 - `tools/check_binaries.py`, which **Repository integrity** runs: a tracked
   binary file outside the approved paths fails unless
   `.github/binary-allowlist.json` lists it with its current SHA-256 (#113).
+- `tools/check_derivations.py`, which **Repository integrity** runs: it runs
+  the derivation scripts named by expected values and compares their results
+  within tolerance, with an illustrative script for the example case (#115).
 
 ### Changed
 

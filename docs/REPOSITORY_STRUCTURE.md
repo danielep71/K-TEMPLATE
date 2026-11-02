@@ -25,7 +25,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `tests/` | Python tests of the repository tooling (`test_*.py`) | Present |
 | `tests/modules/` | VBA test modules | Reserved |
 | `tests/fixtures/`, `tests/expected/` | Synthetic inputs and expected results in the [test-case format](methodology/TEST_CASES.md) | Present, with one illustrative case |
-| `tests/derivations/` | Scripts that compute expected values from the documented method | Reserved |
+| `tests/derivations/` | Scripts that compute expected values from the documented method ([derivation scripts](methodology/TEST_CASES.md#derivation-scripts)) | Present, with one illustrative script |
 | `tools/` | Repository checks, setup and build tooling, in Python | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
 | `test-results/` | Disposable output of local and CI runs | Ignored by Git |
