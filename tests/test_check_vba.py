@@ -1293,6 +1293,10 @@ Public Function Total( _
         For Each Extra In Items
         Next Extra
         If Value > 0 Then mCount = slA Else mCount = LIMIT
+        If Value > 1 Then mCount = 1: mCount = 2 Else mCount = 3: Calls = 0
+        Dim Settings As Long, Letter As Long, Reset As Long
+        Settings = 1: Letter = 2
+        Set Items = Nothing
         Mid$(Label, 1, 1) = "z"
         Calls = Calls + 1
         Total = Value
@@ -1338,6 +1342,14 @@ IDENTIFIERS_INVALID = {
                                 "End Sub\n", "i is assigned in Run but not declared"),
     "assignment-after-then": ("Public Sub Run()\n        If True Then Missing = 1\nEnd Sub\n",
                               "Missing is assigned in Run but not declared"),
+    "assignment-after-else-past-a-colon": (
+        "Public Sub Run()\n        Dim x As Long\n"
+        "        If True Then x = 1: x = 2 Else Missing = 3\nEnd Sub\n",
+        "Missing is assigned in Run but not declared"),
+    "call-after-else-past-a-colon": (
+        "Public Sub Run()\n        Dim x As Long\n"
+        "        If True Then x = 1: x = 2 Else Gone 3\nEnd Sub\n",
+        "Gone is called in Run"),
     "a-declaration-only-in-an-inactive-branch": (
         "Public Sub Run()\n#If Not VBA7 Then\n        Dim Legacy As Long\n#End If\n"
         "        Legacy = 1\nEnd Sub\n",

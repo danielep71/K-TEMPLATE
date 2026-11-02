@@ -72,7 +72,7 @@ ENUM_MEMBER = re.compile(rf"^\s*(?:\[(?P<bracketed>[^\]]+)\]|(?P<name>{NAME}))\s
 FORM_CONTROL = re.compile(rf"^\s*Begin\s+\S+\s+(?P<name>{NAME})\s*$", re.I)
 LABEL = re.compile(rf"^\s*(?:(?P<name>{NAME})|\d+):(?!=)")
 LINE_NUMBER = re.compile(r"^\s*\d+\s+")
-LEAD = re.compile(rf"^\s*(?P<keyword>Let|Set|LSet|RSet)?\s*(?P<name>{NAME}){SUFFIX}", re.I)
+LEAD = re.compile(rf"^\s*(?:(?P<keyword>Let|Set|LSet|RSet)\s+)?(?P<name>{NAME}){SUFFIX}", re.I)
 FOR = re.compile(rf"^\s*For\s+(?:Each\s+)?(?P<name>{NAME}){SUFFIX}\b", re.I)
 CALL = re.compile(rf"^\s*Call\s+(?P<name>{NAME}){SUFFIX}\s*(?P<rest>.*)$", re.I)
 SINGLE_LINE_IF = re.compile(r"^\s*If\b(?P<condition>.*?)\bThen\b(?P<tail>.*)$", re.I)
@@ -167,6 +167,12 @@ def closing_parenthesis(text: str, start: int) -> int | None:
     return None
 
 
+def single_line_if(statement: str) -> bool:
+    """Whether ``statement`` is an If with a statement after its Then."""
+    match = SINGLE_LINE_IF.match(statement)
+    return match is not None and bool(match.group("tail").strip())
+
+
 def statements(source: str) -> Iterator[tuple[int, str]]:
     """``(line, statement)`` of each statement, strings blanked, labels removed."""
     for line, _, kind, code in logical_units(source.split("\n"), blank_strings=True):
@@ -176,8 +182,14 @@ def statements(source: str) -> Iterator[tuple[int, str]]:
         if label and (label.group("name") or "").casefold() not in STATEMENT_WORDS:
             code = code[label.end():]
         code = LINE_NUMBER.sub("", code, count=1)
-        for statement in split_statements(code):
-            if statement:
+        parts = split_statements(code)
+        # In a single-line If, a colon separates the statements of a branch
+        # and Else starts the other branch: split there too, so that no
+        # branch is read as part of the statement before it.
+        if any(single_line_if(part) for part in parts):
+            parts = [piece for part in parts for piece in ELSE.split(part)]
+        for statement in parts:
+            if statement.strip():
                 yield line, statement
 
 
