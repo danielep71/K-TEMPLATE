@@ -20,7 +20,8 @@ neither a commit log nor release evidence. **No version has been released.**
   release contains.
 - Entries move into a dated section only when a release is prepared, as
   [RELEASING.md](RELEASING.md) describes. A published section is not
-  rewritten; a demonstrable error is corrected with a dated note.
+  rewritten; a demonstrable error is corrected in review, with a line
+  `Corrected after release on YYYY-MM-DD: <reason>` in that section.
 
 <a id="date-and-version-rules"></a>
 
@@ -30,7 +31,9 @@ neither a commit log nor release evidence. **No version has been released.**
 references and `VERSION`, and that this introduction, the *Current status* of
 [RELEASING.md](RELEASING.md#current-status) and the README describe the same
 release state; **Repository integrity** also checks that every link reference
-points to this repository. What a version number means is checked
+points to this repository. Once a release's tag exists, its section must equal
+that section at the tag, unless it holds the dated correction line above; a
+correction is reported as a note. What a version number means is checked
 in review.
 
 | Rule | Standard |
@@ -145,6 +148,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/check_changelog.py` freezes released sections: once the tag
+  `vX.Y.Z` exists, the section must equal its content at the tag. A section
+  with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may
+  differ, and the difference is reported as a note. Deleting or renaming a
+  tagged section fails. A release without a tag yet, or a copy without Git
+  history, is a note (#172).
 - The workflow control tests check every `uses:` reference a workflow can
   reach, not only those of job steps. That covers job-level calls of reusable
   workflows, local actions followed into their metadata, and Docker images,
