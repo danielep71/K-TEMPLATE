@@ -86,7 +86,13 @@
         "tools/check_vba_jumps.py",
         "tools/check_vba_public_api.py",
         "tools/check_vba_dependencies.py",
-        "tests/test_check_vba.py"
+        "tests/test_check_vba.py",
+        "tests/modules/TEST_Harness.bas",
+        "tests/modules/TEST_Examples.bas",
+        "tools/check_excel_run.py",
+        "tests/test_check_excel_run.py",
+        "tests/test_vba_harness.py",
+        "docs/methodology/TEST_HARNESS.md"
       ]
     },
     {

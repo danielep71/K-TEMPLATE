@@ -65,7 +65,9 @@ A version may be published only when:
    open on the default branch has been fixed or assessed in the
    certification record;
 4. the candidate's VBA is imported, compiled and run in Excel on the
-   [supported host](INSTALLATION.md#%EF%B8%8F-host-policy), and the run is recorded in
+   [supported host](INSTALLATION.md#%EF%B8%8F-host-policy), the run is
+   [recorded](INSTALLATION.md#recording-an-excel-run) and passes
+   `tools/check_excel_run.py` against the candidate, and the result is in
    the [release certification](docs/release/RELEASE_CERTIFICATION.md);
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
@@ -129,8 +131,20 @@ into an issue for the release, build the workbook from the candidate as
 [INSTALLATION.md](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
 describes, run the regression cases of the
 [validation plan](docs/methodology/VALIDATION_PLAN.md), and fill in the
-record from the runs themselves. If a case fails, fix it through a task pull
-request and start again at step 2.
+record from the runs themselves.
+
+Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md)
+as [recording an Excel run](INSTALLATION.md#recording-an-excel-run)
+describes, then check the evidence folder against the candidate:
+
+```sh
+python tools/check_excel_run.py test-results/excel-run --commit CANDIDATE_SHA
+```
+
+It must end with `excel-run: PASS`. This check is a release gate, not a
+**Repository integrity** step, because the evidence exists only for a
+candidate. If a case or the check fails, fix it through a task pull request
+and start again at step 2.
 
 ### 5. Review the distribution
 

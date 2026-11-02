@@ -60,6 +60,16 @@ milestones and their pull requests.
 
 ### Added
 
+- A VBA test harness and an example suite in `tests/modules/`, with a
+  certification entry point. It refuses state left by an earlier run,
+  reports completeness apart from the verdict, and checks that Excel's state,
+  the open workbooks and the active window are unchanged. It writes every log
+  before it raises, and checks that each deliberate failure reaches its
+  caller. `tools/check_excel_run.py` checks the evidence of an Excel run
+  against one commit, without Excel, and rejects an incomplete run. The
+  [harness guide](docs/methodology/TEST_HARNESS.md) and
+  [recording an Excel run](INSTALLATION.md#recording-an-excel-run) describe
+  them, and the check is a release gate (#79).
 - Five static checks of exported VBA source, which **Repository integrity**
   runs:
   - placement, names, encoding, options, layout and storage;
