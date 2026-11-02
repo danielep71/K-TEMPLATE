@@ -19,7 +19,15 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from vba_lexer import Finding, facade_pattern, read_component, report, tracked_files
+from vba_lexer import (
+    Finding,
+    facade_pattern,
+    logical_units,
+    read_component,
+    report,
+    split_statements,
+    tracked_files,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 COMPONENT_SUFFIXES = frozenset({".bas", ".cls", ".frm"})
@@ -50,11 +58,11 @@ APPROVED_WORKBOOKS: frozenset[str] = frozenset({"src/workbook/Template.xlsx"})
 SOURCE_COPIES = "docs/methodology/sources/"
 
 VB_NAME = re.compile(r'^Attribute VB_Name = "([^"]*)"[ \t]*$', re.M)
-OPTION_EXPLICIT = re.compile(r"^[ \t]*Option[ \t]+Explicit[ \t]*(?:'.*)?$", re.M | re.I)
-OPTION_PRIVATE = re.compile(r"^[ \t]*Option[ \t]+Private[ \t]+Module[ \t]*(?:'.*)?$",
-                            re.M | re.I)
+# Option statements, matched against comment-free statements.
+OPTION_EXPLICIT = re.compile(r"Option\s+Explicit", re.I)
+OPTION_PRIVATE = re.compile(r"Option\s+Private\s+Module", re.I)
 # Explicit array bounds, never Option Base (docs/VBA_HOUSE_STYLE.md).
-OPTION_BASE = re.compile(r"^[ \t]*Option[ \t]+Base\b", re.M | re.I)
+OPTION_BASE = re.compile(r"Option\s+Base\b", re.I)
 FRX_REFERENCE = re.compile(r'"([^"\n]+\.frx)":([0-9A-Fa-f]+)')
 REM_STATEMENT = re.compile(r"Rem(?=[ \t]|$)", re.I)
 LINE_NUMBER = re.compile(r"[ \t]*\d+(?=[ \t])")
@@ -172,14 +180,16 @@ def content(root: Path, path: str, tracked: set[str], names: dict[str, str]) -> 
     suffix = Path(path).suffix.lower()
     if suffix == ".bas" and not text.startswith('Attribute VB_Name = "'):
         findings.append(Finding(path, 1, "a .bas export starts with its Attribute VB_Name line"))
-    if not OPTION_EXPLICIT.search(text):
+    # Comments, continued ones included, are not statements.
+    options = [(line, statement) for line, _, kind, code in logical_units(text.split("\n"))
+               if kind == "code" for statement in split_statements(code)]
+    if not any(OPTION_EXPLICIT.fullmatch(statement) for _, statement in options):
         findings.append(Finding(path, None, "missing Option Explicit"))
     if suffix == ".bas" and path.startswith(PRIVATE_MODULE_HOMES) and \
-            not OPTION_PRIVATE.search(text):
+            not any(OPTION_PRIVATE.fullmatch(statement) for _, statement in options):
         findings.append(Finding(path, None, "missing Option Private Module"))
-    findings.extend(Finding(path, text[:match.start()].count("\n") + 1,
-                            "Option Base; declare explicit array bounds")
-                    for match in OPTION_BASE.finditer(text))
+    findings.extend(Finding(path, line, "Option Base; declare explicit array bounds")
+                    for line, statement in options if OPTION_BASE.match(statement))
     findings.extend(Finding(path, number, "string literal not closed")
                     for number in unclosed_literals(text))
     findings.extend(layout(path, text))

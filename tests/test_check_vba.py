@@ -270,6 +270,20 @@ class SourceTest(unittest.TestCase):
                                            f"Option Explicit\nOption Base {base}\n"),
                                    "Option Base; declare explicit array bounds")
 
+    def test_options_in_comments_do_not_count(self) -> None:
+        core = "src/core/CORE_Validation.bas"
+        continued = "Option Explicit\n' An example _\nOption Base 1\n"
+        self.assertFalse(any("Option Base" in item for item in
+                             self.findings(changed(core, "Option Explicit\n", continued))))
+        commented = "' Note _\nOption Explicit\n"
+        self.assertFinding(changed(core, "Option Explicit\n", commented),
+                           "missing Option Explicit")
+        self.assertFinding(changed(core, "Option Private Module\n",
+                                   "' Note _\nOption Private Module\n"),
+                           "missing Option Private Module")
+        self.assertFinding(changed(core, "Option Explicit\n", "' Option Explicit\n"),
+                           "missing Option Explicit")
+
     def test_ascii_only(self) -> None:
         self.assertFinding(changed("src/core/CORE_Validation.bas", "Err.Description",
                                    "Err.Description & \"\udce9\""), "non-ASCII byte 0xE9")
