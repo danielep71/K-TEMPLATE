@@ -98,6 +98,7 @@ def template_only(context: Context) -> list[Finding]:
 
 
 def contact_links(context: Context) -> list[Finding]:
+    """The issue forms' contact links point to this repository."""
     path = ".github/ISSUE_TEMPLATE/config.yml"
     if not (context.root / path).is_file():
         return []
@@ -109,6 +110,7 @@ def contact_links(context: Context) -> list[Finding]:
 
 
 def traffic_badges(context: Context) -> list[Finding]:
+    """The README's traffic badges read this repository's traffic."""
     path = context.root / "README.md"
     if not path.is_file():
         return []
@@ -119,6 +121,7 @@ def traffic_badges(context: Context) -> list[Finding]:
 
 
 def dependabot_branches(context: Context) -> list[Finding]:
+    """Every Dependabot target-branch exists."""
     path = ".github/dependabot.yml"
     if not (context.root / path).is_file():
         return []
@@ -134,7 +137,7 @@ def dependabot_branches(context: Context) -> list[Finding]:
 
 
 def codeql_default_branch(context: Context) -> list[Finding]:
-    """Branch filters cannot name the default branch, so codeql.yml lists it."""
+    """codeql.yml lists the default branch, which branch filters cannot name."""
     path = ".github/workflows/codeql.yml"
     if not (context.root / path).is_file():
         return []
@@ -155,6 +158,7 @@ def codeql_default_branch(context: Context) -> list[Finding]:
 
 
 def required_documents(context: Context) -> list[Finding]:
+    """The documents the repository requires exist and are not empty."""
     return [(name, "is missing or empty") for name in REQUIRED_DOCUMENTS
             if not (context.root / name).is_file() or not (context.root / name).stat().st_size]
 
@@ -216,6 +220,7 @@ def checks(context: Context) -> list[Check]:
         Check("test-cases", [python, "tools/check_test_cases.py"]),
         Check("derivations", [python, "tools/check_derivations.py"]),
         Check("changelog", changelog),
+        Check("generated-docs", [python, "tools/render_docs.py", "--check"]),
         Check("markdown-links", [python, "tools/check_links.py"]),
         Check("dependabot-target-branches", function=dependabot_branches),
         Check("codeql-default-branch", function=codeql_default_branch,

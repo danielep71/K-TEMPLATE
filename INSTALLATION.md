@@ -170,17 +170,19 @@ TEST_Examples.RunExampleTests
 It runs the example suite through `TEST_Harness` and writes one record per
 line. A passing run ends with:
 
+<!-- BEGIN generated: example-suite-results -->
 ```text
 RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=12; assertions=27; failures=0; cleanup=PASS; recovery=NONE
 ```
 
-Anything else, or the error *Suite examples did not pass*, is a failure. Two
-more entry points show the failure paths and are expected to fail:
+Anything else, or the error *Suite examples did not pass*, is a failure.
+Two more entry points show the failure paths and are expected to fail:
 
 | Entry point | Expected end |
 | --- | --- |
 | `TEST_Examples.RunExampleTestsWithInjectedFailure` | `RESULT=FAIL`, `operation=FAIL`, `completeness=COMPLETE`, `failures=1`, then *Suite examples did not pass* |
 | `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=11`, `assertions=25`, `failures=1`, then *Suite examples did not pass* |
+<!-- END generated: example-suite-results -->
 
 - **Complete log.** The Immediate window keeps only its last 200 lines. To
   keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`

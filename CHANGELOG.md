@@ -65,6 +65,11 @@ milestones and their pull requests.
   **Repository integrity**. It builds a reproducible source bundle with its
   checksums, attests their build provenance, and drafts the GitHub Release.
   A manual run rehearses a ref without attesting or releasing (#161).
+- `tools/render_docs.py`, which renders documentation facts the code already
+  knows into marked blocks: the list of **Repository integrity** checks in
+  `CONTRIBUTING.md` and the example suite's expected results in
+  `INSTALLATION.md`. **Repository integrity** fails while a block is stale
+  (#163).
 - An OpenSSF Scorecard workflow, which scores the default branch's
   supply-chain posture weekly and on each push to it. It publishes to code
   scanning and the Scorecard service on public repositories only (#164).
