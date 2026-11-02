@@ -38,7 +38,12 @@ scripts and the pinned configuration parser for the workflow control tests:
 python -m pip install --require-hashes -r .github/requirements.txt
 python -m unittest discover -s tests
 python tools/check_links.py
+python tools/format_vba.py --check
 ```
+
+`python tools/format_vba.py --write` fixes what the last command reports;
+re-import a rewritten module into the VBE before committing
+([house style](docs/VBA_HOUSE_STYLE.md#source-representation)).
 
 Ruff, strict mypy and actionlint also run in **Repository integrity**; the
 [setup guide](docs/setup/REPOSITORY_SETUP.md#-maintain-the-baseline) explains how

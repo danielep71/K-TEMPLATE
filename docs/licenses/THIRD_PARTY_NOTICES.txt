@@ -105,3 +105,16 @@ The license text, with its copyright notice, is included in MIT.txt in this
 directory. Modifications restrict pushes and manual runs to the default
 branch, grant issues: read so the script can read pull requests on a private
 repository, and add local documentation references.
+
+The following files were adapted from danielep71/VBA-EXCEL_UI
+(https://github.com/danielep71/VBA-EXCEL_UI) under the MIT License:
+
+tools/format_vba.py
+tests/test_format_vba.py
+
+The license text is included in MIT.txt in this directory; that repository's
+copyright line reads "Copyright (c) 2026 Daniele". Modifications keep the
+literal-aware comment scan and the self-test cases as unit tests, replace the
+project's banner, label and declaration-alignment rules with the layout rules
+of docs/VBA_HOUSE_STYLE.md, keep the header the VBE writes in class and form
+files, and find the source files under the template's source directories.

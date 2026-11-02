@@ -10,7 +10,7 @@ and the evidence they require, show that the figures are right.
 | [📚 Sources](SOURCES.md) | Every regulatory and technical source a rule relies on, the version used, and whether it has been verified. |
 | [🧾 Data contract](DATA_CONTRACT.md) | The input datasets, their layout, units and validation, and how an import is traced. |
 | [🧮 Calculation contracts](CALCULATION_CONTRACTS.md) | For each calculation: inputs, rules with their sources, outputs, limits and failure behaviour. |
-| [✅ Validation plan](VALIDATION_PLAN.md) | Who checks what, the independent checks for each calculation, and what an evidence record contains. |
+| [✅ Validation plan](VALIDATION_PLAN.md) | Who checks what, the independent checks for each calculation, what an evidence record contains, and which Excel host behaviour has been measured. |
 | [🧪 Numerical test cases](TEST_CASES.md) | The format of the synthetic inputs and expected results, with their provenance and tolerances, that the checks enforce. |
 | [📊 Workbook contract](WORKBOOK_CONTRACT.md) | The workbook's sheets, code names, defined names and areas, what each operation writes, and how a failure marks earlier results. |
 

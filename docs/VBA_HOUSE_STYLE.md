@@ -144,6 +144,22 @@ each failed restoration, and a primary and cleanup failure together.
 - A generated component names its generator and is regenerated, never edited
   by hand.
 
+`python tools/format_vba.py --write` applies the mechanical part of these
+rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
+`examples/modules/`:
+
+- CRLF line endings and one final line ending;
+- no trailing white space, and four spaces for each indentation tab;
+- procedure declarations, their `End` statements and labels at the outer
+  level;
+- two blank lines after each procedure's `End` statement.
+
+It never changes a string literal, and it keeps the `VERSION`, `BEGIN`, `END`,
+`Object` and `Attribute` lines that the VBE writes. **Repository integrity**
+runs it with `--check`. Re-import a module it rewrote into the VBE before
+committing, so that the workbook and the source stay the same. It neither
+compiles nor checks the other rules of this guide.
+
 Changed VBA is imported, compiled and run on the supported host before its
 behaviour is accepted. Repository checks are not compilation. Record the full
 commit, the Excel build and bitness, the references and the results, as the

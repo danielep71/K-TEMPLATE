@@ -27,8 +27,10 @@ neither a commit log nor release evidence. **No version has been released.**
 ### Date and version rules
 
 `python tools/check_changelog.py` checks the headings, dates, order, link
-references and `VERSION`; **Repository integrity** also checks that every link
-reference points to this repository. What a version number means is checked
+references and `VERSION`, and that this introduction, the *Current status* of
+[RELEASING.md](RELEASING.md#current-status) and the README describe the same
+release state; **Repository integrity** also checks that every link reference
+points to this repository. What a version number means is checked
 in review.
 
 | Rule | Standard |
@@ -58,6 +60,11 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/format_vba.py`, which brings exported VBA source into the
+  house-style layout with `--write`, and which **Repository integrity** runs
+  with `--check`. It changes only line endings, trailing white space,
+  indentation tabs, the level of procedure and label lines and the blank
+  lines between procedures, never a string literal (#130).
 - A release process: [RELEASING.md](RELEASING.md), this changelog, a release
   certification record and a milestone closeout record under `docs/release/`,
   and `tools/check_changelog.py`, which **Repository integrity** runs (#69).
@@ -75,12 +82,31 @@ milestones and their pull requests.
   within tolerance, once per variant for a file-based case, with an
   illustrative script for each example case (#115, #117).
 
+- A host behaviour register in `docs/methodology/VALIDATION_PLAN.md`: each
+  Excel or VBE behaviour that the code relies on is `assumed` or `measured`,
+  with the probe, the host and the result. Assumed entries are listed as a
+  limit in the release certification (#133).
 - `docs/methodology/WORKBOOK_CONTRACT.md`, a workbook contract to fill in: the
   sheets and code names, defined names, areas, operations, status after a
   failure, and what the build creates (#118).
 
 ### Changed
 
+- `tools/check_changelog.py` also fails when the prose describes another
+  release state than the changelog: the "No version has been released"
+  sentence, the *Current status* of `RELEASING.md`, placeholder lines such as
+  `TBD`, and a "Release Candidate" mention or unchecked task in the README
+  (#131). A status row must name the newest release as a whole version
+  number, so `10.2.0` does not pass for `0.2.0` (#142).
+- The pull request template has an *Excel run* block for changes that need
+  Excel: the commit, host, compile result, suite, evidence, and a completion
+  state that is `PASS`, `FAIL`, `INCOMPLETE` or `NOT RUN`.
+  [PULL_REQUESTS.md](docs/repo_governance/PULL_REQUESTS.md#excel-run) defines
+  the states (#134).
+- `INSTALLATION.md` explains how to upgrade to a new revision by rebuilding
+  the workbook and carrying its inputs across, how to diagnose common import
+  and run failures, and what removing the workbook's components leaves
+  behind (#132).
 - `docs/licenses/provenance.json` records the source repository, license and
   revision of each adapted file, or why the revision is not recorded; a test
   keeps it in step with the third-party notice (#116).
