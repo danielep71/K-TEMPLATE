@@ -60,6 +60,11 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/format_vba.py`, which brings exported VBA source into the
+  house-style layout with `--write`, and which **Repository integrity** runs
+  with `--check`. It changes only line endings, trailing white space,
+  indentation tabs, the level of procedure and label lines and the blank
+  lines between procedures, never a string literal (#130).
 - A release process: [RELEASING.md](RELEASING.md), this changelog, a release
   certification record and a milestone closeout record under `docs/release/`,
   and `tools/check_changelog.py`, which **Repository integrity** runs (#69).
