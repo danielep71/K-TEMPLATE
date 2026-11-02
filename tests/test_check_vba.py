@@ -27,7 +27,7 @@ import check_vba_dependencies  # noqa: E402
 import check_vba_jumps  # noqa: E402
 import check_vba_public_api  # noqa: E402
 import check_vba_source  # noqa: E402
-from vba_lexer import Finding, strip_code  # noqa: E402
+from vba_lexer import Finding, logical_units, strip_code  # noqa: E402
 
 CORE = '''Attribute VB_Name = "CORE_Validation"
 Option Explicit
@@ -299,6 +299,8 @@ class SourceTest(unittest.TestCase):
 
     def test_workbooks_are_not_committed(self) -> None:
         self.assertFinding({"src/workbook/Workbook.xlsm": b"PK\x03\x04"}, "workbook committed")
+        source = {"docs/methodology/sources/Annex.xlsx": b"PK\x03\x04"}
+        self.assertFalse(any("workbook committed" in item for item in self.findings(source)))
 
     def test_main_exit_codes(self) -> None:
         for files, expected in ((VALID, 0), ({"src/Stray.bas": CORE}, 1)):
@@ -431,6 +433,12 @@ End Sub
 
 Private Sub Second()
 Shared:
+        Exit Sub
+End Sub
+''',
+    "continued-comment": '''Private Sub First()
+        ' A comment that continues _
+          GoTo Missing
         Exit Sub
 End Sub
 ''',
@@ -754,6 +762,14 @@ class PublicApiTest(unittest.TestCase):
                 "Public Function DEMO_Echo(ByVal Value As Long) As Long\nEnd Function\n"
         self.assertFinding(api_files(DEMO_Other=other), "public name 'DEMO_Echo' collides with "
                                                        "DEMO_Api.DEMO_Echo (Function)")
+        # Every standard module shares the project's namespace, not only the facade.
+        core = 'Attribute VB_Name = "CORE_Twin"\nOption Explicit\nOption Private Module\n' \
+               "Public Function Inside() As Long\nEnd Function\n"
+        self.assertFinding({**api_files(), "src/core/CORE_Twin.bas": core},
+                           "public name 'Inside' collides with CORE_Internal.Inside (Function)")
+        echo = core.replace("Inside", "DEMO_Echo")
+        self.assertFinding({**api_files(), "src/core/CORE_Twin.bas": echo},
+                           "collides with")
 
     def test_no_public_globals_or_declares_in_standard_modules(self) -> None:
         self.assertFinding(api_files(API_FACADE.replace("Private mHidden As Long",
@@ -928,6 +944,11 @@ Private Enum Field
     Load = 2
     Dir = 3
 End Enum
+''')),
+    "continued-comment": (CORE_PATH, core_module('''Public Sub Work()
+        ' A comment that continues _
+          MsgBox 1
+End Sub
 ''')),
     "tests-and-facade-are-not-restricted": ("tests/modules/TEST_Fixture.bas", module('''
 Public Sub RunAll()
@@ -1216,6 +1237,13 @@ class LexerTest(unittest.TestCase):
                          "Debug.Print         : GoTo y")
         self.assertEqual(strip_code("x = ['GoTo z'!A1]: GoTo y", blank_strings=True),
                          "x = [" + " " * len("'GoTo z'!A1") + "]: GoTo y")
+
+    def test_continued_comment_lines_are_comment(self) -> None:
+        lines = ["x = 1 ' note _", "  GoTo Missing _", "  MsgBox 1", "y = 2", "' plain _"]
+        self.assertEqual(logical_units(lines), [(1, 3, "code", "x = 1"), (4, 4, "code", "y = 2"),
+                                                (5, 5, "code", "")])
+        # A continuation in code still joins the lines.
+        self.assertEqual(logical_units(["x = 1 + _", "  2"]), [(1, 2, "code", "x = 1 + 2")])
 
 
 class MainTest(unittest.TestCase):

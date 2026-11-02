@@ -178,13 +178,25 @@ def logical_units(lines: list[str], *, blank_strings: bool = False
     """``(first line, last line, kind, code)`` per logical line, numbered from 1.
 
     ``kind`` is ``"directive"`` for a conditional-compilation line (starting
-    with ``#``) and ``"code"`` otherwise; continuation lines are joined.
+    with ``#``) and ``"code"`` otherwise; continuation lines are joined. A
+    comment that ends in " _" continues on the next physical line: those
+    lines are comment, not code, and extend the unit the comment belongs to.
     """
     units: list[tuple[int, int, str, str]] = []
     buffer: list[str] = []
     start = 0
+    in_comment = False
     for number, raw in enumerate(lines, start=1):
+        if in_comment:
+            in_comment = bool(CONTINUATION.search(raw))
+            if units and not buffer:
+                first, _, kind, code = units[-1]
+                units[-1] = (first, number, kind, code)
+            continue
         code = strip_code(raw, blank_strings=blank_strings)
+        # strip_code keeps every column before a comment, so a shorter
+        # result means the line ends in a comment.
+        in_comment = len(code) < len(raw.rstrip()) and bool(CONTINUATION.search(raw))
         if not buffer and code.strip().startswith("#"):
             units.append((number, number, "directive", code.strip()))
             continue

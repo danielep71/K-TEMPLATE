@@ -143,14 +143,12 @@ class Scan:
     """Declarations and findings of one component in one environment."""
 
     path: str
-    public: bool
     declarations: list[Declaration] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
 
     def declare(self, kind: str, name: str, signature: str, line: int) -> None:
-        if self.public:
-            self.declarations.append(Declaration(Path(self.path).stem, kind, name, signature,
-                                                 self.path, line))
+        self.declarations.append(Declaration(Path(self.path).stem, kind, name, signature,
+                                             self.path, line))
 
     def reject(self, line: int, message: str) -> None:
         self.findings.append(Finding(self.path, line, message))
@@ -193,8 +191,8 @@ def scan_statement(scan: Scan, line: int, code: str) -> None:
         scan.declare(outcome[0], outcome[1], norm(code), line)
 
 
-def scan_source(path: str, text: str, public: bool) -> Scan:
-    scan = Scan(path, public)
+def scan_source(path: str, text: str) -> Scan:
+    scan = Scan(path)
     items = statements(text)
     inside = False
     index = 0
@@ -226,7 +224,7 @@ def scan_component(path: str, text: str) -> tuple[dict[Declaration, list[str]], 
     sources, findings = reachable_sources(path, text)
     declarations: dict[Declaration, list[str]] = {}
     for environment, source in sources.items():
-        scan = scan_source(path, source, path.startswith(PUBLIC_HOME))
+        scan = scan_source(path, source)
         findings.extend(item for item in scan.findings if item not in findings)
         for declaration in scan.declarations:
             declarations.setdefault(declaration, []).append(environment)
@@ -328,11 +326,15 @@ def check(root: Path) -> tuple[list[Finding], int, int]:
         found, errors = scan_component(path, read_component(root, path))
         declarations.update(found)
         findings.extend(errors)
+    # Collisions span every home, since Excel compiles them into one project;
+    # only the facade's declarations are supported API.
     findings.extend(collisions(declarations))
+    supported = {declaration: environments for declaration, environments
+                 in declarations.items() if declaration.path.startswith(PUBLIC_HOME)}
     rows, signatures, errors = read_inventory(root)
     findings.extend(errors)
-    findings.extend(inventory_findings(declarations, rows, signatures))
-    return findings, len(components), len(declarations)
+    findings.extend(inventory_findings(supported, rows, signatures))
+    return findings, len(components), len(supported)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

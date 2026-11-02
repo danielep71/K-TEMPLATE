@@ -41,11 +41,13 @@ HOMES = tuple(sorted({home for home, _ in NAMING}))
 # Standard modules whose Public procedures must stay inside the project.
 PRIVATE_MODULE_HOMES = ("src/core/", "tests/modules/")
 MAX_NAME = 31  # the VBE rejects a longer component name
-# Workbooks are build outputs. Only the macro-free template may be committed
+# Workbooks are build outputs. Only the macro-free template and the
+# byte-preserved copies of regulatory sources may be committed
 # (docs/REPOSITORY_STRUCTURE.md, Locations).
 WORKBOOK_SUFFIXES = frozenset({".xls", ".xlsx", ".xlsm", ".xlsb", ".xlt", ".xltx", ".xltm",
                                ".xlam", ".xla", ".xlw"})
 APPROVED_WORKBOOKS: frozenset[str] = frozenset({"src/workbook/Template.xlsx"})
+SOURCE_COPIES = "docs/methodology/sources/"
 
 VB_NAME = re.compile(r'^Attribute VB_Name = "([^"]*)"[ \t]*$', re.M)
 OPTION_EXPLICIT = re.compile(r"^[ \t]*Option[ \t]+Explicit[ \t]*(?:'.*)?$", re.M | re.I)
@@ -219,10 +221,12 @@ def check(root: Path) -> tuple[list[Finding], int]:
         suffix = Path(path).suffix.lower()
         if suffix in COMPONENT_SUFFIXES or suffix == ".frx":
             findings.extend(placement(path, naming))
-        if suffix in WORKBOOK_SUFFIXES and path not in APPROVED_WORKBOOKS:
+        if suffix in WORKBOOK_SUFFIXES and path not in APPROVED_WORKBOOKS and \
+                not path.startswith(SOURCE_COPIES):
             findings.append(Finding(path, None, "workbook committed; workbooks are built from "
                                                 "source, and only src/workbook/Template.xlsx "
-                                                "may be committed"))
+                                                f"and copies under {SOURCE_COPIES} may be "
+                                                "committed"))
     names: dict[str, str] = {}
     for path in components:
         findings.extend(content(root, path, tracked_set, names))
