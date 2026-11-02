@@ -51,6 +51,10 @@ records a run on the exact commit of the pull request:
 | `INCOMPLETE` | Some case did not run, for example because it was skipped or the run stopped. It is not a pass, even if every case that ran passed ([completeness policy](../methodology/TEST_CASES.md#completeness-policy)) |
 | `NOT RUN` | No Excel run was made; the *Not validated* section says why |
 
+A run recorded as [recording an Excel run](../../INSTALLATION.md#recording-an-excel-run)
+describes, and checked with `tools/check_excel_run.py` against the commit, is
+the strongest evidence; cite its report.
+
 A push to VBA source after the run makes it stale, like a review. Record a new
 run, or state `NOT RUN` for the new head. A pull request that changes none of
 these files deletes the block.

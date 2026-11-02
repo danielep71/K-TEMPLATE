@@ -211,6 +211,8 @@ def checks(context: Context) -> list[Check]:
         Check("readme-traffic-badges", function=traffic_badges, missing=no_repository),
         Check("binaries", [python, "tools/check_binaries.py"]),
         Check("vba-format", [python, "tools/format_vba.py", "--check"]),
+        *[Check(f"vba-{name.replace('_', '-')}", [python, f"tools/check_vba_{name}.py"])
+          for name in ("source", "conditionals", "jumps", "public_api", "dependencies")],
         Check("test-cases", [python, "tools/check_test_cases.py"]),
         Check("derivations", [python, "tools/check_derivations.py"]),
         Check("changelog", changelog),

@@ -1,0 +1,668 @@
+#!/usr/bin/env python3
+"""Check the evidence of an Excel run of the VBA harness against one commit.
+
+The harness runs only in Excel, by hand (INSTALLATION.md, Recording an Excel
+run). This reads what that run left in an evidence folder and checks it
+against the candidate commit, without Excel. The evidence layout, the modes
+and the supported host are configured once, in the constants below, and
+docs/methodology/TEST_HARNESS.md describes them:
+
+- source identity: the modules exported back from the workbook equal, line
+  for line, the commit's VBA components, each form's .frx equals the
+  commit's byte for byte, and none is missing or extra;
+- the three logs saved with TEST_Harness.SaveLog: each holds, record for
+  record, what the commit's suite writes in its mode (no record missing,
+  extra or out of order, no ERROR), with cleanup PASS and no recovery: the
+  normal run passes with every case and assertion; the injected-failure run
+  fails only its designated assertion, with the expected value the suite
+  injects, an actual value that differs and the same values in its ASSERT,
+  FAILURE and PRIMARY_FAILURE records; the skipped-case run lacks only the
+  last case and fails only harness.completeness; all three come from one
+  64-bit host; a normal run that is INCOMPLETE is rejected as such;
+- certification.log, written by TEST_Harness.EndCertification: each mode
+  ended as it must, the two failure modes reaching their caller as
+  ERR_TEST_FAILED, and CERTIFICATION=PASS with COMPLETE;
+- host.txt: the Windows build, the references (exactly the four supported
+  ones) and that Debug > Compile VBAProject completed;
+- with --workbook, the binding of the export to the workbook it came from:
+  export-manifest.json (tools/devbuild/export_manifest.py) records the
+  SHA-256 of the workbook and of every exported file, and the workbook's
+  build stamp names the commit. The binding is VERIFIED, FAIL, or UNVERIFIED
+  when no workbook or manifest is given; --require-binding fails anything
+  but VERIFIED.
+
+It proves only that this evidence is consistent with the commit. It does not
+run Excel, and a PASS validates no calculation of the workbook.
+"""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import posixpath
+import re
+import subprocess
+import sys
+import zipfile
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree
+
+ROOT = Path(__file__).resolve().parents[1]
+VBA_SUFFIXES = (".bas", ".cls", ".frm")
+# A form's binary resources, exported beside its .frm and compared byte for byte.
+RESOURCE_SUFFIXES = (".frx",)
+
+# Configuration: the suite, its modes and the evidence layout.
+HARNESS = "tests/modules/TEST_Harness.bas"
+EXAMPLES = "tests/modules/TEST_Examples.bas"
+SUITE = "examples"
+# Each mode's log; only NORMAL must pass, the others are deliberate failures.
+LOGS = {"NORMAL": "examples.log", "INJECTED_FAILURE": "injected.log",
+        "SKIPPED_CASE": "skipped.log"}
+MUST_PASS = frozenset({"NORMAL"})
+CERTIFICATION = "certification.log"
+EXPORTED = "exported"
+HOST = "host.txt"
+MANIFEST = "export-manifest.json"
+MANIFEST_FORMAT = "vba-export-1"
+BUILD_CONFIG = "tools/devbuild/workbook.json"
+# Configuration: the supported host (INSTALLATION.md, Host policy).
+REFERENCES = ("Visual Basic For Applications", "Microsoft Excel 16.0 Object Library",
+              "OLE Automation", "Microsoft Office 16.0 Object Library")
+OFFICE = "64-bit"
+ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
+HOST_FIELDS = ("windows", "references", "compile")
+
+VB_OBJECT_ERROR = -2147221504
+# ERR_TEST_FAILED as vbObjectError + n, or as the literal &H8004xxxx equal to it.
+TEST_FAILED = re.compile(r"^\s*Public Const ERR_TEST_FAILED\s+As Long = "
+                         r"(?:vbObjectError \+ (\d+)|&H([0-9A-F]{8}))\b", re.M | re.I)
+RECORD = re.compile(r"^([A-Z_]+)=(.*)$")
+CONSTANT = re.compile(r"^\s*Private Const (\w+)\s+As Long = (\d+)\b", re.M)
+PROCEDURE = re.compile(r"^(?:Public|Private) Sub (\w+)\(.*?^End Sub$", re.M | re.S)
+BEGIN_CASE = re.compile(r'TEST_Harness\.BeginCase "([^"]+)"')
+ASSERTION = re.compile(r'TEST_Harness\.Assert\w+ "([^"]+)"')
+CALL = re.compile(r"^\s+(Case\w+)$", re.M)
+INJECTED_VALUE = re.compile(r'If mMode = "INJECTED_FAILURE" Then\s+\w+ = ([-+.\dE]+)\s')
+
+
+@dataclass
+class Record:
+    """One log line: its key, its first value and its named fields."""
+
+    key: str
+    value: str
+    fields: dict[str, str]
+    line: int
+
+
+@dataclass
+class Suite:
+    """What the commit's example suite runs: case and assertion identifiers in order,
+    the identifiers of the last case (skipped in SKIPPED_CASE), the assertions of
+    the case whose expected value INJECTED_FAILURE changes and the value it sets."""
+
+    cases: list[str]
+    assertions: list[str]
+    last_case: list[str]
+    injected: list[str]
+    expected_cases: int
+    expected_assertions: int
+    injected_expected: str = ""
+
+
+@dataclass
+class Evidence:
+    findings: list[str] = field(default_factory=list)
+    hashes: dict[str, str] = field(default_factory=dict)
+    environment: dict[str, str] = field(default_factory=dict)
+    host: dict[str, str] = field(default_factory=dict)
+    binding: str = "UNVERIFIED"
+    binding_notes: list[str] = field(default_factory=list)
+
+
+def git(root: Path, *args: str) -> bytes:
+    completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
+    if completed.returncode:
+        raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
+    return completed.stdout
+
+
+def components(root: Path, commit: str) -> dict[str, bytes]:
+    """The commit's VBA components and form resources, by file name, as Git stores
+    them: text components with LF line ends, resources byte for byte."""
+    listed = git(root, "ls-tree", "-r", "-z", "--name-only", commit).split(b"\0")
+    paths = [item.decode("utf-8") for item in listed
+             if item.decode("utf-8").lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)]
+    return {Path(path).name: git(root, "show", f"{commit}:{path}") for path in paths}
+
+
+def parse_record(text: str, line: int) -> Record | None:
+    match = RECORD.match(text)
+    if not match:
+        return None
+    first, *rest = match.group(2).split("; ")
+    fields = {}
+    for part in rest:
+        name, _, value = part.partition("=")
+        fields[name] = value
+    if "=" in first:
+        name, _, value = first.partition("=")
+        fields[name] = value
+        first = ""
+    return Record(match.group(1), first, fields, line)
+
+
+def read_log(path: Path, problems: list[str]) -> list[Record]:
+    if not path.is_file():
+        problems.append(f"{path.name}: missing")
+        return []
+    records = []
+    for number, text in enumerate(path.read_text(encoding="utf-8", errors="replace")
+                                  .splitlines(), 1):
+        record = parse_record(text, number)
+        if record is None:
+            problems.append(f"{path.name}:{number}: not a KEY=value record")
+        else:
+            records.append(record)
+    if not records:
+        problems.append(f"{path.name}: incomplete log: no record")
+    return records
+
+
+def read_suite(source: bytes) -> Suite:
+    text = source.decode("ascii", errors="replace").replace("\r\n", "\n")
+    bodies = {match.group(1): match.group(0) for match in PROCEDURE.finditer(text)}
+    constants = {name: int(value) for name, value in CONSTANT.findall(text)}
+    cases: list[str] = []
+    assertions: list[str] = []
+    last_case: list[str] = []
+    injected: list[str] = []
+    injected_expected = ""
+    for name in CALL.findall(bodies.get("RunSuite", "")):
+        body = bodies.get(name, "")
+        case = BEGIN_CASE.findall(body)
+        names = [f"{case[0] if case else name}/{item}" for item in ASSERTION.findall(body)]
+        cases += case
+        assertions += names
+        last_case = case + names
+        if 'mMode = "INJECTED_FAILURE"' in body:
+            injected += names
+            value = INJECTED_VALUE.search(body)
+            injected_expected = value.group(1) if value else ""
+    return Suite(cases, assertions, last_case, injected, constants.get("EXPECTED_CASES", -1),
+                 constants.get("EXPECTED_ASSERTIONS", -1), injected_expected)
+
+
+def check_sources(root: Path, commit: str, folder: Path, evidence: Evidence) -> dict[str, bytes]:
+    expected = components(root, commit)
+    exported = folder / EXPORTED
+    present = {path.name: path for path in exported.iterdir()} if exported.is_dir() else {}
+    if not expected:
+        evidence.findings.append(f"commit {commit} holds no VBA component")
+    for name, data in sorted(expected.items()):
+        evidence.hashes[name] = git_blob(data)
+        if name not in present:
+            evidence.findings.append(f"{EXPORTED}/{name}: not exported from the workbook")
+            continue
+        actual = present[name].read_bytes()
+        if name.lower().endswith(RESOURCE_SUFFIXES):
+            if actual != data:
+                evidence.findings.append(f"{EXPORTED}/{name}: differs from {name} at "
+                                         f"{commit[:12]} (binary resource, compared byte for "
+                                         "byte)")
+            continue
+        actual = actual.replace(b"\r\n", b"\n")
+        if actual != data:
+            evidence.findings.append(f"{EXPORTED}/{name}: differs from {name} at {commit[:12]} "
+                                     f"(first difference at line {first_difference(actual, data)})")
+    for name in sorted(set(present) - set(expected)):
+        evidence.findings.append(f"{EXPORTED}/{name}: not a VBA component of the commit")
+    return expected
+
+
+def git_blob(data: bytes) -> str:
+    """The Git blob id of ``data``, as ``git hash-object`` gives it."""
+    # Git names objects by SHA-1; this is an identifier, not a security control.
+    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
+
+
+def first_difference(actual: bytes, expected: bytes) -> int:
+    for number, (left, right) in enumerate(zip(actual.split(b"\n"), expected.split(b"\n"),
+                                               strict=False), 1):
+        if left != right:
+            return number
+    return min(actual.count(b"\n"), expected.count(b"\n")) + 1
+
+
+@dataclass
+class Plan:
+    """What one mode's run must log: its cases and assertions in order, the
+    failures it must report (assertions, or harness identifiers) and its RESULT."""
+
+    mode: str
+    cases: list[str]
+    assertions: list[str]
+    failing: list[str]
+    result: dict[str, str]
+
+
+def plans(suite: Suite) -> list[Plan]:
+    skipped = set(suite.last_case)
+    cases = [case for case in suite.cases if case not in skipped]
+    assertions = [item for item in suite.assertions if item not in skipped]
+
+    def result(verdict: str, operation: str, complete: bool, kept: tuple[list[str], list[str]],
+               failures: int) -> dict[str, str]:
+        return {"RESULT": verdict, "suite": SUITE, "operation": operation,
+                "completeness": "COMPLETE" if complete else "INCOMPLETE",
+                "cases": str(len(kept[0])), "assertions": str(len(kept[1])),
+                "failures": str(failures), "cleanup": "PASS", "recovery": "NONE"}
+
+    every = (suite.cases, suite.assertions)
+    return [Plan("NORMAL", *every, [], result("PASS", "PASS", True, every, 0)),
+            Plan("INJECTED_FAILURE", *every, suite.injected,
+                 result("FAIL", "FAIL", True, every, len(suite.injected))),
+            Plan("SKIPPED_CASE", cases, assertions, ["harness.completeness"],
+                 result("FAIL", "PASS", False, (cases, assertions), 1))]
+
+
+def sequence(plan: Plan, suite: Suite) -> list[tuple[str, str]]:
+    """Every record the run writes, as (key, first value), in order."""
+    records = [("RUN", SUITE), ("ENVIRONMENT", "")]
+    for case in plan.cases:
+        records.append(("CASE", case))
+        for item in (name for name in plan.assertions if name.startswith(f"{case}/")):
+            records.append(("ASSERT", item))
+            if item in plan.failing:
+                records.append(("FAILURE", item))
+    records += [("FAILURE", item) for item in plan.failing if "/" not in item]
+    records += [("CASES", str(len(plan.cases))), ("ASSERTIONS", str(len(plan.assertions))),
+                ("FAILURES", str(len(plan.failing)))]
+    records += [("PRIMARY_FAILURE", plan.failing[0])] if plan.failing else []
+    return [*records, ("CLEANUP", "PASS"), ("RECOVERY", "NONE"),
+            ("RESULT", plan.result["RESULT"])]
+
+
+def check_sequence(name: str, records: list[Record], expected: list[tuple[str, str]],
+                   problems: list[str]) -> bool:
+    """The log holds exactly the expected records, in order: none missing, extra,
+    repeated or contradicting the run's outcome."""
+    for record, (key, value) in zip(records, expected, strict=False):
+        if (record.key, record.value) != (key, value):
+            problems.append(f"{name}:{record.line}: {record.key}={record.value}, "
+                            f"expected {key}={value}")
+            return False
+    if len(records) < len(expected):
+        key, value = expected[len(records)]
+        problems.append(f"{name}: incomplete log: it ends before {key}={value}")
+        return False
+    if len(records) > len(expected):
+        extra = records[len(expected)]
+        problems.append(f"{name}:{extra.line}: {extra.key}={extra.value} after RESULT "
+                        "(more than one run?)")
+        return False
+    return True
+
+
+def expect(name: str, record: Record, wanted: dict[str, str], problems: list[str]) -> None:
+    for key, value in wanted.items():
+        actual = record.value if key == record.key else record.fields.get(key)
+        if actual != value:
+            problems.append(f"{name}:{record.line}: {record.key} {key}={actual}, "
+                            f"expected {value}")
+
+
+def check_fields(name: str, records: list[Record], plan: Plan, suite: Suite,
+                 problems: list[str]) -> None:
+    expected = {"CASES": str(suite.expected_cases), "ASSERTIONS": str(suite.expected_assertions)}
+    for record in records:
+        if record.key == "RUN":
+            expect(name, record, {"mode": plan.mode, "expected_cases": expected["CASES"],
+                                  "expected_assertions": expected["ASSERTIONS"]}, problems)
+        elif record.key == "ASSERT":
+            status = "FAIL" if record.value in plan.failing else "PASS"
+            expect(name, record, {"status": status}, problems)
+        elif record.key in expected:
+            expect(name, record, {"expected": expected[record.key]}, problems)
+        elif record.key == "FAILURES":
+            expect(name, record, {"errors": "0"}, problems)
+        elif record.key == "RESULT" and {"RESULT": record.value, **record.fields} != plan.result:
+            problems.append(f"{name}:{record.line}: RESULT={record.value} with "
+                            f"{record.fields}, expected {plan.result}")
+
+
+def check_injected(name: str, records: list[Record], plan: Plan, suite: Suite,
+                   problems: list[str]) -> None:
+    """The designated failure's ASSERT, FAILURE and PRIMARY_FAILURE records carry
+    numeric expected and actual values that differ, the expected one being the value
+    the suite injects, and all three carry the same values."""
+    if plan.mode != "INJECTED_FAILURE" or len(suite.injected) != 1:
+        return
+    found = [record for record in records
+             if record.key in ("ASSERT", "FAILURE", "PRIMARY_FAILURE")
+             and record.value == suite.injected[0]]
+    for record in found:
+        values = (record.fields.get("expected", ""), record.fields.get("actual", ""))
+        try:
+            expected, actual = float(values[0]), float(values[1])
+        except ValueError:
+            problems.append(f"{name}:{record.line}: {record.key} lacks numeric expected= "
+                            "and actual= values")
+            continue
+        if suite.injected_expected and expected != float(suite.injected_expected):
+            problems.append(f"{name}:{record.line}: {record.key} expected={values[0]}, but the "
+                            f"suite injects {suite.injected_expected}")
+        if expected == actual:
+            problems.append(f"{name}:{record.line}: {record.key} expected equals actual, so "
+                            "the assertion cannot have failed")
+    if len({(record.fields.get("expected"), record.fields.get("actual"))
+            for record in found}) > 1:
+        problems.append(f"{name}: the injected failure's values differ between ASSERT, "
+                        "FAILURE and PRIMARY_FAILURE")
+
+
+def check_logs(folder: Path, suite: Suite, evidence: Evidence) -> None:
+    environments = []
+    for plan in plans(suite):
+        filename = LOGS[plan.mode]
+        records = read_log(folder / filename, evidence.findings)
+        if not records:
+            continue
+        result = records[-1]
+        if plan.mode in MUST_PASS and result.key == "RESULT" and \
+                result.fields.get("completeness") != "COMPLETE":
+            evidence.findings.append(f"{filename}:{result.line}: the run is "
+                                     f"{result.fields.get('completeness') or 'not COMPLETE'}: "
+                                     "a mandatory case or assertion did not run")
+        if check_sequence(filename, records, sequence(plan, suite), evidence.findings):
+            check_fields(filename, records, plan, suite, evidence.findings)
+            check_injected(filename, records, plan, suite, evidence.findings)
+        if len(records) > 1 and records[1].key == "ENVIRONMENT":
+            environments.append(records[1].fields)
+    for environment in environments:
+        missing = [name for name in ENVIRONMENT_FIELDS if not environment.get(name)]
+        if missing:
+            evidence.findings.append(f"ENVIRONMENT lacks {', '.join(missing)}")
+    if len({tuple(sorted(item.items())) for item in environments}) > 1:
+        evidence.findings.append("the logs come from different hosts (ENVIRONMENT differs)")
+    if environments:
+        evidence.environment = environments[0]
+
+
+def check_host(folder: Path, evidence: Evidence) -> None:
+    path = folder / HOST
+    if not path.is_file():
+        evidence.findings.append(f"{HOST}: missing")
+        return
+    host = {}
+    for text in path.read_text(encoding="utf-8").splitlines():
+        key, separator, value = text.partition("=")
+        if separator and not text.startswith("#"):
+            host[key.strip()] = value.strip()
+    evidence.host = host
+    for key in HOST_FIELDS:
+        if not host.get(key):
+            evidence.findings.append(f"{HOST}: no {key}=")
+    references = tuple(item.strip() for item in host.get("references", "").split(";"))
+    if host.get("references") and sorted(references) != sorted(REFERENCES):
+        evidence.findings.append(f"{HOST}: references must be exactly {'; '.join(REFERENCES)}")
+    if host.get("compile") and host["compile"] != "PASS":
+        evidence.findings.append(f"{HOST}: compile={host['compile']}, expected PASS")
+    if evidence.environment and evidence.environment.get("office") != OFFICE:
+        evidence.findings.append(f"not the supported target: Office is not {OFFICE}")
+
+
+def test_failed_number(source: bytes) -> int | None:
+    """ERR_TEST_FAILED of the commit's harness, as the number VBA raises."""
+    match = TEST_FAILED.search(source.decode("ascii", errors="replace"))
+    if not match:
+        return None
+    if match.group(1):
+        return VB_OBJECT_ERROR + int(match.group(1))
+    value = int(match.group(2), 16)
+    return value - (1 << 32) if value >= 1 << 31 else value
+
+
+def certification_plan(failed: int | None) -> list[tuple[str, dict[str, str]]]:
+    """Every record of certification.log after CERTIFY, as (key, fields)."""
+    records = []
+    for mode in LOGS:
+        must_pass = mode in MUST_PASS
+        complete = "INCOMPLETE" if mode == "SKIPPED_CASE" else "COMPLETE"
+        records.append(("MODE", {"MODE": mode, "expected": "PASS" if must_pass else "FAIL",
+                                 "error": "0" if must_pass else str(failed),
+                                 "result": "PASS" if must_pass else "FAIL",
+                                 "completeness": complete, "status": "PASS"}))
+    records.append(("CERTIFICATION", {"CERTIFICATION": "PASS", "suite": SUITE,
+                                      "completeness": "COMPLETE", "modes": str(len(LOGS)),
+                                      "failures": "0"}))
+    return records
+
+
+def check_certification(folder: Path, failed: int | None, evidence: Evidence) -> None:
+    """certification.log holds CERTIFY, one MODE record per mode in order, each
+    ending as it must, and CERTIFICATION=PASS: written before anything was raised."""
+    if failed is None:
+        evidence.findings.append(f"{HARNESS}: no ERR_TEST_FAILED constant")
+        return
+    records = read_log(folder / CERTIFICATION, evidence.findings)
+    if not records:
+        return
+    if (records[0].key, records[0].value) != ("CERTIFY", SUITE):
+        evidence.findings.append(f"{CERTIFICATION}:{records[0].line}: {records[0].key}="
+                                 f"{records[0].value}, expected CERTIFY={SUITE}")
+        return
+    expected = certification_plan(failed)
+    for record, (key, fields) in zip(records[1:], expected, strict=False):
+        actual = {record.key: record.value, **record.fields}
+        if record.key != key or actual != fields:
+            evidence.findings.append(f"{CERTIFICATION}:{record.line}: {record.key}="
+                                     f"{record.value} with {record.fields}, expected {fields}")
+    if len(records) - 1 < len(expected):
+        key, fields = expected[len(records) - 1]
+        evidence.findings.append(f"{CERTIFICATION}: incomplete log: it ends before "
+                                 f"{key}={fields[key]}")
+    elif len(records) - 1 > len(expected):
+        extra = records[len(expected) + 1]
+        evidence.findings.append(f"{CERTIFICATION}:{extra.line}: {extra.key}={extra.value} "
+                                 "after CERTIFICATION (more than one certification?)")
+
+
+SPREADSHEET = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+RELATIONSHIP = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+PACKAGE = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+REFERENCE = re.compile(r"^(?:'((?:[^']|'')+)'|([^'!]+))!\$?([A-Z]{1,3})\$?([0-9]+)$")
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def cell_text(package: zipfile.ZipFile, part: str, cell: str) -> str | None:
+    """The text of one cell of a worksheet part: inline, shared or formula string."""
+    root = ElementTree.fromstring(package.read(part))
+    for element in root.iter(f"{SPREADSHEET}c"):
+        if element.get("r") != cell:
+            continue
+        kind = element.get("t")
+        if kind == "inlineStr":
+            return "".join(node.text or "" for node in element.iter(f"{SPREADSHEET}t"))
+        value = element.find(f"{SPREADSHEET}v")
+        if value is None or value.text is None:
+            return None
+        if kind == "s":
+            shared = ElementTree.fromstring(package.read("xl/sharedStrings.xml"))
+            item = list(shared.iter(f"{SPREADSHEET}si"))[int(value.text)]
+            return "".join(node.text or "" for node in item.iter(f"{SPREADSHEET}t"))
+        return value.text
+    return None
+
+
+def read_stamp(workbook: Path, name: str) -> str | None:
+    """The value of the defined name ``name`` of a workbook, read from its parts."""
+    with zipfile.ZipFile(workbook) as package:
+        book = ElementTree.fromstring(package.read("xl/workbook.xml"))
+        target = next((item.text or "" for item in book.iter(f"{SPREADSHEET}definedName")
+                       if item.get("name", "").casefold() == name.casefold()
+                       and item.get("localSheetId") is None), None)
+        match = REFERENCE.match(target or "")
+        if not match:
+            return None
+        tab = (match.group(1) or "").replace("''", "'") or match.group(2)
+        sheet = next((item for item in book.iter(f"{SPREADSHEET}sheet")
+                      if item.get("name") == tab), None)
+        if sheet is None:
+            return None
+        relations = ElementTree.fromstring(package.read("xl/_rels/workbook.xml.rels"))
+        relation = next((item for item in relations.iter(f"{PACKAGE}Relationship")
+                         if item.get("Id") == sheet.get(RELATIONSHIP)), None)
+        if relation is None:
+            return None
+        location = relation.get("Target", "")
+        part = location.lstrip("/") if location.startswith("/") else \
+            posixpath.normpath(str(PurePosixPath("xl") / location))
+        return cell_text(package, part, f"{match.group(3)}{match.group(4)}")
+
+
+def load_manifest(path: Path) -> tuple[str, dict[str, str]]:
+    """The workbook digest and the exported files' digests of export-manifest.json."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("format") != MANIFEST_FORMAT:
+        raise ValueError(f"format is {data.get('format')!r}, expected {MANIFEST_FORMAT}")
+    files = {str(item["file"]): str(item["sha256"]).lower() for item in data["files"]}
+    return str(data["workbook"]["sha256"]).lower(), files
+
+
+def check_binding(root: Path, commit: str, folder: Path, workbook: Path | None,
+                  evidence: Evidence) -> None:
+    """VERIFIED when the manifest matches the export and the workbook, and the
+    workbook's stamp names the commit; FAIL on any mismatch; UNVERIFIED without
+    a manifest or a workbook. A manifest that contradicts the export fails even
+    without --workbook."""
+    findings: list[str] = []
+    path = folder / MANIFEST
+    if not path.is_file():
+        evidence.binding = "UNVERIFIED"
+        evidence.binding_notes.append(f"no {MANIFEST}: the export is not bound to a workbook")
+        return
+    try:
+        workbook_digest, files = load_manifest(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        evidence.binding = "FAIL"
+        evidence.findings.append(f"{MANIFEST}: not a valid export manifest: {error!r}")
+        return
+    exported = folder / EXPORTED
+    present = {item.name: item for item in exported.iterdir() if item.is_file()} \
+        if exported.is_dir() else {}
+    for name in sorted(set(files) | set(present)):
+        if name not in present:
+            findings.append(f"{MANIFEST}: {name} is recorded but not in {EXPORTED}/")
+        elif name not in files:
+            findings.append(f"{MANIFEST}: {EXPORTED}/{name} is not recorded")
+        elif sha256(present[name].read_bytes()) != files[name]:
+            findings.append(f"{MANIFEST}: {EXPORTED}/{name} changed after the export")
+    if workbook is not None:
+        findings += workbook_findings(root, commit, workbook, workbook_digest)
+    else:
+        evidence.binding_notes.append("no --workbook: the manifest is not checked against "
+                                      "a workbook")
+    evidence.findings += findings
+    evidence.binding = "FAIL" if findings else ("VERIFIED" if workbook else "UNVERIFIED")
+
+
+def workbook_findings(root: Path, commit: str, workbook: Path, digest: str) -> list[str]:
+    if not workbook.is_file():
+        return [f"workbook {workbook}: not a file"]
+    findings = []
+    actual = sha256(workbook.read_bytes())
+    if actual != digest:
+        findings.append(f"workbook {workbook.name}: sha256 {actual}, but {MANIFEST} records "
+                        f"{digest}")
+    try:
+        layout = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
+        name = str(layout["stamp"]["commit"])
+    except (RuntimeError, ValueError, KeyError, TypeError):
+        return [*findings, f"{BUILD_CONFIG} at {commit[:12]} names no commit stamp"]
+    try:
+        stamp = read_stamp(workbook, name)
+    except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
+            ElementTree.ParseError) as error:
+        return [*findings, f"workbook {workbook.name}: build stamp not readable: {error!r}"]
+    if stamp != commit:
+        findings.append(f"workbook {workbook.name}: build stamp {name} is {stamp!r}, expected "
+                        f"{commit} from a clean build")
+    return findings
+
+
+def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
+          require_binding: bool = False) -> Evidence:
+    evidence = Evidence()
+    sources = check_sources(root, commit, folder, evidence)
+    suite = read_suite(sources.get(Path(EXAMPLES).name, b""))
+    if not suite.cases:
+        evidence.findings.append(f"no example suite in {EXAMPLES} at {commit[:12]}")
+    if len(suite.injected) != 1:
+        evidence.findings.append(f"{EXAMPLES} at {commit[:12]}: INJECTED_FAILURE must change "
+                                 f"exactly one assertion, found {suite.injected}")
+    elif not suite.injected_expected:
+        evidence.findings.append(f"{EXAMPLES} at {commit[:12]}: INJECTED_FAILURE sets no "
+                                 "numeric expected value")
+    check_logs(folder, suite, evidence)
+    check_certification(folder, test_failed_number(sources.get(Path(HARNESS).name, b"")),
+                        evidence)
+    check_host(folder, evidence)
+    check_binding(root, commit, folder, workbook, evidence)
+    if require_binding and evidence.binding == "UNVERIFIED":
+        evidence.findings.append("binding UNVERIFIED, but --require-binding needs VERIFIED: "
+                                 + "; ".join(evidence.binding_notes))
+    return evidence
+
+
+def report(commit: str, evidence: Evidence) -> str:
+    environment = "; ".join(f"{key}={evidence.environment.get(key, '')}"
+                            for key in ENVIRONMENT_FIELDS)
+    lines = [f"Candidate commit: {commit}",
+             f"Environment: {environment}",
+             f"Windows: {evidence.host.get('windows', '')}",
+             f"References: {evidence.host.get('references', '')}",
+             f"Compile: {evidence.host.get('compile', '')}",
+             "Imported components (Git blob ids at the commit):"]
+    lines += [f"  {name} {blob}" for name, blob in sorted(evidence.hashes.items())]
+    notes = f" ({'; '.join(evidence.binding_notes)})" if evidence.binding_notes else ""
+    lines.append(f"Binding: {evidence.binding}{notes}")
+    lines += [f"FAIL: {finding}" for finding in evidence.findings]
+    status = "FAIL" if evidence.findings else "PASS"
+    lines.append(f"excel-run: {status} (evidence checked against the commit; Excel is not run "
+                 "here and no calculation of the workbook is validated)")
+    return "\n".join(lines)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("evidence", type=Path, help="folder holding the run's evidence")
+    parser.add_argument("--commit", required=True, help="the commit the workbook was built from")
+    parser.add_argument("--workbook", type=Path,
+                        help="the workbook the export came from, checked against "
+                             f"{MANIFEST} and its build stamp")
+    parser.add_argument("--require-binding", action="store_true",
+                        help="fail unless the binding is VERIFIED (release evidence)")
+    parser.add_argument("--root", type=Path, default=ROOT)
+    args = parser.parse_args(argv)
+    root = args.root.resolve()
+    try:
+        commit = git(root, "rev-parse", "--verify", f"{args.commit}^{{commit}}").decode().strip()
+    except RuntimeError as error:
+        print(f"FAIL: commit {args.commit} not found: {error}")
+        return 1
+    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding)
+    print(report(commit, evidence))
+    return 1 if evidence.findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

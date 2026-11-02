@@ -23,10 +23,10 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `src/workbook/` | Excel adapters, `ThisWorkbook` and sheet document modules, and the optional macro-free `Template.xlsx`, laid out as the [workbook contract](methodology/WORKBOOK_CONTRACT.md) defines | Reserved |
 | `src/forms/` | UserForms, each `.frm` with its `.frx` | Reserved |
 | `tests/` | Python tests of the repository tooling (`test_*.py`) | Present |
-| `tests/modules/` | VBA test modules | Reserved |
+| `tests/modules/` | VBA test modules: the [test harness](methodology/TEST_HARNESS.md) and its example suite | Present, with the harness and the example suite |
 | `tests/fixtures/`, `tests/expected/` | Synthetic inputs and expected results in the [test-case format](methodology/TEST_CASES.md) | Present, with one illustrative case of each form |
 | `tests/derivations/` | Scripts that compute expected values from the documented method ([derivation scripts](methodology/TEST_CASES.md#derivation-scripts)) | Present, with one illustrative script for each case |
-| `tools/` | Repository checks, setup and build tooling, in Python | Present |
+| `tools/` | Repository checks, setup and build tooling, in Python; `tools/devbuild/` builds a workbook from source ([building a workbook from source](../INSTALLATION.md#building-a-workbook-from-source)) | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
 | `test-results/` | Disposable output of local and CI runs | Ignored by Git |
 
@@ -64,6 +64,10 @@ calls back the other way, so there are no cycles.
   methodology, not by translating the VBA
   ([validation plan](methodology/VALIDATION_PLAN.md#independent-reference-values)).
 - Repository tooling is not a second implementation of the calculation.
+
+The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations,
+the role prefixes and this dependency direction by name, and match the
+inventory below against `src/modules/`.
 
 ## Public API inventory
 

@@ -60,6 +60,37 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/devbuild/build_workbook.py`, which builds a macro-enabled workbook
+  from the source of one commit, with the sheets, code names and defined
+  names of the workbook contract, a build stamp, and a VBA project written
+  from source, so it needs no *Trust access to the VBA project object model*.
+  A rebuild is byte-identical, and a working tree with changes is stamped as
+  not evidence-grade. `tools/devbuild/export_manifest.py` and
+  `check_excel_run.py --workbook` bind an export to the workbook it came from
+  (`VERIFIED`, `FAIL` or `UNVERIFIED`), and a release requires `VERIFIED`. An
+  optional LibreOffice smoke test runs the harness certification as an early
+  warning, never as evidence (#100).
+- A VBA test harness and an example suite in `tests/modules/`, with a
+  certification entry point. It refuses state left by an earlier run,
+  reports completeness apart from the verdict, and checks that Excel's state,
+  the open workbooks and the active window are unchanged. It writes every log
+  before it raises, and checks that each deliberate failure reaches its
+  caller. `tools/check_excel_run.py` checks the evidence of an Excel run
+  against one commit, without Excel, and rejects an incomplete run. The
+  [harness guide](docs/methodology/TEST_HARNESS.md) and
+  [recording an Excel run](INSTALLATION.md#recording-an-excel-run) describe
+  them, and the check is a release gate (#79).
+- Five static checks of exported VBA source, which **Repository integrity**
+  runs:
+  - placement, names, encoding, options, layout and storage;
+  - `#If` structure and `PtrSafe` in each compilation environment;
+  - procedure-local jump targets;
+  - visibility and the public API inventory, including a public name in two
+    modules;
+  - the dependency direction.
+
+  The [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what they
+  cannot prove (#70).
 - `tools/check_repository.py`, one command that runs every **Repository
   integrity** check locally and in CI. It writes a log per check and a
   `report.json` with the commit, the dirty state and the SHA-256 of every

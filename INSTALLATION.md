@@ -2,7 +2,9 @@
 
 This guide moves VBA source between the repository and Excel, in both
 directions, without losing line endings, metadata or form resources. It also
-covers upgrading to a new revision, troubleshooting and removal. The
+covers building a workbook from source, running the VBA test harness,
+recording an Excel run, upgrading to a new revision, troubleshooting and
+removal. The
 [repository structure](docs/REPOSITORY_STRUCTURE.md) says where each component
 lives, and the [house style](docs/VBA_HOUSE_STYLE.md) says how it is written.
 The repository's own checks are in the
@@ -16,10 +18,11 @@ Adapt this section to the project and record the decision in an issue.
   32-bit, older perpetual versions, Mac and Excel for the web are not
   supported until a recorded decision and evidence add them.
 - **References:** only the defaults of the target installation: Visual Basic
-  For Applications, the Microsoft Excel Object Library, OLE Automation and the
-  Microsoft Office Object Library. Any other reference needs a reviewed
-  decision. Before compiling, check **Tools → References** for entries marked
-  *MISSING*.
+  For Applications, the Microsoft Excel 16.0 Object Library, OLE Automation
+  and the Microsoft Office 16.0 Object Library. Any other reference needs a
+  reviewed decision, and a change to the `REFERENCES` of
+  `tools/check_excel_run.py`. Before compiling, check **Tools → References**
+  for entries marked *MISSING*.
 - **Python** is used for repository tooling and for deriving reference values,
   never by the workbook.
 - **Macro security:** follow your organization's policy. Nothing here needs
@@ -101,6 +104,197 @@ Manual import needs no *Trust access to the VBA project object model*.
 5. **Check.** Run the [local checks](CONTRIBUTING.md#-local-checks) before
    committing. They check the repository, not VBA compilation or the results
    of a calculation.
+
+<a id="building-a-workbook-from-source"></a>
+
+## 🏗️ Building a workbook from source
+
+`tools/devbuild/build_workbook.py` builds the workbook of steps 1 to 5 above
+in one command, from the checkout:
+
+```sh
+python tools/devbuild/build_workbook.py                            # development
+python tools/devbuild/build_workbook.py --configuration production
+```
+
+It writes `test-results/build/Workbook-<configuration>.xlsm`, which Git
+ignores, with:
+
+- the sheets, code names and defined names of the
+  [workbook contract](docs/methodology/WORKBOOK_CONTRACT.md), read from
+  `tools/devbuild/workbook.json`;
+- the build stamp on the reference sheet: the commit, its committer time and
+  the configuration. A tracked change, or an untracked file in a source
+  directory, adds *NOT evidence-grade* to the commit;
+- a VBA project written from source. The production configuration takes the
+  standard and class modules of `src/`. The development configuration adds
+  `tests/modules/` and `examples/modules/`. Each sheet's document module
+  comes from `src/workbook/<code name>.cls`, when that file exists.
+
+Excel compiles the project from source when the workbook opens, so the build
+needs no *Trust access to the VBA project object model*. Two builds of the
+same commit and working tree are byte-identical. The build stops on a form,
+which needs a designer the builder does not write; import forms by hand
+(step 4). It also stops on a module too dense to fit the VBA compression
+format; import that module by hand.
+
+1. Unblock the file if it was copied from another machine, open it, enable
+   macros, and check **Tools → References**.
+2. Compile with **Debug → Compile VBAProject**.
+3. Changes made in the VBE are not read back: export them as
+   [exporting changes](#%EF%B8%8F-exporting-changes) describes, then build
+   again.
+
+If Excel rejects or strips the embedded project, import by hand as in
+[importing VBA into Excel](#%EF%B8%8F-importing-vba-into-excel), and record
+the failure in an issue.
+
+**Early warning in LibreOffice (optional).** Where LibreOffice and its
+Python UNO bridge are installed, `python3 tools/devbuild/lo_smoke.py` builds
+the development workbook and runs the harness certification in headless
+LibreOffice. It reports only failures that LibreOffice is not known to
+cause. LibreOffice is not a supported host, and this is never Excel
+evidence.
+
+<a id="running-the-harness"></a>
+
+## 🧪 Running the harness
+
+In a **development** workbook built as above, with the modules of
+`tests/modules/`, open the Immediate window (**Ctrl+G**) and type:
+
+```text
+TEST_Examples.RunExampleTests
+```
+
+It runs the example suite through `TEST_Harness` and writes one record per
+line. A passing run ends with:
+
+```text
+RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=12; assertions=27; failures=0; cleanup=PASS; recovery=NONE
+```
+
+Anything else, or the error *Suite examples did not pass*, is a failure. Two
+more entry points show the failure paths and are expected to fail:
+
+| Entry point | Expected end |
+| --- | --- |
+| `TEST_Examples.RunExampleTestsWithInjectedFailure` | `RESULT=FAIL`, `operation=FAIL`, `completeness=COMPLETE`, `failures=1`, then *Suite examples did not pass* |
+| `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=11`, `assertions=25`, `failures=1`, then *Suite examples did not pass* |
+
+- **Complete log.** The Immediate window keeps only its last 200 lines. To
+  keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`
+  after it, with a folder outside the checkout or the ignored
+  `test-results/` directory.
+- **Recovery.** A run that stopped half way, or that left Excel's state
+  changed, leaves `recovery=REQUIRED`, and the next run is refused. Check
+  **File → Options → Formulas** (calculation), the open workbooks and the
+  other settings the log names, then type `TEST_Harness.ResetTests`.
+- **What it proves.** The suite exercises the harness itself and validates no
+  calculation of the workbook. The [harness guide](docs/methodology/TEST_HARNESS.md)
+  defines the outcomes and the log format.
+
+<a id="recording-an-excel-run"></a>
+
+## 🧾 Recording an Excel run
+
+This is the evidence that a commit's VBA was imported, compiled and run on the
+supported host, for a release and for any issue or pull request that cites
+an Excel run. It needs no self-hosted runner, no change to the
+macro-security level and no *Trust access to the VBA project object model*.
+
+1. **Fix the candidate.** In a clone with no local changes
+   (`git status --short` prints nothing), type `git switch --detach <commit>`,
+   then `git rev-parse HEAD` for the full SHA.
+2. **Make the evidence folder**, for example `test-results\excel-run\` in the
+   checkout (ignored by Git), with an empty `exported\` folder inside.
+3. **Build a development workbook** from that checkout with
+   `python tools/devbuild/build_workbook.py`, as in
+   [building a workbook from source](#building-a-workbook-from-source). Use
+   [importing VBA into Excel](#%EF%B8%8F-importing-vba-into-excel) only if the
+   project has forms or the build fails. Then only the source identity is
+   checked, not the binding of step 8.
+4. **Compile** with **Debug → Compile VBAProject**.
+5. **Certify.** In the Immediate window type, with the full path of the
+   folder and no trailing backslash:
+
+   ```text
+   TEST_Examples.CertifyExamples "C:\path\to\test-results\excel-run"
+   ```
+
+   It refuses to start if an earlier run left state behind. It runs the
+   suite normally, with the injected failure and with the skipped case, and
+   saves each complete log as `examples.log`, `injected.log` and
+   `skipped.log`. Then it writes `certification.log`. Each run prints a
+   `SAVED=` line: the normal run with `error=0`, the two failure runs with
+   the error *Suite examples did not pass*. Those errors are recorded, not
+   raised, so that every log is written. The certification ends with
+   `CERTIFICATION=PASS`; otherwise it raises *Certification of examples did
+   not pass* after writing its log.
+6. **Export the modules back.** In the VBE, right-click each component →
+   **Export File**, into `exported\`, under its own name. Export every VBA
+   component of the commit, the test modules included; a form exports as its
+   `.frm` with its `.frx`. Do not export a document module that the build
+   generated and that has no file in `src/workbook/`. Do not edit the
+   exported files.
+7. **Bind the export to the workbook.** Close the workbook, then record the
+   SHA-256 of the workbook and of every exported file:
+
+   ```sh
+   python tools/devbuild/export_manifest.py test-results/build/Workbook-development.xlsm test-results/excel-run
+   ```
+
+   It writes `export-manifest.json` in the folder. Do not open or save the
+   workbook again before step 9.
+8. **Write `host.txt`** in the folder:
+
+   ```text
+   windows=Windows 11 Pro, version 24H2, OS build 26100.4061
+   references=Visual Basic For Applications; Microsoft Excel 16.0 Object Library; OLE Automation; Microsoft Office 16.0 Object Library
+   compile=PASS
+   ```
+
+   `windows` is what `winver` shows. `references` lists the boxes ticked
+   in **Tools → References**, separated by `; `. Write `compile=PASS` only if
+   step 4 completed with no error; otherwise write what it reported.
+9. **Check** the folder against the commit, with Python 3.11 or later and
+   Git:
+
+   ```sh
+   python tools/check_excel_run.py test-results/excel-run --commit <commit> \
+     --workbook test-results/build/Workbook-development.xlsm --require-binding
+   ```
+
+   It must end with `Binding: VERIFIED` and `excel-run: PASS`. It prints
+   the commit, the host and the Git blob id of every imported component. For
+   a workbook imported by hand, omit `--workbook` and `--require-binding`:
+   the binding is then `UNVERIFIED`, which a release does not accept.
+10. **Record.** Copy the report into the issue, the pull request or the
+    [release certification](docs/release/RELEASE_CERTIFICATION.md), and add a
+    row to the tested environments of the
+    [host policy](#%EF%B8%8F-host-policy). The folder stays outside Git: its
+    exported modules would be second copies of the VBA components.
+
+`check_excel_run.py` reads only the folder and the commit:
+
+| It fails when | Because |
+| --- | --- |
+| An exported module differs from the commit's file line for line, a form's `.frx` differs byte for byte, or one is missing or extra | The workbook was not built from that commit |
+| A log is missing or empty, does not end with `RESULT`, holds more than one run, or a line is not a `KEY=value` record | The log is incomplete |
+| A record is missing, extra or out of the order in which the commit's suite writes it, or an unexpected error (`ERROR`) is logged | The run did not execute the suite as written |
+| The normal run is `INCOMPLETE` | A mandatory case or assertion did not run |
+| The normal run is not `RESULT=PASS`, or its cases and assertions differ from the commit's suite in name or order | The run did not pass as written |
+| `CLEANUP` is not `PASS` or `RECOVERY` is not `NONE` in any of the three logs | Cleanup failed |
+| The two failure runs do not end as [documented](#running-the-harness), or fail anything but their own failure: the injected run its one designated assertion, with the expected value the suite injects and the same values in each record, the skipped-case run only `harness.completeness` | The failure paths did not behave |
+| `certification.log` is missing, a mode did not end as it must, a failure run did not reach its caller as `ERR_TEST_FAILED`, or it does not end with `CERTIFICATION=PASS` and `COMPLETE` | The certification did not pass |
+| `ENVIRONMENT` lacks a field, differs between the logs, or Office is not 64-bit | The host is unknown or not the supported target |
+| `host.txt` lacks a field, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), or `compile` is not `PASS` | The host record is incomplete |
+| `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |
+| With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
+
+It cannot see Excel: the compile result, the references and the Windows
+build are the runner's own record. A PASS says the evidence is consistent
+with the commit; it validates no calculation of the workbook.
 
 ## 🔄 Upgrading to a new revision
 
