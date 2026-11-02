@@ -79,7 +79,14 @@
         "tests/test_check_changelog.py",
         "tests/test_check_test_cases.py",
         "tests/fixtures/illustrative-format-example.json",
-        "tests/expected/illustrative-format-example.json"
+        "tests/expected/illustrative-format-example.json",
+        "tools/vba_lexer.py",
+        "tools/check_vba_source.py",
+        "tools/check_vba_conditionals.py",
+        "tools/check_vba_jumps.py",
+        "tools/check_vba_public_api.py",
+        "tools/check_vba_dependencies.py",
+        "tests/test_check_vba.py"
       ]
     },
     {

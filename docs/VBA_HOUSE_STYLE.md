@@ -10,7 +10,10 @@ name no existing component.
 ## Naming and visibility
 
 Replace `<REGIME>` with the project's short name, such as `SACCR` or `LCR`,
-once, in this table and in the structure guide.
+once, in this table and in the structure guide. The
+[static checks](#static-checks) read the facade prefix from this table; while
+it is `<REGIME>_`, they accept any project prefix that is not a reserved one
+(`CORE_`, `TEST_`, `EX_`, `M_`).
 
 | Element | Convention | Example |
 | --- | --- | --- |
@@ -159,6 +162,32 @@ It never changes a string literal, and it keeps the `VERSION`, `BEGIN`, `END`,
 runs it with `--check`. Re-import a module it rewrote into the VBE before
 committing, so that the workbook and the source stay the same. It neither
 compiles nor checks the other rules of this guide.
+
+## Static checks
+
+**Repository integrity** runs five static checks on every tracked `.bas`,
+`.cls` and `.frm` file. Each also runs on its own, for example
+`python tools/check_vba_source.py`; with no VBA source, each passes and says
+it examined no component.
+
+| Check | Enforces |
+| --- | --- |
+| `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`, tab or trailing white space; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
+| `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe` |
+| `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target is a label of the same procedure, in each environment; no label is defined twice in a procedure |
+| `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
+| `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
+
+What they cannot prove:
+
+- they neither compile nor run VBA, and resolve no call: a name-based rule
+  can miss a call made through a variable or an object;
+- they check the three compilation environments statically, not on a 32-bit
+  or 64-bit host;
+- a private procedure name may repeat across modules, as VBA allows; only a
+  public name in two standard modules is a collision;
+- the formatter and these checks enforce the mechanical rules only; review
+  covers the rest of this guide.
 
 Changed VBA is imported, compiled and run on the supported host before its
 behaviour is accepted. Repository checks are not compilation. Record the full
