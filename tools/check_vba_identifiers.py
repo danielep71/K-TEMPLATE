@@ -81,7 +81,7 @@ LABEL = re.compile(rf"^\s*(?:(?P<name>{NAME})|\d+):(?!=)")
 LINE_NUMBER = re.compile(r"^\s*\d+\s+")
 LEAD = re.compile(rf"^\s*(?:(?P<keyword>Let|Set|LSet|RSet)\s+)?(?P<name>{NAME}){SUFFIX}", re.I)
 FOR = re.compile(rf"^\s*For\s+(?:Each\s+)?(?P<name>{NAME}){SUFFIX}\b", re.I)
-CALL = re.compile(rf"^\s*Call\s+(?P<name>{NAME}){SUFFIX}\s*(?P<rest>.*)$", re.I)
+CALL = re.compile(r"^\s*Call\s+", re.I)
 SINGLE_LINE_IF = re.compile(r"^\s*If\b(?P<condition>.*?)\bThen\b(?P<tail>.*)$", re.I)
 ELSE = re.compile(r"\bElse\b", re.I)
 
@@ -365,18 +365,23 @@ def procedure_statement(module: Module, procedure: Procedure, line: int, stateme
         return
     call = CALL.match(statement)
     if call:
-        if not call.group("rest").startswith("."):
-            procedure.calls.append((line, call.group("name")))
+        target_or_call(module, procedure, line, statement[call.end():], explicit_call=True)
         return
     target_or_call(module, procedure, line, statement)
 
 
-def target_or_call(module: Module, procedure: Procedure, line: int, statement: str) -> None:
-    """Classify a statement that starts with a name: an assignment or a call."""
+def target_or_call(module: Module, procedure: Procedure, line: int, statement: str, *,
+                   explicit_call: bool = False) -> None:
+    """Classify a statement that starts with a name: an assignment or a call.
+
+    The same reading serves ``Call Name(args)``, with ``explicit_call``: past the
+    name and any index in parentheses, a ``.`` or a ``!`` before a name is a
+    member access, as in ``Call Items(1).Refresh`` or ``Call Me!txtAmount.SetFocus``,
+    which no rule resolves."""
     lead = LEAD.match(statement)
     if not lead or statement.lstrip().startswith("."):
         return  # A member of a With block, or nothing a rule reads.
-    keyword = lead.group("keyword")
+    keyword = None if explicit_call else lead.group("keyword")
     name = lead.group("name")
     if keyword is None and name.casefold() in STATEMENT_WORDS:
         return
@@ -389,9 +394,11 @@ def target_or_call(module: Module, procedure: Procedure, line: int, statement: s
                                                               f"{statement.strip()!r}"))
             return
         after = rest[end + 1:].lstrip()
-    if after.startswith((".", "!")):
-        return  # A member access, such as x.y = 1 or x(1).y = 1.
-    if after.startswith("=") or keyword is not None:
+    if after.startswith(".") or MEMBER_MARK.match(after):
+        return  # A member access, such as x.y = 1, x(1).y = 1 or Me!txtAmount = 1.
+    if explicit_call:
+        procedure.calls.append((line, name))
+    elif after.startswith("=") or keyword is not None:
         procedure.assignments.append((line, name))
     else:
         procedure.calls.append((line, name))

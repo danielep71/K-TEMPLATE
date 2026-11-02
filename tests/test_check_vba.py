@@ -1293,6 +1293,9 @@ Public Function Total( _
         ReDim Ratios!(1 To 3)
         Ratios!(1) = 1
         Items!Count = 3
+        Call Items(1).Refresh
+        Call Items!First.Refresh
+        Items(1).Refresh
         With Items
             ReDim .Values(1 To 4)
         End With
@@ -1369,6 +1372,8 @@ IDENTIFIERS_INVALID = {
         "OldHelper is called in Run but no procedure of that name is reachable"),
     "an-explicit-call-to-nothing": ("Public Sub Run()\n        Call Gone(1)\nEnd Sub\n",
                                     "Gone is called in Run"),
+    "an-explicit-call-without-arguments": ("Public Sub Run()\n        Call Gone\nEnd Sub\n",
+                                           "Gone is called in Run"),
     "dim-empty": ("Public Sub Run()\n        Dim Empty() As Long\nEnd Sub\n",
                   "variable Empty is named like the VBA keyword Empty"),
     "keyword-parameter": ("Public Sub Run(ByVal Date As Long)\nEnd Sub\n",
@@ -1430,6 +1435,7 @@ class IdentifierTest(unittest.TestCase):
                             "   OleObjectBlob") + ("\nPrivate Sub UserForm_Initialize()\n"
                                                     "        txtAmount = \"0\"\n        Hide\n"
                                                     "        Me!txtAmount = \"1\"\n"
+                                                    "        Call Me!txtAmount.SetFocus\n"
                                                     "End Sub\n")
         files = changed("src/forms/frmRunOptions.frm", FORM, form)
         cls = CLASS + "\nPublic Sub Reset()\n        Amount = 0\nEnd Sub\n"
