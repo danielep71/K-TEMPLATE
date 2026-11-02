@@ -1,7 +1,8 @@
 # 📥 Installation: VBA import and export
 
 This guide moves VBA source between the repository and Excel, in both
-directions, without losing line endings, metadata or form resources. The
+directions, without losing line endings, metadata or form resources. It also
+covers upgrading to a new revision, troubleshooting and removal. The
 [repository structure](docs/REPOSITORY_STRUCTURE.md) says where each component
 lives, and the [house style](docs/VBA_HOUSE_STYLE.md) says how it is written.
 The repository's own checks are in the
@@ -100,6 +101,75 @@ Manual import needs no *Trust access to the VBA project object model*.
 5. **Check.** Run the [local checks](CONTRIBUTING.md#-local-checks) before
    committing. They check the repository, not VBA compilation or the results
    of a calculation.
+
+## 🔄 Upgrading to a new revision
+
+A workbook is never patched in place. To move to a new revision, build a new
+workbook from it and carry your inputs across:
+
+1. **Read the changes.** Read the changelog between the two revisions, and the
+   `behavior-change` entries first. They name changed results, input layouts
+   and output layouts, so you know which differences to expect.
+2. **Keep the old workbook.** Keep it unchanged and record its commit, so you
+   can compare results.
+3. **Build the new one.** Import every component from the new revision into a
+   fresh workbook, as [Importing VBA into Excel](#%EF%B8%8F-importing-vba-into-excel)
+   describes. Never import some components from one revision and some from
+   another, and never paste new source beside old components.
+4. **Carry the inputs across.**
+   - Re-import the input files the [data contract](docs/methodology/DATA_CONTRACT.md)
+     defines.
+   - Copy the values of each input area that the
+     [workbook contract](docs/methodology/WORKBOOK_CONTRACT.md) lists, area by
+     area, by its defined name. A sheet, area or name that the new revision
+     renamed or removed is listed in the changelog. Never copy results:
+     recalculate them.
+5. **Compile and compare.** Compile, run the documented tests, and compare the
+   results with the old workbook. Explain every difference with a changelog
+   entry, or treat it as a defect. Record the run as for a new installation.
+
+A copy with local changes is a fork. Export its changes first, compare them
+with both revisions, and reapply them deliberately; never assume they survive
+a rebuild.
+
+## 🩺 Troubleshooting
+
+| Symptom | Check |
+| --- | --- |
+| A compile error or a missing procedure | Every component comes from one revision and was imported; the references match the [host policy](#%EF%B8%8F-host-policy) |
+| *Ambiguous name detected* | An obsolete or duplicate component remains. Start again from a fresh workbook |
+| A reference marked *MISSING* | The workbook was built on another host. Remove it, or record a decision for it |
+| A form without its controls | Its `.frm` was imported without the matching `.frx` beside it |
+| Source with LF line endings, or one long line | It came from a raw download or an archive instead of a [Git checkout](#-start-from-an-exact-revision) |
+| A document module duplicated as a class | Its `.cls` was imported instead of pasted ([step 5](#%EF%B8%8F-importing-vba-into-excel)) |
+| Excel left with screen updating, events or calculation changed after an error | Read the operation's cleanup outcome ([house style](docs/VBA_HOUSE_STYLE.md#operation-and-cleanup-outcomes)); never reset settings to assumed defaults |
+| Results marked `STALE` or `FAILED` | Read the findings and the log; the [workbook contract](docs/methodology/WORKBOOK_CONTRACT.md#status-and-staleness) says what each status means |
+| A result differs from its expected value | Check the commit, the inputs and the tolerance of the [test case](docs/methodology/TEST_CASES.md) before changing code |
+
+If Excel's state is uncertain, save your data separately, close Excel, and
+reproduce the problem in a fresh session with synthetic data before changing
+code.
+
+## 🗑️ Removing the workbook's components
+
+1. Run any documented cleanup, so that the workbook leaves Excel's settings as
+   it found them.
+2. Remove every imported module, class and form, and any test or example
+   module.
+3. Delete the code pasted into `ThisWorkbook` and each sheet's document module
+   ([step 5](#%EF%B8%8F-importing-vba-into-excel)), keeping the components
+   themselves. Otherwise their event handlers stay active and call
+   procedures that no longer exist.
+4. Compile what remains, then reopen the workbook and check that it opens with
+   no error.
+
+Removing components does not remove:
+
+- data on worksheets, defined names or sheets the build created;
+- references added by hand;
+- trusted locations, macro settings or anything else outside the workbook.
+
+Remove only what this workbook created, and record anything you keep.
 
 ## 🧹 Git hygiene
 
