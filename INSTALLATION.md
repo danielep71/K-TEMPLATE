@@ -2,7 +2,8 @@
 
 This guide moves VBA source between the repository and Excel, in both
 directions, without losing line endings, metadata or form resources. It also
-covers upgrading to a new revision, troubleshooting and removal. The
+covers running the VBA test harness, recording an Excel run, upgrading to a
+new revision, troubleshooting and removal. The
 [repository structure](docs/REPOSITORY_STRUCTURE.md) says where each component
 lives, and the [house style](docs/VBA_HOUSE_STYLE.md) says how it is written.
 The repository's own checks are in the
@@ -16,10 +17,11 @@ Adapt this section to the project and record the decision in an issue.
   32-bit, older perpetual versions, Mac and Excel for the web are not
   supported until a recorded decision and evidence add them.
 - **References:** only the defaults of the target installation: Visual Basic
-  For Applications, the Microsoft Excel Object Library, OLE Automation and the
-  Microsoft Office Object Library. Any other reference needs a reviewed
-  decision. Before compiling, check **Tools → References** for entries marked
-  *MISSING*.
+  For Applications, the Microsoft Excel 16.0 Object Library, OLE Automation
+  and the Microsoft Office 16.0 Object Library. Any other reference needs a
+  reviewed decision, and a change to the `REFERENCES` of
+  `tools/check_excel_run.py`. Before compiling, check **Tools → References**
+  for entries marked *MISSING*.
 - **Python** is used for repository tooling and for deriving reference values,
   never by the workbook.
 - **Macro security:** follow your organization's policy. Nothing here needs
@@ -101,6 +103,127 @@ Manual import needs no *Trust access to the VBA project object model*.
 5. **Check.** Run the [local checks](CONTRIBUTING.md#-local-checks) before
    committing. They check the repository, not VBA compilation or the results
    of a calculation.
+
+<a id="running-the-harness"></a>
+
+## 🧪 Running the harness
+
+In a **development** workbook built as above, with the modules of
+`tests/modules/`, open the Immediate window (**Ctrl+G**) and type:
+
+```text
+TEST_Examples.RunExampleTests
+```
+
+It runs the example suite through `TEST_Harness` and writes one record per
+line. A passing run ends with:
+
+```text
+RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=12; assertions=27; failures=0; cleanup=PASS; recovery=NONE
+```
+
+Anything else, or the error *Suite examples did not pass*, is a failure. Two
+more entry points show the failure paths and are expected to fail:
+
+| Entry point | Expected end |
+| --- | --- |
+| `TEST_Examples.RunExampleTestsWithInjectedFailure` | `RESULT=FAIL`, `operation=FAIL`, `completeness=COMPLETE`, `failures=1`, then *Suite examples did not pass* |
+| `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=11`, `assertions=25`, `failures=1`, then *Suite examples did not pass* |
+
+- **Complete log.** The Immediate window keeps only its last 200 lines. To
+  keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`
+  after it, with a folder outside the checkout or the ignored
+  `test-results/` directory.
+- **Recovery.** A run that stopped half way, or that left Excel's state
+  changed, leaves `recovery=REQUIRED`, and the next run is refused. Check
+  **File → Options → Formulas** (calculation), the open workbooks and the
+  other settings the log names, then type `TEST_Harness.ResetTests`.
+- **What it proves.** The suite exercises the harness itself and validates no
+  calculation of the workbook. The [harness guide](docs/methodology/TEST_HARNESS.md)
+  defines the outcomes and the log format.
+
+<a id="recording-an-excel-run"></a>
+
+## 🧾 Recording an Excel run
+
+This is the evidence that a commit's VBA was imported, compiled and run on the
+supported host, for a release and for any issue or pull request that cites
+an Excel run. It needs no self-hosted runner, no change to the
+macro-security level and no *Trust access to the VBA project object model*.
+
+1. **Fix the candidate.** In a clone with no local changes
+   (`git status --short` prints nothing), type `git switch --detach <commit>`,
+   then `git rev-parse HEAD` for the full SHA.
+2. **Make the evidence folder**, for example `test-results\excel-run\` in the
+   checkout (ignored by Git), with an empty `exported\` folder inside.
+3. **Build a development workbook** from that checkout as in
+   [importing VBA into Excel](#%EF%B8%8F-importing-vba-into-excel), with the
+   modules of `tests/modules/`.
+4. **Compile** with **Debug → Compile VBAProject**.
+5. **Certify.** In the Immediate window type, with the full path of the
+   folder and no trailing backslash:
+
+   ```text
+   TEST_Examples.CertifyExamples "C:\path\to\test-results\excel-run"
+   ```
+
+   It refuses to start if an earlier run left state behind. It runs the
+   suite normally, with the injected failure and with the skipped case, and
+   saves each complete log as `examples.log`, `injected.log` and
+   `skipped.log`. Then it writes `certification.log`. Each run prints a
+   `SAVED=` line: the normal run with `error=0`, the two failure runs with
+   the error *Suite examples did not pass*. Those errors are recorded, not
+   raised, so that every log is written. The certification ends with
+   `CERTIFICATION=PASS`; otherwise it raises *Certification of examples did
+   not pass* after writing its log.
+6. **Export the modules back.** In the VBE, right-click each component →
+   **Export File**, into `exported\`, under its own name. Export every VBA
+   component of the commit, the test modules included. Do not edit the
+   exported files.
+7. **Write `host.txt`** in the folder:
+
+   ```text
+   windows=Windows 11 Pro, version 24H2, OS build 26100.4061
+   references=Visual Basic For Applications; Microsoft Excel 16.0 Object Library; OLE Automation; Microsoft Office 16.0 Object Library
+   compile=PASS
+   ```
+
+   `windows` is what `winver` shows. `references` lists the boxes ticked
+   in **Tools → References**, separated by `; `. Write `compile=PASS` only if
+   step 4 completed with no error; otherwise write what it reported.
+8. **Check** the folder against the commit, with Python 3.11 or later and
+   Git:
+
+   ```sh
+   python tools/check_excel_run.py test-results/excel-run --commit <commit>
+   ```
+
+   It must end with `excel-run: PASS`. It prints the commit, the host and
+   the Git blob id of every imported component.
+9. **Record.** Copy the report into the issue, the pull request or the
+   [release certification](docs/release/RELEASE_CERTIFICATION.md), and add a
+   row to the tested environments of the
+   [host policy](#%EF%B8%8F-host-policy). The folder stays outside Git: its
+   exported modules would be second copies of the VBA components.
+
+`check_excel_run.py` reads only the folder and the commit:
+
+| It fails when | Because |
+| --- | --- |
+| An exported module differs from the commit's file, or one is missing or extra | The workbook was not built from that commit |
+| A log is missing or empty, does not end with `RESULT`, holds more than one run, or a line is not a `KEY=value` record | The log is incomplete |
+| A record is missing, extra or out of the order in which the commit's suite writes it, or an unexpected error (`ERROR`) is logged | The run did not execute the suite as written |
+| The normal run is `INCOMPLETE` | A mandatory case or assertion did not run |
+| The normal run is not `RESULT=PASS`, or its cases and assertions differ from the commit's suite in name or order | The run did not pass as written |
+| `CLEANUP` is not `PASS` or `RECOVERY` is not `NONE` in any of the three logs | Cleanup failed |
+| The two failure runs do not end as [documented](#running-the-harness), or fail anything but their own failure: the injected run its one designated assertion, with the expected value the suite injects and the same values in each record, the skipped-case run only `harness.completeness` | The failure paths did not behave |
+| `certification.log` is missing, a mode did not end as it must, a failure run did not reach its caller as `ERR_TEST_FAILED`, or it does not end with `CERTIFICATION=PASS` and `COMPLETE` | The certification did not pass |
+| `ENVIRONMENT` lacks a field, differs between the logs, or Office is not 64-bit | The host is unknown or not the supported target |
+| `host.txt` lacks a field, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), or `compile` is not `PASS` | The host record is incomplete |
+
+It cannot see Excel: the compile result, the references and the Windows
+build are the runner's own record. A PASS says the evidence is consistent
+with the commit; it validates no calculation of the workbook.
 
 ## 🔄 Upgrading to a new revision
 
