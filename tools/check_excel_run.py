@@ -223,6 +223,16 @@ def components(root: Path, commit: str) -> dict[str, bytes]:
     return {Path(path).name: git(root, "show", f"{commit}:{path}") for path in paths}
 
 
+def source_at(root: Path, commit: str, path: str, evidence: Evidence) -> bytes:
+    """The file at ``path`` in the commit, exactly as the policy names it; a
+    finding, and no bytes, when the commit has no such file."""
+    try:
+        return git(root, "show", f"{commit}:{path}")
+    except RuntimeError:
+        evidence.findings.append(f"{path}: not in commit {commit[:12]}, but {POLICY} names it")
+        return b""
+
+
 def parse_record(text: str, line: int) -> Record | None:
     match = RECORD.match(text)
     if not match:
@@ -720,14 +730,17 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     except PolicyError as error:
         evidence.findings.append(str(error))
         return evidence
-    sources = check_sources(root, commit, folder, evidence, policy)
-    source = sources.get(Path(policy.suite_source).name, b"")
+    check_sources(root, commit, folder, evidence, policy)
+    # The harness and the suite are read at the paths the policy names, never
+    # by file name, so a policy cannot point at a module the commit lacks.
+    harness = source_at(root, commit, policy.harness, evidence)
+    source = source_at(root, commit, policy.suite_source, evidence)
     suite = read_suite(source)
-    evidence.findings += suite_findings(policy, suite, source, commit[:12])
+    if source:
+        evidence.findings += suite_findings(policy, suite, source, commit[:12])
     check_logs(folder, suite, evidence, policy)
-    check_certification(folder,
-                        test_failed_number(sources.get(Path(policy.harness).name, b"")),
-                        evidence, policy)
+    if harness:
+        check_certification(folder, test_failed_number(harness), evidence, policy)
     check_host(folder, evidence, policy)
     check_binding(root, commit, folder, workbook, evidence, policy)
     if require_binding and evidence.binding == "UNVERIFIED":

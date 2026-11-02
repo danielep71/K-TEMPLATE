@@ -571,6 +571,16 @@ class PolicyTest(unittest.TestCase):
             lambda data: data["suite"].update(
                 certification_entry_point="CertifyOther")).encode()))
         self.assertTrue(any("no Public Sub CertifyOther" in item for item in entry), entry)
+        for key, name in (("harness", "TEST_Harness.bas"), ("suite", "TEST_Examples.bas")):
+            with self.subTest(moved=key):
+                path = f"does-not-exist/{name}"
+                def moved(data: dict[str, Any], key: str = key, path: str = path) -> None:
+                    if key == "harness":
+                        data["harness"] = path
+                    else:
+                        data["suite"]["source"] = path
+                found = run(*make_repository(policy_text(moved).encode()))
+                self.assertIn(f"{path}: not in commit", " ".join(found))
         logs = run(*make_repository(policy_text(
             lambda data: data["modes"][2].update(log="other.log")).encode()))
         self.assertIn("other.log: missing", logs)

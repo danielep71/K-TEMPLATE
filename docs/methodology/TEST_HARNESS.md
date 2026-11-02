@@ -131,8 +131,9 @@ holds what an Excel run must leave as evidence:
 
 `tools/check_excel_run.py` reads the policy from the candidate commit, so a
 run is judged by the policy of the commit it names, and rejects a policy that
-is missing or malformed. It also fails when the suite's counts or entry point
-differ from the policy. `tools/render_docs.py` renders the expected results in
+is missing or malformed. It reads the harness and the suite at the exact paths
+the policy names, and fails when the commit has no file there, or when the
+suite's counts or entry point differ from the policy. `tools/render_docs.py` renders the expected results in
 the installation guide from the same policy, and
 `tests/test_check_excel_run.py` keeps the policy equal to the suite and to
 the host policy of the installation guide. To change a mode, a file name, a
