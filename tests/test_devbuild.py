@@ -302,20 +302,6 @@ class Layout(unittest.TestCase):
                 self.assertTrue(any(expected in problem for problem in problems), problems)
         self.assertEqual(build_workbook.layout_problems(base), [])
 
-
-@contextlib.contextmanager
-def source_tree(files: dict[str, bytes]) -> Any:
-    """A directory with the build configuration and the given files."""
-    with tempfile.TemporaryDirectory(prefix="devbuild-") as temporary:
-        root = Path(temporary)
-        (root / "tools/devbuild").mkdir(parents=True)
-        shutil.copy(ROOT / build_workbook.CONFIG, root / build_workbook.CONFIG)
-        for name, data in files.items():
-            (root / name).parent.mkdir(parents=True, exist_ok=True)
-            (root / name).write_bytes(data)
-        yield root
-
-
     def test_test_sheets_are_built_only_in_development(self) -> None:
         base = self.layout
         layout = build_workbook.Layout(
@@ -334,6 +320,19 @@ def source_tree(files: dict[str, bytes]) -> Any:
         with zipfile.ZipFile(io.BytesIO(package)) as archive:
             book = archive.read("xl/workbook.xml").decode()
         self.assertNotIn("Checks", book)
+
+
+@contextlib.contextmanager
+def source_tree(files: dict[str, bytes]) -> Any:
+    """A directory with the build configuration and the given files."""
+    with tempfile.TemporaryDirectory(prefix="devbuild-") as temporary:
+        root = Path(temporary)
+        (root / "tools/devbuild").mkdir(parents=True)
+        shutil.copy(ROOT / build_workbook.CONFIG, root / build_workbook.CONFIG)
+        for name, data in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(data)
+        yield root
 
 
 class Components(unittest.TestCase):
