@@ -397,7 +397,8 @@ class Workbook(unittest.TestCase):
             with self.subTest(component=path.stem):
                 self.assertEqual(decompress(cfb.read(f"VBA/{path.stem}")).decode("cp1252"),
                                  build_workbook.module_text(path))
-                self.assertIn(f"Module={path.stem}", project)
+                record = "Class" if path.suffix.lower() == ".cls" else "Module"
+                self.assertIn(f"{record}={path.stem}", project)
 
     def test_production_holds_no_test_module(self) -> None:
         _, result = self.build("production")
@@ -409,10 +410,66 @@ class Workbook(unittest.TestCase):
             code = build_workbook.main([str(Path(temporary) / "W.xlsm"), "--root", str(ROOT),
                                         "--configuration", "production"])
         self.assertEqual(code, 0)
-        self.assertIn("no VBA component", output.getvalue())
+        selected = build_workbook.components(ROOT, self.layout, "production")
+        expected = ", ".join(path.stem for path in selected) or "no VBA component"
+        self.assertIn(f"components: {expected}", output.getvalue())
+        with git_tree({}) as root, tempfile.TemporaryDirectory() as temporary, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(build_workbook.main([str(Path(temporary) / "W.xlsm"), "--root",
+                                                  str(root), "--configuration", "production"]), 0)
+        self.assertIn("no VBA component: the workbook holds only its document modules",
+                      output.getvalue())
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(build_workbook.main(["--configuration", "staging"]), 1)
         self.assertIn("unknown configuration", output.getvalue())
+
+
+CLASS_SOURCE = (b'VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  \'True\r\nEND\r\n'
+                b'Attribute VB_Name = "CPair"\r\nOption Explicit\r\n')
+SHEET_SOURCE = (b'VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  \'True\r\nEND\r\n'
+                b'Attribute VB_Name = "shInputs"\r\nOption Explicit\r\n'
+                b'Private Sub Worksheet_Change(ByVal Target As Range)\r\nEnd Sub\r\n')
+
+
+@contextlib.contextmanager
+def git_tree(files: dict[str, bytes]) -> Any:
+    """A committed Git repository with the build configuration and the given files."""
+    with source_tree(files) as root:
+        for command in (["init", "-q"], ["add", "-A"],
+                        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"]):
+            build_workbook.git(root, *command)
+        yield root
+
+
+class ProjectSource(unittest.TestCase):
+    """Builds of a project with its own standard, class and document modules."""
+
+    files = {"src/core/CORE_Demo.bas": b'Attribute VB_Name = "CORE_Demo"\r\nOption Explicit\r\n',
+             "src/classes/CPair.cls": CLASS_SOURCE,
+             "src/workbook/shInputs.cls": SHEET_SOURCE}
+
+    def test_every_kind_of_module_is_embedded(self) -> None:
+        with git_tree(self.files) as root, tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary) / "W.xlsm"
+            result = build_workbook.build(root, "production", target)
+            with zipfile.ZipFile(target) as package:
+                cfb = CompoundFile(package.read("xl/vbaProject.bin"))
+        self.assertTrue(result.clean)
+        self.assertEqual([path.name for path in result.components], ["CORE_Demo.bas", "CPair.cls"])
+        project = cfb.read("PROJECT").decode("cp1252")
+        for record in ("Module=CORE_Demo", "Class=CPair", "Document=shInputs/&H00000000"):
+            self.assertIn(record, project)
+        sheet = decompress(cfb.read("VBA/shInputs")).decode("cp1252")
+        self.assertIn("Private Sub Worksheet_Change", sheet)
+        self.assertTrue(sheet.startswith('Attribute VB_Name = "shInputs"'))
+
+    def test_a_document_module_in_the_wrong_case_stops_the_build(self) -> None:
+        files = {"src/workbook/shINPUTS.cls": SHEET_SOURCE.replace(b"shInputs", b"shINPUTS")}
+        with git_tree(files) as root, tempfile.TemporaryDirectory() as temporary, \
+                self.assertRaisesRegex(build_workbook.BuildError,
+                                       r"shINPUTS\.cls \(code name shInputs\) differs"):
+            build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
 
 
 class Manifest(unittest.TestCase):

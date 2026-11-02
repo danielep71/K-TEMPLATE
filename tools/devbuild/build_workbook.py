@@ -194,13 +194,21 @@ def components(root: Path, layout: Layout, configuration: str) -> list[Path]:
         found += sorted(folder.glob("*.bas"))
         if directory == CLASS_HOME:
             found += sorted(folder.glob("*.cls"))
-    documents = {code.casefold() for code in
+    documents = {code.casefold(): code for code in
                  [layout.workbook_code_name, *(sheet.code_name for sheet in layout.sheets)]}
-    strays = sorted(path.name for path in (root / DOCUMENT_HOME).glob("*.cls")
-                    if path.stem.casefold() not in documents) \
+    exported = sorted((root / DOCUMENT_HOME).glob("*.cls")) \
         if (root / DOCUMENT_HOME).is_dir() else []
+    strays = [path.name for path in exported if path.stem.casefold() not in documents]
     if strays:
         raise BuildError(f"{DOCUMENT_HOME}: {', '.join(strays)} matches no sheet of {CONFIG}")
+    # The file is found by its exact name, so a name that differs only in case
+    # would be missed on a case-sensitive file system and replaced by an empty
+    # document module.
+    miscased = [f"{path.name} (code name {documents[path.stem.casefold()]})"
+                for path in exported if path.stem != documents[path.stem.casefold()]]
+    if miscased:
+        raise BuildError(f"{DOCUMENT_HOME}: {', '.join(miscased)} differs from its code name "
+                         "in case; rename it to the code name")
     return found
 
 
