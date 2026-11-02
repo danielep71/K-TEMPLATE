@@ -23,7 +23,13 @@ docs/methodology/TEST_HARNESS.md describes them:
   ended as it must, the two failure modes reaching their caller as
   ERR_TEST_FAILED, and CERTIFICATION=PASS with COMPLETE;
 - host.txt: the Windows build, the references (exactly the four supported
-  ones) and that Debug > Compile VBAProject completed.
+  ones) and that Debug > Compile VBAProject completed;
+- with --workbook, the binding of the export to the workbook it came from:
+  export-manifest.json (tools/devbuild/export_manifest.py) records the
+  SHA-256 of the workbook and of every exported file, and the workbook's
+  build stamp names the commit. The binding is VERIFIED, FAIL, or UNVERIFIED
+  when no workbook or manifest is given; --require-binding fails anything
+  but VERIFIED.
 
 It proves only that this evidence is consistent with the commit. It does not
 run Excel, and a PASS validates no calculation of the workbook.
@@ -33,12 +39,16 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import posixpath
 import re
 import subprocess
 import sys
+import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 VBA_SUFFIXES = (".bas", ".cls", ".frm")
@@ -56,6 +66,9 @@ MUST_PASS = frozenset({"NORMAL"})
 CERTIFICATION = "certification.log"
 EXPORTED = "exported"
 HOST = "host.txt"
+MANIFEST = "export-manifest.json"
+MANIFEST_FORMAT = "vba-export-1"
+BUILD_CONFIG = "tools/devbuild/workbook.json"
 # Configuration: the supported host (INSTALLATION.md, Host policy).
 REFERENCES = ("Visual Basic For Applications", "Microsoft Excel 16.0 Object Library",
               "OLE Automation", "Microsoft Office 16.0 Object Library")
@@ -64,8 +77,9 @@ ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
 HOST_FIELDS = ("windows", "references", "compile")
 
 VB_OBJECT_ERROR = -2147221504
-TEST_FAILED = re.compile(r"^\s*Public Const ERR_TEST_FAILED\s+As Long = vbObjectError \+ (\d+)\b",
-                         re.M)
+# ERR_TEST_FAILED as vbObjectError + n, or as the literal &H8004xxxx equal to it.
+TEST_FAILED = re.compile(r"^\s*Public Const ERR_TEST_FAILED\s+As Long = "
+                         r"(?:vbObjectError \+ (\d+)|&H([0-9A-F]{8}))\b", re.M | re.I)
 RECORD = re.compile(r"^([A-Z_]+)=(.*)$")
 CONSTANT = re.compile(r"^\s*Private Const (\w+)\s+As Long = (\d+)\b", re.M)
 PROCEDURE = re.compile(r"^(?:Public|Private) Sub (\w+)\(.*?^End Sub$", re.M | re.S)
@@ -106,6 +120,8 @@ class Evidence:
     hashes: dict[str, str] = field(default_factory=dict)
     environment: dict[str, str] = field(default_factory=dict)
     host: dict[str, str] = field(default_factory=dict)
+    binding: str = "UNVERIFIED"
+    binding_notes: list[str] = field(default_factory=list)
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -403,7 +419,12 @@ def check_host(folder: Path, evidence: Evidence) -> None:
 def test_failed_number(source: bytes) -> int | None:
     """ERR_TEST_FAILED of the commit's harness, as the number VBA raises."""
     match = TEST_FAILED.search(source.decode("ascii", errors="replace"))
-    return VB_OBJECT_ERROR + int(match.group(1)) if match else None
+    if not match:
+        return None
+    if match.group(1):
+        return VB_OBJECT_ERROR + int(match.group(1))
+    value = int(match.group(2), 16)
+    return value - (1 << 32) if value >= 1 << 31 else value
 
 
 def certification_plan(failed: int | None) -> list[tuple[str, dict[str, str]]]:
@@ -451,7 +472,134 @@ def check_certification(folder: Path, failed: int | None, evidence: Evidence) ->
                                  "after CERTIFICATION (more than one certification?)")
 
 
-def check(root: Path, commit: str, folder: Path) -> Evidence:
+SPREADSHEET = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+RELATIONSHIP = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+PACKAGE = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+REFERENCE = re.compile(r"^(?:'((?:[^']|'')+)'|([^'!]+))!\$?([A-Z]{1,3})\$?([0-9]+)$")
+
+
+def sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def cell_text(package: zipfile.ZipFile, part: str, cell: str) -> str | None:
+    """The text of one cell of a worksheet part: inline, shared or formula string."""
+    root = ElementTree.fromstring(package.read(part))
+    for element in root.iter(f"{SPREADSHEET}c"):
+        if element.get("r") != cell:
+            continue
+        kind = element.get("t")
+        if kind == "inlineStr":
+            return "".join(node.text or "" for node in element.iter(f"{SPREADSHEET}t"))
+        value = element.find(f"{SPREADSHEET}v")
+        if value is None or value.text is None:
+            return None
+        if kind == "s":
+            shared = ElementTree.fromstring(package.read("xl/sharedStrings.xml"))
+            item = list(shared.iter(f"{SPREADSHEET}si"))[int(value.text)]
+            return "".join(node.text or "" for node in item.iter(f"{SPREADSHEET}t"))
+        return value.text
+    return None
+
+
+def read_stamp(workbook: Path, name: str) -> str | None:
+    """The value of the defined name ``name`` of a workbook, read from its parts."""
+    with zipfile.ZipFile(workbook) as package:
+        book = ElementTree.fromstring(package.read("xl/workbook.xml"))
+        target = next((item.text or "" for item in book.iter(f"{SPREADSHEET}definedName")
+                       if item.get("name", "").casefold() == name.casefold()
+                       and item.get("localSheetId") is None), None)
+        match = REFERENCE.match(target or "")
+        if not match:
+            return None
+        tab = (match.group(1) or "").replace("''", "'") or match.group(2)
+        sheet = next((item for item in book.iter(f"{SPREADSHEET}sheet")
+                      if item.get("name") == tab), None)
+        if sheet is None:
+            return None
+        relations = ElementTree.fromstring(package.read("xl/_rels/workbook.xml.rels"))
+        relation = next((item for item in relations.iter(f"{PACKAGE}Relationship")
+                         if item.get("Id") == sheet.get(RELATIONSHIP)), None)
+        if relation is None:
+            return None
+        location = relation.get("Target", "")
+        part = location.lstrip("/") if location.startswith("/") else \
+            posixpath.normpath(str(PurePosixPath("xl") / location))
+        return cell_text(package, part, f"{match.group(3)}{match.group(4)}")
+
+
+def load_manifest(path: Path) -> tuple[str, dict[str, str]]:
+    """The workbook digest and the exported files' digests of export-manifest.json."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if data.get("format") != MANIFEST_FORMAT:
+        raise ValueError(f"format is {data.get('format')!r}, expected {MANIFEST_FORMAT}")
+    files = {str(item["file"]): str(item["sha256"]).lower() for item in data["files"]}
+    return str(data["workbook"]["sha256"]).lower(), files
+
+
+def check_binding(root: Path, commit: str, folder: Path, workbook: Path | None,
+                  evidence: Evidence) -> None:
+    """VERIFIED when the manifest matches the export and the workbook, and the
+    workbook's stamp names the commit; FAIL on any mismatch; UNVERIFIED without
+    a manifest or a workbook. A manifest that contradicts the export fails even
+    without --workbook."""
+    findings: list[str] = []
+    path = folder / MANIFEST
+    if not path.is_file():
+        evidence.binding = "UNVERIFIED"
+        evidence.binding_notes.append(f"no {MANIFEST}: the export is not bound to a workbook")
+        return
+    try:
+        workbook_digest, files = load_manifest(path)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        evidence.binding = "FAIL"
+        evidence.findings.append(f"{MANIFEST}: not a valid export manifest: {error!r}")
+        return
+    exported = folder / EXPORTED
+    present = {item.name: item for item in exported.iterdir() if item.is_file()} \
+        if exported.is_dir() else {}
+    for name in sorted(set(files) | set(present)):
+        if name not in present:
+            findings.append(f"{MANIFEST}: {name} is recorded but not in {EXPORTED}/")
+        elif name not in files:
+            findings.append(f"{MANIFEST}: {EXPORTED}/{name} is not recorded")
+        elif sha256(present[name].read_bytes()) != files[name]:
+            findings.append(f"{MANIFEST}: {EXPORTED}/{name} changed after the export")
+    if workbook is not None:
+        findings += workbook_findings(root, commit, workbook, workbook_digest)
+    else:
+        evidence.binding_notes.append("no --workbook: the manifest is not checked against "
+                                      "a workbook")
+    evidence.findings += findings
+    evidence.binding = "FAIL" if findings else ("VERIFIED" if workbook else "UNVERIFIED")
+
+
+def workbook_findings(root: Path, commit: str, workbook: Path, digest: str) -> list[str]:
+    if not workbook.is_file():
+        return [f"workbook {workbook}: not a file"]
+    findings = []
+    actual = sha256(workbook.read_bytes())
+    if actual != digest:
+        findings.append(f"workbook {workbook.name}: sha256 {actual}, but {MANIFEST} records "
+                        f"{digest}")
+    try:
+        layout = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
+        name = str(layout["stamp"]["commit"])
+    except (RuntimeError, ValueError, KeyError, TypeError):
+        return [*findings, f"{BUILD_CONFIG} at {commit[:12]} names no commit stamp"]
+    try:
+        stamp = read_stamp(workbook, name)
+    except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
+            ElementTree.ParseError) as error:
+        return [*findings, f"workbook {workbook.name}: build stamp not readable: {error!r}"]
+    if stamp != commit:
+        findings.append(f"workbook {workbook.name}: build stamp {name} is {stamp!r}, expected "
+                        f"{commit} from a clean build")
+    return findings
+
+
+def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
+          require_binding: bool = False) -> Evidence:
     evidence = Evidence()
     sources = check_sources(root, commit, folder, evidence)
     suite = read_suite(sources.get(Path(EXAMPLES).name, b""))
@@ -467,6 +615,10 @@ def check(root: Path, commit: str, folder: Path) -> Evidence:
     check_certification(folder, test_failed_number(sources.get(Path(HARNESS).name, b"")),
                         evidence)
     check_host(folder, evidence)
+    check_binding(root, commit, folder, workbook, evidence)
+    if require_binding and evidence.binding == "UNVERIFIED":
+        evidence.findings.append("binding UNVERIFIED, but --require-binding needs VERIFIED: "
+                                 + "; ".join(evidence.binding_notes))
     return evidence
 
 
@@ -480,6 +632,8 @@ def report(commit: str, evidence: Evidence) -> str:
              f"Compile: {evidence.host.get('compile', '')}",
              "Imported components (Git blob ids at the commit):"]
     lines += [f"  {name} {blob}" for name, blob in sorted(evidence.hashes.items())]
+    notes = f" ({'; '.join(evidence.binding_notes)})" if evidence.binding_notes else ""
+    lines.append(f"Binding: {evidence.binding}{notes}")
     lines += [f"FAIL: {finding}" for finding in evidence.findings]
     status = "FAIL" if evidence.findings else "PASS"
     lines.append(f"excel-run: {status} (evidence checked against the commit; Excel is not run "
@@ -492,6 +646,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("evidence", type=Path, help="folder holding the run's evidence")
     parser.add_argument("--commit", required=True, help="the commit the workbook was built from")
+    parser.add_argument("--workbook", type=Path,
+                        help="the workbook the export came from, checked against "
+                             f"{MANIFEST} and its build stamp")
+    parser.add_argument("--require-binding", action="store_true",
+                        help="fail unless the binding is VERIFIED (release evidence)")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
     root = args.root.resolve()
@@ -500,7 +659,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except RuntimeError as error:
         print(f"FAIL: commit {args.commit} not found: {error}")
         return 1
-    evidence = check(root, commit, args.evidence)
+    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding)
     print(report(commit, evidence))
     return 1 if evidence.findings else 0
 

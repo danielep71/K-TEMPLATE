@@ -59,12 +59,13 @@ Attribute VB_Name = "TEST_Examples"
         Private Const SUITE_NAME              As String = "examples"
         Private Const EXPECTED_CASES          As Long = 12
         Private Const EXPECTED_ASSERTIONS     As Long = 27
-    'Errors of the example procedures, test-only.
-        Private Const ERR_EXAMPLE_INVALID     As Long = vbObjectError + 4080   'Input outside the domain
-        Private Const ERR_EXAMPLE_OPERATION   As Long = vbObjectError + 4081   'Primary error of the operation
-        Private Const ERR_EXAMPLE_RESTORE     As Long = vbObjectError + 4082   'Simulated restore failure
-        Private Const ERR_CLEANUP_FAILED      As Long = vbObjectError + 4083   'Only the cleanup failed
-        Private Const ERR_EXAMPLE_HOST        As Long = vbObjectError + 4084   'Simulated capture or change failure
+    'Errors of the example procedures, test-only, as literals equal to
+    'vbObjectError + n (see TEST_Harness, Module constants).
+        Private Const ERR_EXAMPLE_INVALID     As Long = &H80040FF0   'vbObjectError + 4080: Input outside the domain
+        Private Const ERR_EXAMPLE_OPERATION   As Long = &H80040FF1   'vbObjectError + 4081: Primary error of the operation
+        Private Const ERR_EXAMPLE_RESTORE     As Long = &H80040FF2   'vbObjectError + 4082: Simulated restore failure
+        Private Const ERR_CLEANUP_FAILED      As Long = &H80040FF3   'vbObjectError + 4083: Only the cleanup failed
+        Private Const ERR_EXAMPLE_HOST        As Long = &H80040FF4   'vbObjectError + 4084: Simulated capture or change failure
 
 '------------------------------------------------------------------------------
 ' MODULE STATE
@@ -292,7 +293,7 @@ Private Sub CertifyMode( _
         RunErrorDescription = Err.Description
         On Error GoTo 0
         TEST_Harness.SaveLog Path
-        Debug.Print "SAVED=" & Path & "; mode=" & Mode & "; error=" & CStr(RunErrorNumber) & _
+        TEST_Harness.Echo "SAVED=" & Path & "; mode=" & Mode & "; error=" & CStr(RunErrorNumber) & _
             IIf(RunErrorNumber = 0, vbNullString, " " & RunErrorDescription)
         TEST_Harness.CertifyRun Mode, MustPass, RunErrorNumber, RunErrorDescription
 

@@ -117,7 +117,33 @@ the active window; the example suite's evidence entry point becomes
 CertifyExamples. The Excel-run check also checks certification.log, rejects an
 incomplete normal run by name and keeps its configuration in one block; its
 tests check a commit made from the working tree's modules. The log format
-moves to docs/methodology/TEST_HARNESS.md.
+moves to docs/methodology/TEST_HARNESS.md. So that the harness also runs in
+LibreOffice, its error numbers are written as literals equal to
+vbObjectError + n, it prints through TEST_Harness.Echo, it reads host
+properties that may be missing through HostProperty, and its timestamps use
+the hh:mm:ss format. The Excel-run check also binds an export to the
+workbook it came from, through export-manifest.json and the workbook's build
+stamp.
+
+The following files were adapted from danielep71/K-IRRBB-NMDs
+(https://github.com/danielep71/K-IRRBB-NMDs) under the Mozilla Public
+License 2.0:
+
+tools/devbuild/vba_project.py
+tools/devbuild/build_workbook.py
+tools/devbuild/lo_smoke.py
+tests/test_devbuild.py
+
+The license text is included in MPL-2.0.txt in this directory.
+Modifications add class modules to the VBA project writer. The workbook
+builder writes its own package from tools/devbuild/workbook.json, which
+follows the workbook contract, instead of a project template. It also builds
+a production or a development configuration from the directories of the
+structure guide, stops on forms and on document modules that match no sheet,
+and stamps the commit's committer time so that a rebuild is byte-identical.
+The LibreOffice smoke test runs the harness certification in a temporary
+profile and reports only failures LibreOffice is not known to cause. The
+decoder tests also check the builder against the workbook contract.
 
 The following file was adapted from danielep71/K-FRTB-SA
 (https://github.com/danielep71/K-FRTB-SA) under the MIT License:

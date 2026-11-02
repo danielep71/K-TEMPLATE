@@ -14,7 +14,7 @@ Attribute VB_Name = "TEST_Harness"
 '   Suite lifecycle: BeginRun, BeginCase, RecordCaseError, EndRun.
 '   Assertions: AssertEqualDouble, AssertNear, AssertEqualText, AssertTrue,
 '   AssertErrorValue, AssertRaised; WithinTolerance is the comparison rule.
-'   Log: Say, SaveLog, LastResult. Recovery: ResetTests. Certification:
+'   Log: Say, Echo, SaveLog, LastResult. Recovery: ResetTests. Certification:
 '   BeginCertification, CertifyRun, EndCertification. Option Private Module
 '   keeps all of them out of the workbook's external surface.
 '
@@ -72,9 +72,11 @@ Attribute VB_Name = "TEST_Harness"
 ' MODULE CONSTANTS
 '------------------------------------------------------------------------------
     'Test-only error numbers, kept apart from the production range in use.
-        Public Const ERR_TEST_DIRTY_START   As Long = vbObjectError + 4064   'Run refused: active or recovery required
-        Public Const ERR_TEST_FAILED        As Long = vbObjectError + 4065   'Run finished without PASS
-        Public Const ERR_TEST_USAGE         As Long = vbObjectError + 4066   'Lifecycle used out of order
+    'Written as literals equal to vbObjectError + n: LibreOffice, the optional
+    'smoke host, cannot evaluate vbObjectError in a constant expression.
+        Public Const ERR_TEST_DIRTY_START   As Long = &H80040FE0   'vbObjectError + 4064: Run refused: active or recovery required
+        Public Const ERR_TEST_FAILED        As Long = &H80040FE1   'vbObjectError + 4065: Run finished without PASS
+        Public Const ERR_TEST_USAGE         As Long = &H80040FE2   'vbObjectError + 4066: Lifecycle used out of order
 
 '------------------------------------------------------------------------------
 ' MODULE STATE
@@ -204,7 +206,7 @@ WriteHeader:
         Say "RUN=" & SuiteName & "; mode=" & Mode & _
             "; expected_cases=" & CStr(ExpectedCases) & _
             "; expected_assertions=" & CStr(ExpectedAssertions) & _
-            "; started=" & Format$(Now, "yyyy-mm-dd hh:nn:ss")
+            "; started=" & Format$(Now, "yyyy-mm-dd hh:mm:ss")
         Say "ENVIRONMENT=" & EnvironmentSummary()
         Exit Sub
 
@@ -727,7 +729,7 @@ Public Sub BeginCertification( _
         mCertComplete = 0
         mLastResult = vbNullString
         Set mCertLog = New Collection
-        CertSay "CERTIFY=" & SuiteName & "; started=" & Format$(Now, "yyyy-mm-dd hh:nn:ss")
+        CertSay "CERTIFY=" & SuiteName & "; started=" & Format$(Now, "yyyy-mm-dd hh:mm:ss")
 
 End Sub
 
@@ -758,7 +760,9 @@ Public Sub CertifyRun( _
 '   failure is never silent. A run with no RESULT of its own fails.
 '
 ' ERROR POLICY
-'   Raises ERR_TEST_USAGE outside a certification or while a run is active.
+'   Raises ERR_TEST_USAGE outside a certification. A run that is still
+'   active did not end: it requires recovery and is recorded as failed, so
+'   that the certification still writes its log.
 '
 ' UPDATED
 '   2026-11-02
@@ -777,8 +781,10 @@ Public Sub CertifyRun( _
 '------------------------------------------------------------------------------
         RequireCertification "CertifyRun"
         If mRunActive Then
-            Err.Raise ERR_TEST_USAGE, "TEST_Harness.CertifyRun", _
-                "The run of " & mSuite & " has not ended; call EndRun first."
+            mRunActive = False
+            mRecoveryRequired = True
+            mRecoveryReason = "run of " & mSuite & " did not end"
+            mLastResult = vbNullString
         End If
         If Len(mLastResult) = 0 Then
             Verdict = "NONE"
@@ -900,7 +906,32 @@ Public Sub Say( _
             Set mLog = New Collection
         End If
         mLog.Add Text
+        Echo Text
+
+End Sub
+
+
+Public Sub Echo( _
+    ByVal Text As String)
+'
+'==============================================================================
+'                                     Echo
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Print one line to the Immediate window, without keeping it in the log.
+'
+' ERROR POLICY
+'   A host without an Immediate window, such as LibreOffice run headless,
+'   raises on Debug.Print; that failure is ignored, because the kept log,
+'   not the window, is the record of a run.
+'
+' UPDATED
+'   2026-11-02
+'==============================================================================
+'
+        On Error Resume Next
         Debug.Print Text
+        On Error GoTo 0
 
 End Sub
 
@@ -1080,7 +1111,7 @@ Private Sub CertSay( _
 '==============================================================================
 '
         mCertLog.Add Text
-        Debug.Print Text
+        Echo Text
 
 End Sub
 
@@ -1341,6 +1372,40 @@ Private Function NumberText( _
 End Function
 
 
+Private Function HostProperty( _
+    ByVal PropertyName As String) _
+    As String
+'
+'==============================================================================
+'                                 HostProperty
+'------------------------------------------------------------------------------
+' PURPOSE
+'   One Application property as text, or an empty string when the host
+'   cannot read it.
+'
+' UPDATED
+'   2026-11-02
+'==============================================================================
+'
+        On Error GoTo ReadFailed
+        Select Case PropertyName
+            Case "Name"
+                HostProperty = Application.Name
+            Case "Version"
+                HostProperty = Application.Version
+            Case "Build"
+                HostProperty = CStr(Application.Build)
+            Case "OperatingSystem"
+                HostProperty = Application.OperatingSystem
+        End Select
+        Exit Function
+
+ReadFailed:
+        HostProperty = vbNullString
+
+End Function
+
+
 Private Function EnvironmentSummary() _
     As String
 '
@@ -1351,11 +1416,13 @@ Private Function EnvironmentSummary() _
 '   Describe the Excel host and the compiled VBA environment.
 '
 ' RETURNS
-'   host, version, os, office (bitness) and runtime (VBA generation); the
-'   last two come from conditional compilation, not from Windows.
+'   host, version, build, os, office (bitness) and runtime (VBA
+'   generation); the last two come from conditional compilation, not from
+'   Windows. A host property that cannot be read is left empty, so that the
+'   run still starts and tools/check_excel_run.py rejects the evidence.
 '
 ' UPDATED
-'   2026-10-24
+'   2026-11-02
 '==============================================================================
 '
 
@@ -1378,8 +1445,8 @@ Private Function EnvironmentSummary() _
 #Else
         Runtime = "VBA6"
 #End If
-        EnvironmentSummary = "host=" & Application.Name & "; version=" & Application.Version & _
-            "; build=" & CStr(Application.Build) & "; os=" & Application.OperatingSystem & _
+        EnvironmentSummary = "host=" & HostProperty("Name") & "; version=" & HostProperty("Version") & _
+            "; build=" & HostProperty("Build") & "; os=" & HostProperty("OperatingSystem") & _
             "; office=" & Bitness & "; runtime=" & Runtime
 
 End Function
