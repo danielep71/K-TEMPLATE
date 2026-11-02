@@ -112,6 +112,36 @@ class DerivationTest(unittest.TestCase):
         unscripted = output(reference={**output()["reference"], "script": None})
         self.assertEqual(run(None, [unscripted]), ([], 0))
 
+    def test_file_based_case_runs_once_per_variant(self) -> None:
+        # The script reads the variant directory it is given and prints its value.
+        script = ("import json, sys\nfrom pathlib import Path\n"
+                  "value = float((Path(sys.argv[1]) / 'total.txt').read_text())\n"
+                  "print(json.dumps({'outputs': [{'quantity': 'total_amount', 'scope': None, "
+                  "'value': value}]}))\n")
+
+        def check(expected: dict[str, float]) -> tuple[list[str], int]:
+            with tempfile.TemporaryDirectory(prefix="derivations-") as directory:
+                root = Path(directory)
+                files = {SCRIPT: script, "tests/fixtures/case-one/case.json": "{}",
+                         "tests/fixtures/case-one/lf/total.txt": "100\n",
+                         "tests/fixtures/case-one/crlf/total.txt": "200\r\n",
+                         "tests/expected/case-one.json": json.dumps({"variants": {
+                             variant: [output(value=value)]
+                             for variant, value in expected.items()}})}
+                for path, text in files.items():
+                    (root / path).parent.mkdir(parents=True, exist_ok=True)
+                    (root / path).write_bytes(text.encode())
+                return check_derivations.check(root)
+
+        self.assertEqual(check({"lf": 100.0, "crlf": 200.0}), ([], 2))
+        findings, compared = check({"lf": 100.0, "crlf": 100.0})
+        self.assertEqual(compared, 2)
+        self.assertEqual(findings, ["tests/expected/case-one.json: variants.crlf: total_amount "
+                                    "from tests/derivations/total.py: value 200.0, expected "
+                                    "100.0 within 0.01"])
+        # An expected variant without a directory is left to check_test_cases.py.
+        self.assertEqual(check({"lf": 100.0, "gone": 1.0}), ([], 1))
+
     def test_main_reports_the_verdict(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()) as printed:
             self.assertEqual(check_derivations.main(["--root", str(ROOT)]), 0)

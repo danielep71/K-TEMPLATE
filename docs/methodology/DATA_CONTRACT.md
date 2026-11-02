@@ -7,9 +7,15 @@ and fields by name.
 
 ## Datasets
 
-| ID | Description | Provider | Frequency | Granularity | File or sheet |
-| --- | --- | --- | --- | --- | --- |
-| *Illustrative:* `DS-01` | Example positions | Upstream system or manual input | Per reporting date | One row per position | `positions.csv` |
+| ID | Description | Provider | Frequency | Granularity | File or sheet | Encoding |
+| --- | --- | --- | --- | --- | --- | --- |
+| *Illustrative:* `DS-01` | Example positions | Upstream system or manual input | Per reporting date | One row per position | `positions.csv` | `UTF-8` |
+
+Name each file or sheet in a code span; a name with an extension is a file.
+*Encoding* is the encoding the workbook reads the files in, as a Python codec
+name such as `UTF-8` or `cp1252`; an empty cell means UTF-8. The
+[file-based test cases](TEST_CASES.md#file-based-cases) hold only these files,
+in this encoding.
 
 ## File format
 

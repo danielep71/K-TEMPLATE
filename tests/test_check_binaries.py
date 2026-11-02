@@ -61,7 +61,15 @@ class BinaryCheckTest(unittest.TestCase):
             "src/workbook/Template.xlsx": b"PK\x03\x04\0",
             "src/forms/frmRun.frm": b"VERSION 5.00\r\n",
             "src/forms/frmRun.frx": b"\0\1\2",
+            "tests/fixtures/a-case/crlf/positions.csv": b"id\r\nP1\r\n",
+            "tests/fixtures/a-case/utf-16/positions.csv": "id\n".encode("utf-16"),
         }), [])
+
+    def test_file_case_manifest_is_not_a_variant_file(self) -> None:
+        self.assertFinding(self.repository({"tests/fixtures/a-case/case.json": b"{\0}"}),
+                           "tests/fixtures/a-case/case.json: binary content")
+        self.assertFinding(self.repository({"tests/fixtures/data.bin": b"\0"}),
+                           "tests/fixtures/data.bin: binary content")
 
     def test_nul_byte_in_a_text_file_fails(self) -> None:
         self.assertFinding(self.repository({"notes.txt": b"text\0more"}),
