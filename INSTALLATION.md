@@ -156,7 +156,11 @@ code.
    it found them.
 2. Remove every imported module, class and form, and any test or example
    module.
-3. Compile what remains, then reopen the workbook and check that it opens with
+3. Delete the code pasted into `ThisWorkbook` and each sheet's document module
+   ([step 5](#%EF%B8%8F-importing-vba-into-excel)), keeping the components
+   themselves. Otherwise their event handlers stay active and call
+   procedures that no longer exist.
+4. Compile what remains, then reopen the workbook and check that it opens with
    no error.
 
 Removing components does not remove:
