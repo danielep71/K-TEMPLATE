@@ -12,9 +12,9 @@
 #   - Binary payloads never receive text normalization or line-based merges.
 #   - GitHub Linguist reports exported modules as VBA.
 #   - Text and binary handling depends on file type, except for the copies of
-#     regulatory sources in docs/methodology/sources/, which are stored byte
-#     for byte; the only other path rules are the archive exclusions
-#     under ARCHIVE HYGIENE.
+#     regulatory sources in docs/methodology/sources/ and the variant files of
+#     file-based test cases, which are stored byte for byte; the only other
+#     path rules are the archive exclusions under ARCHIVE HYGIENE.
 #     Other locations use file-type rules for their handling;
 #     Linguist already treats docs/ and
 #     examples/ as documentation. Add a path rule only with a layout change
@@ -252,6 +252,17 @@ VERSION         text eol=lf
 # README itself is ordinary documentation.
 docs/methodology/sources/**             -text
 docs/methodology/sources/README.md      text eol=lf
+
+
+#------------------------------------------------------------------------------
+# FILE-BASED TEST CASE VARIANTS
+#------------------------------------------------------------------------------
+# tests/fixtures/<case-id>/<variant>/ holds input files exactly as the workbook
+# reads them: a case may test CRLF line endings, a missing final newline,
+# trailing blanks or another encoding, so Git never converts these files and
+# reports no white-space error in them. The case.json manifest, one level up,
+# stays ordinary JSON. docs/methodology/TEST_CASES.md describes the format.
+tests/fixtures/*/*/**                   -text -whitespace
 
 
 #------------------------------------------------------------------------------

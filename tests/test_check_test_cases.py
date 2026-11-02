@@ -11,6 +11,8 @@ import contextlib
 import copy
 import io
 import json
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -301,6 +303,162 @@ class ExpectedTest(FindingTest):
         def all_illustrative(f: dict[str, Any], e: dict[str, Any]) -> None:
             output(e)["reference"].update({"class": "illustrative", "derivation": "Example"})
         self.assertFinding(run(all_illustrative), "illustrative- prefix must be used exactly")
+
+
+DATA_FILES = ("# Data\n\n## Datasets\n\n| ID | Description | File or sheet | Encoding |\n"
+              "| --- | --- | --- | --- |\n"
+              "| `DS-02` | Real positions | `positions.csv`, `limits.csv` | |\n"
+              "| `DS-03` | Legacy feed | `legacy.txt` | `cp1252` |\n"
+              "| `DS-04` | Manual input | `Inputs` sheet | |\n"
+              "| *Illustrative:* `DS-01` | Example | `example.csv` | |\n")
+MANIFEST: dict[str, Any] = {
+    "schema_version": 1, "kind": "test-file-fixture", "id": "file-one", "synthetic": True,
+    "description": "A synthetic import", "category": "nominal", "calculation": "CALC-02",
+    "reporting_date": "2026-01-02", "reporting_currency_code": "EUR",
+    "datasets": ["DS-02", "DS-03"]}
+VARIANT_FILES = {"lf/positions.csv": b"id,notional\nP1,600000\n",
+                 "crlf/positions.csv": b"id,notional\r\nP1,600000\r\n",
+                 "crlf/legacy.txt": "caf\u00e9\r\n".encode("cp1252")}
+EXPECTED_VARIANTS: dict[str, Any] = {
+    "schema_version": 1, "kind": "test-expected", "fixture": "file-one",
+    "variants": {"lf": [OUTPUT], "crlf": [OUTPUT]}}
+
+
+def file_case(edit: Edit | None = None, files: dict[str, bytes | None] | None = None,
+              extra: dict[str, str] | None = None) -> list[str]:
+    """Check a repository with one file-based case, after edit(manifest, expected).
+
+    files adds or replaces variant files, relative to the case directory; None
+    removes one, and a name ending in / makes an empty directory.
+    """
+    manifest, expected = copy.deepcopy(MANIFEST), copy.deepcopy(EXPECTED_VARIANTS)
+    if edit is not None:
+        edit(manifest, expected)
+    variant_files: dict[str, bytes | None] = {**VARIANT_FILES, **(files or {})}
+    with tempfile.TemporaryDirectory(prefix="file-cases-") as directory:
+        root = Path(directory)
+        texts = {"docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
+                 "docs/methodology/DATA_CONTRACT.md": DATA_FILES,
+                 "docs/methodology/SOURCES.md": SOURCES,
+                 "tests/fixtures/file-one/case.json": json.dumps(manifest),
+                 "tests/expected/file-one.json": json.dumps(expected), **(extra or {})}
+        for path, text in texts.items():
+            (root / path).parent.mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(text, encoding="utf-8")
+        case = root / "tests/fixtures/file-one"
+        for name, content in variant_files.items():
+            if content is None:
+                continue
+            (case / name).parent.mkdir(parents=True, exist_ok=True)
+            if name.endswith("/"):
+                (case / name).mkdir(exist_ok=True)
+            else:
+                (case / name).write_bytes(content)
+        return check_test_cases.check(root)[0]
+
+
+class FileBasedCaseTest(FindingTest):
+    def test_valid_file_case_passes(self) -> None:
+        self.assertEqual(file_case(), [])
+
+    def test_record_scope_names_a_dataset_of_the_case(self) -> None:
+        def scoped(dataset: str) -> Edit:
+            def edit(m: dict[str, Any], e: dict[str, Any]) -> None:
+                e["variants"]["lf"] = [{**OUTPUT, "scope": {"dataset": dataset,
+                                                            "record": "line 2"}}]
+            return edit
+        self.assertEqual(file_case(scoped("DS-02")), [])
+        self.assertFinding(file_case(scoped("DS-09")), "is not a dataset of the case")
+
+    def test_variants_and_expected_outputs_match(self) -> None:
+        self.assertFinding(file_case(lambda m, e: e["variants"].pop("crlf")),
+                           "variant crlf has no expected outputs")
+        self.assertFinding(file_case(lambda m, e: e["variants"].update(gone=[OUTPUT])),
+                           "variant 'gone' has no directory under tests/fixtures/file-one/")
+        self.assertFinding(file_case(lambda m, e: e["variants"].update(lf=[])),
+                           "variants.lf: outputs is not a non-empty list")
+        self.assertFinding(file_case(lambda m, e: e.update(variants={})),
+                           "variants is not a non-empty object")
+        self.assertFinding(file_case(lambda m, e: e.update(outputs=e.pop("variants"))),
+                           "lists outputs by variant")
+
+    def test_variant_holds_only_contract_files(self) -> None:
+        self.assertFinding(file_case(files={"lf/notes.txt": b"x\n"}),
+                           "lf/notes.txt: is not a file the data contract lists")
+        self.assertFinding(file_case(files={"lf/example.csv": b"x\n"}),
+                           "lf/example.csv: is not a file the data contract lists")
+        self.assertFinding(file_case(files={"lf/deeper/positions.csv": b"x\n"}),
+                           "lf/deeper: is not a file")
+        self.assertFinding(file_case(files={"empty/": b""}), "empty: is an empty variant")
+        self.assertFinding(file_case(files={"Upper/positions.csv": b"x\n"}),
+                           "Upper: is not a kebab-case variant name")
+        self.assertFinding(file_case(files={"README.md": b"x\n"}),
+                           "file-one/README.md: is not case.json or a variant directory")
+
+    def test_files_are_read_in_the_contract_encoding(self) -> None:
+        self.assertFinding(file_case(files={"lf/positions.csv": b"id\n\xff\n"}),
+                           "lf/positions.csv: is not UTF-8 (invalid start byte at byte 3)")
+        self.assertFinding(file_case(files={"crlf/legacy.txt": b"\x81"}),
+                           "crlf/legacy.txt: is not cp1252")
+
+        def invalid(m: dict[str, Any], e: dict[str, Any]) -> None:
+            m["category"] = "invalid"
+            status = {"quantity": "import_status", "text": "REJECTED_ENCODING", "scope": None,
+                      "rule": "CALC-02.1", "reference": OUTPUT["reference"]}
+            e["variants"] = {"lf": [status], "crlf": [status]}
+        self.assertEqual(file_case(invalid, files={"lf/positions.csv": b"\xff"}), [])
+        self.assertFinding(file_case(lambda m, e: m.update(category="invalid")),
+                           "variants.lf: an invalid case needs a _status text output")
+
+    def test_manifest(self) -> None:
+        cases: list[tuple[Edit, str]] = [
+            (lambda m, e: m.update(kind="test-fixture"), "kind is not 'test-file-fixture'"),
+            (lambda m, e: m.update(id="file-two"), "id is not the kebab-case directory name"),
+            (lambda m, e: m.update(datasets=[]), "datasets is not a non-empty list"),
+            (lambda m, e: m.update(datasets=["DS-02", "DS-02"]), "of distinct DS- IDs"),
+            (lambda m, e: m.update(datasets=["DS-09"]), "dataset DS-09 is not declared"),
+            (lambda m, e: m.update(datasets=["DS-02", "DS-04"]),
+             "dataset DS-04 names no file in the Datasets table"),
+            (lambda m, e: m.update(datasets=["DS-01", "DS-03"]), "DS-01 is illustrative"),
+            (lambda m, e: m.update(calculation="CALC-09"), "calculation CALC-09 is not"),
+            (lambda m, e: m.pop("reporting_date"), "missing reporting_date"),
+        ]
+        for edit, text in cases:
+            with self.subTest(text=text):
+                self.assertFinding(file_case(edit), text)
+
+    def test_case_directory(self) -> None:
+        self.assertFinding(file_case(files={"lf/positions.csv": None, "crlf/positions.csv": None,
+                                            "crlf/legacy.txt": None}),
+                           "file-one: has no variant directory")
+        self.assertFinding(file_case(extra={"tests/fixtures/file-one.json": "{}"}),
+                           "file-one.json is a second fixture of the same case")
+        self.assertFinding(file_case(extra={"tests/fixtures/stray/positions.csv": "x\n"}),
+                           "tests/fixtures/stray: is a directory without case.json")
+
+    def test_data_contract_encodings(self) -> None:
+        unknown = DATA_FILES.replace("`cp1252`", "`klingon`")
+        self.assertFinding(file_case(extra={"docs/methodology/DATA_CONTRACT.md": unknown}),
+                           "DS-03 has an unknown encoding 'klingon'")
+        without_column = ("# Data\n\n## Datasets\n\n| ID | File or sheet |\n| --- | --- |\n"
+                          "| `DS-02` | `positions.csv`, `limits.csv` |\n| `DS-03` | `legacy.txt` |\n")
+        # Without an Encoding column every file is UTF-8, which the cp1252 file is not.
+        self.assertFinding(file_case(extra={"docs/methodology/DATA_CONTRACT.md": without_column}),
+                           "crlf/legacy.txt: is not UTF-8")
+
+    @unittest.skipIf(shutil.which("git") is None, "git is not installed")
+    def test_variant_files_are_stored_byte_for_byte(self) -> None:
+        paths = ["tests/fixtures/a-case/a-variant/positions.csv", "tests/fixtures/a-case/case.json"]
+        printed = subprocess.run(["git", "check-attr", "text", "whitespace", "--", *paths],
+                                 cwd=ROOT, capture_output=True, text=True, check=True).stdout
+        self.assertEqual(printed.splitlines(), [
+            f"{paths[0]}: text: unset", f"{paths[0]}: whitespace: unset",
+            f"{paths[1]}: text: set", f"{paths[1]}: whitespace: unspecified"])
+        editorconfig = (ROOT / ".editorconfig").read_text(encoding="utf-8")
+        section = editorconfig.split("[tests/fixtures/*/*/**]\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(section.splitlines(), [
+            "charset = unset", "end_of_line = unset", "insert_final_newline = unset",
+            "trim_trailing_whitespace = false"])
 
 
 class MainTest(unittest.TestCase):

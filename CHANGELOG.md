@@ -61,15 +61,23 @@ milestones and their pull requests.
 - A release process: [RELEASING.md](RELEASING.md), this changelog, a release
   certification record and a milestone closeout record under `docs/release/`,
   and `tools/check_changelog.py`, which **Repository integrity** runs (#69).
-- A numerical test-case format, `docs/methodology/TEST_CASES.md`, with an
-  illustrative case under `tests/fixtures/` and `tests/expected/`, and
+- A numerical test-case format, `docs/methodology/TEST_CASES.md`, and
   `tools/check_test_cases.py`, which **Repository integrity** runs (#75).
+  A case is a JSON fixture, or a file-based case whose variants hold input
+  files named and encoded as in the data contract, stored byte for byte
+  (#117). An illustrative case of each form is under `tests/fixtures/` and
+  `tests/expected/`.
 - `tools/check_binaries.py`, which **Repository integrity** runs: a tracked
   binary file outside the approved paths fails unless
   `.github/binary-allowlist.json` lists it with its current SHA-256 (#113).
 - `tools/check_derivations.py`, which **Repository integrity** runs: it runs
   the derivation scripts named by expected values and compares their results
-  within tolerance, with an illustrative script for the example case (#115).
+  within tolerance, once per variant for a file-based case, with an
+  illustrative script for each example case (#115, #117).
+
+- `docs/methodology/WORKBOOK_CONTRACT.md`, a workbook contract to fill in: the
+  sheets and code names, defined names, areas, operations, status after a
+  failure, and what the build creates (#118).
 
 ### Changed
 

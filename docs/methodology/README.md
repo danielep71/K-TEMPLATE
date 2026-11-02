@@ -12,10 +12,12 @@ and the evidence they require, show that the figures are right.
 | [🧮 Calculation contracts](CALCULATION_CONTRACTS.md) | For each calculation: inputs, rules with their sources, outputs, limits and failure behaviour. |
 | [✅ Validation plan](VALIDATION_PLAN.md) | Who checks what, the independent checks for each calculation, and what an evidence record contains. |
 | [🧪 Numerical test cases](TEST_CASES.md) | The format of the synthetic inputs and expected results, with their provenance and tolerances, that the checks enforce. |
+| [📊 Workbook contract](WORKBOOK_CONTRACT.md) | The workbook's sheets, code names, defined names and areas, what each operation writes, and how a failure marks earlier results. |
 
-Read them in that order: a rule cites a source, consumes the data contract's
-fields, and is validated as the plan describes, with test cases in the
-format the last guide defines.
+Read the first five in that order: a rule cites a source, consumes the data
+contract's fields, and is validated as the plan describes, with test cases in
+the format the fifth guide defines. The workbook contract then places those
+inputs and results in the workbook.
 
 ## Filling in the guides
 
