@@ -77,6 +77,10 @@ milestones and their pull requests.
   within tolerance, once per variant for a file-based case, with an
   illustrative script for each example case (#115, #117).
 
+- A host behaviour register in `docs/methodology/VALIDATION_PLAN.md`: each
+  Excel or VBE behaviour that the code relies on is `assumed` or `measured`,
+  with the probe, the host and the result. Assumed entries are listed as a
+  limit in the release certification (#133).
 - `docs/methodology/WORKBOOK_CONTRACT.md`, a workbook contract to fill in: the
   sheets and code names, defined names, areas, operations, status after a
   failure, and what the build creates (#118).
