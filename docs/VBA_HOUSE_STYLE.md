@@ -194,9 +194,12 @@ What they cannot prove:
   `With` block) nor qualified calls (`Module.Name`, `obj.Method`), nor calls
   inside an expression (`x = Helper(1)`), and it does not see the controls of
   a worksheet, which a document module may name. Its built-in callees, such as
-  `MsgBox`, `DoEvents` and a form's `Hide`, are listed in `BUILTIN_CALLS`;
-  extend that list when a built-in it does not know is called as a
-  statement;
+  `MsgBox` and `DoEvents`, are listed in `BUILTIN_CALLS`, a form's or document
+  module's own methods, such as `Hide` or `Protect`, in `HOST_CALLS`, and the
+  host properties assignable without a declaration in `HOST_TARGETS`:
+  `Range` and `Cells` anywhere, a UserForm's `Caption` or `Width` in a form,
+  a workbook's `Saved` or a worksheet's `Visible` in a document module.
+  Extend the list when code calls or assigns a built-in it does not know;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 

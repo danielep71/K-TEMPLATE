@@ -10,12 +10,16 @@ never satisfies an assignment in an active one:
   ``RSet`` or ``For`` (``For Each`` included), is declared: a parameter, a
   ``Dim``, ``Static``, ``Const`` or ``ReDim`` of the procedure, a module-level
   name, a control of a form, the procedure's own name, a property of the
-  module, or a public name of a standard module. ``ReDim`` declares, as VBA
+  module, a public name of a standard module, or a property the host
+  provides (HOST_TARGETS: Range and Cells anywhere, a UserForm's Caption in a
+  form, a Worksheet's Visible in a document module). ``ReDim`` declares, as VBA
   does. A member access (``x.y =``, ``.y =`` in a ``With`` block) is not read;
 - every statement-level call, ``Name args`` or ``Call Name(args)``, names a
   procedure or ``Declare`` of the same module, a public procedure or
-  ``Declare`` of a standard module, or a name of BUILTIN_CALLS, the
-  documented VBA, Excel and form built-ins. A qualified call (``Module.Name``,
+  ``Declare`` of a standard module, a name of BUILTIN_CALLS (VBA functions
+  and Excel methods used as statements), or a method the host provides in
+  that kind of module (HOST_CALLS: a UserForm's Hide in a form, a
+  Worksheet's Protect in a document module). A qualified call (``Module.Name``,
   ``obj.Method``) and a call inside an expression are not resolved;
 - no procedure, parameter, variable, constant, Enum, Enum member, Type,
   Declare or Event is named like a VBA keyword (KEYWORDS). A bracketed Enum
@@ -89,13 +93,42 @@ STATEMENT_WORDS = frozenset("""
     wend while width with write
 """.split())
 # Names a statement may call without a declaration in the project: VBA
-# statements and functions used as statements, and members of the Excel
-# Application and of a UserForm that VBA resolves unqualified.
-BUILTIN_CALLS = frozenset("""
-    beep calculate doevents hide inputbox msgbox repaint run sendkeys shell show
-""".split())
+# functions used as statements and the Excel Application methods that VBA
+# resolves unqualified, in every module; a UserForm's own methods in a form;
+# a Worksheet's or Workbook's in a document module (one with VB_Base).
+# Extend the list of the module kind when code calls another one.
+BUILTIN_CALLS = frozenset("calculate doevents inputbox msgbox run sendkeys shell".split())
+HOST_CALLS = {
+    "form": frozenset("""
+        hide move printform redoaction repaint scroll setdefaulttaborder show undoaction
+        whatsthismode
+    """.split()),
+    "document": frozenset("""
+        activate calculate copy delete move paste printout printpreview protect refreshall
+        save saveas showalldata unprotect
+    """.split()),
+}
 # Built-in statement targets: Mid$(Text, 1, 1) = "x" replaces characters.
 BUILTIN_TARGETS = frozenset({"mid", "mid$", "midb", "midb$"})
+# Properties the host provides without a declaration, assignable unqualified:
+# the Excel globals in every module, a UserForm's own properties in a form,
+# and a Worksheet's or Workbook's in a document module (one with VB_Base).
+# Extend the list of the module kind when code assigns another one.
+HOST_TARGETS = {
+    "any": frozenset("activecell cells columns range rows".split()),
+    "form": frozenset("""
+        backcolor bordercolor borderstyle caption cycle drawbuffer enabled font forecolor
+        height helpcontextid keepscrollbarsvisible left mousepointer picture
+        picturealignment picturesizemode picturetiling righttoleft scrollbars scrollheight
+        scrollleft scrolltop scrollwidth specialeffect startupposition tag top visible
+        whatsthisbutton whatsthishelp width zoom
+    """.split()),
+    "document": frozenset("""
+        displaypagebreaks displayrighttoleft enableautofilter enablecalculation
+        enableformatconditionscalculation enableoutlining enableselection saved scrollarea
+        standardwidth visible
+    """.split()),
+}
 KEYWORDS = frozenset("""
     addressof alias and any as attribute base boolean byref byte byval call case
     close const currency date decimal declare dim do double each else elseif empty
@@ -122,6 +155,7 @@ class Procedure:
 class Module:
     path: str
     standard: bool
+    kind: str = "any"
     names: set[str] = field(default_factory=set)
     public: set[str] = field(default_factory=set)
     callables: set[str] = field(default_factory=set)
@@ -347,6 +381,8 @@ def scan(path: str, source: str) -> Module:
     """The declarations, assignments and calls of one component's source."""
     module = Module(path, path.lower().endswith(".bas"))
     header = path.lower().endswith(".frm")
+    if header:
+        module.kind = "form"
     current: Procedure | None = None
     block: list[str] = []
     for line, statement in statements(source):
@@ -358,6 +394,8 @@ def scan(path: str, source: str) -> Module:
                 if control:
                     module.names.add(control.group("name").casefold())
                 continue
+        if statement.lower().startswith("attribute vb_base ") and path.lower().endswith(".cls"):
+            module.kind = "document"
         opener = PROC.match(statement) if not block else None
         if opener:
             kind = re.sub(r"\s+", " ", opener.group("kind")).casefold()
@@ -397,12 +435,14 @@ def environment_findings(modules: list[Module]) -> list[Finding]:
                         for line, name, what in module.declared if name.casefold() in KEYWORDS)
         for procedure in module.procedures:
             assignable = (procedure.names | module.names | module.properties | public_names
-                          | {procedure.name.casefold()} | BUILTIN_TARGETS)
+                          | {procedure.name.casefold()} | BUILTIN_TARGETS
+                          | HOST_TARGETS["any"] | HOST_TARGETS.get(module.kind, frozenset()))
             findings.extend(Finding(module.path, line, f"{name} is assigned in {procedure.name} "
                                                        "but not declared")
                             for line, name in procedure.assignments
                             if name.casefold() not in assignable)
-            callable_names = module.callables | public_callables | BUILTIN_CALLS
+            callable_names = (module.callables | public_callables | BUILTIN_CALLS
+                              | HOST_CALLS.get(module.kind, frozenset()))
             findings.extend(Finding(module.path, line, f"{name} is called in {procedure.name} "
                                                        "but no procedure of that name is "
                                                        "reachable")

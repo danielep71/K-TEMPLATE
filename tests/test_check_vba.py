@@ -1424,6 +1424,31 @@ class IdentifierTest(unittest.TestCase):
         files = changed("src/classes/CCalculationResult.cls", CLASS, cls, files)
         self.assertEqual(run_check(check_vba_identifiers.check, files), [])
 
+    def test_host_properties_are_assignable_in_their_module_kind(self) -> None:
+        form = FORM + ('\nPrivate Sub UserForm_Initialize()\n        Caption = "Options"\n'
+                       '        Width = 200\n        Range("A1") = 1\nEnd Sub\n')
+        sheet = WORKBOOK + ('\nPrivate Sub Workbook_Open()\n        Saved = True\n'
+                            '        Cells(1, 1) = 2\n        RefreshAll\n        Save\n'
+                            'End Sub\n')
+        files = changed("src/workbook/ThisWorkbook.cls", WORKBOOK, sheet,
+                        changed("src/forms/frmRunOptions.frm", FORM, form))
+        self.assertEqual(run_check(check_vba_identifiers.check, files), [])
+        # A form property is not a name of a standard module, and a typo is
+        # still undeclared in a form.
+        standard = module("Public Sub Run()\n        Caption = \"x\"\n        Range(\"A1\") = 1\n"
+                          "End Sub\n")
+        self.assertEqual(run_check(check_vba_identifiers.check, standalone(standard)),
+                         ["tests/modules/TEST_Fixture.bas:5: Caption is assigned in Run but not "
+                          "declared [vba6-win32, vba7-win32, vba7-win64]"])
+        hidden = module("Public Sub Run()\n        Hide\nEnd Sub\n")
+        self.assertIn("Hide is called in Run", run_check(check_vba_identifiers.check,
+                                                         standalone(hidden))[0])
+        typo = form.replace("Caption = ", "Captoin = ")
+        found = run_check(check_vba_identifiers.check,
+                          changed("src/forms/frmRunOptions.frm", FORM, typo))
+        self.assertEqual(len(found), 1)
+        self.assertIn("Captoin is assigned in UserForm_Initialize but not declared", found[0])
+
     def test_counts_components_and_procedures(self) -> None:
         with repository(VALID) as root:
             _, components, procedures = check_vba_identifiers.check(root)
