@@ -142,7 +142,7 @@ class RunTest(RepositoryTest):
     def run_checks(self, listed: list[Check], strict: bool = False,
                    summary: Path | None = None) -> tuple[int, str, dict[str, object]]:
         with contextlib.redirect_stdout(io.StringIO()) as printed, \
-                mock.patch.dict(os.environ, {"PR_HEAD_SHA": "f" * 40}):
+                mock.patch.dict(os.environ, {"PR_HEAD_SHA": "f" * 40, "GITHUB_ACTIONS": ""}):
             code = check_repository.run(self.context(), listed,
                                         self.root / "test-results/integrity", strict, summary)
         report = json.loads((self.root / "test-results/integrity/report.json")
