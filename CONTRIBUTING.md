@@ -64,6 +64,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `vba-jumps` | `python tools/check_vba_jumps.py` |
 | `vba-public-api` | `python tools/check_vba_public_api.py` |
 | `vba-dependencies` | `python tools/check_vba_dependencies.py` |
+| `vba-identifiers` | `python tools/check_vba_identifiers.py` |
 | `test-cases` | `python tools/check_test_cases.py` |
 | `derivations` | `python tools/check_derivations.py` |
 | `changelog` | `python tools/check_changelog.py` |
