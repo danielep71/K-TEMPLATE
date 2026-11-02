@@ -95,7 +95,8 @@ In a task pull request into the release branch:
 `tools/check_changelog.py` fails until these agree with the newest release. It
 also fails on a placeholder line, such as `TBD`, in a changelog section, and
 on a "Release Candidate" mention or an unchecked task-list item in
-`README.md`.
+`README.md`. From step 6 on, the section is frozen: once the tag exists, the
+check fails when the section differs from its content at the tag.
 
 ### 2. Integrate and freeze the candidate
 
@@ -242,7 +243,12 @@ Logs and artifacts expire, so copy the decisive lines.
   tag may have been fetched, prefer a new patch version to deleting it.
 - **After publication:** never move the tag or replace an asset. Publish a
   corrected patch version and record the problem in the changelog; report a
-  vulnerability as [SECURITY.md](SECURITY.md) describes.
+  vulnerability as [SECURITY.md](SECURITY.md) describes. Leave the released
+  section as published. Only a demonstrable error in it, such as a wrong file
+  name or link, is corrected there, in a reviewed pull request that adds
+  `Corrected after release on YYYY-MM-DD: <reason>` to the section;
+  `tools/check_changelog.py` then reports the difference as a note instead of
+  failing.
 
 ## ✅ Checklist
 

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import contextlib
 import io
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -221,6 +223,130 @@ class VersionTest(unittest.TestCase):
                 self.assertEqual(check_changelog.main(["--root", temporary,
                                                        "--repository", REPOSITORY]), code)
                 self.assertIn(verdict, output.getvalue())
+
+
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
+                    "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                    "-c", "tag.gpgsign=false", *args], capture_output=True, check=True)
+
+
+@unittest.skipUnless(shutil.which("git"), "needs Git")
+class FrozenSectionTest(unittest.TestCase):
+    """Released sections against CHANGELOG.md at their tags, in temporary repositories."""
+
+    def frozen(self, edit: str | None = None, tags: tuple[str, ...] = ("v0.1.0", "v0.2.0"),
+               tagged: str = RELEASED) -> tuple[list[str], list[str]]:
+        """Commit ``tagged`` with the tags, then check ``edit`` (or ``tagged``) against them."""
+        with tempfile.TemporaryDirectory(prefix="changelog-") as temporary:
+            root = Path(temporary)
+            (root / "CHANGELOG.md").write_text(tagged, encoding="utf-8", newline="")
+            (root / "VERSION").write_text("0.2.0\n", encoding="utf-8")
+            git(root, "init", "-q")
+            git(root, "add", "-A")
+            git(root, "commit", "-qm", "Release")
+            for tag in tags:
+                git(root, "tag", "-a", tag, "-m", tag)
+            if edit is not None:
+                (root / "CHANGELOG.md").write_text(edit, encoding="utf-8", newline="")
+            found, _, notes = check_changelog.check_with_notes(root, REPOSITORY)
+            return found, notes
+
+    def test_an_unchanged_release_passes(self) -> None:
+        self.assertEqual(self.frozen(), ([], []))
+
+    def test_a_new_release_and_line_endings_do_not_unfreeze_older_sections(self) -> None:
+        newer = RELEASED.replace(
+            "## [Unreleased]\n\n", "## [Unreleased]\n\n## [0.3.0] - 2026-11-20\n\n"
+            "### Added\n\n- More.\n\n").replace(
+            "compare/v0.2.0...HEAD\n", f"compare/v0.3.0...HEAD\n[0.3.0]: {TAGS}/v0.3.0\n")
+        found, notes = self.frozen(newer.replace("\n", "\r\n"))
+        self.assertEqual(notes, ["CHANGELOG.md: [0.3.0] has no tag v0.3.0 yet, so it is not "
+                                 "frozen"])
+        self.assertEqual([item for item in found if "tag" in item], [])
+
+    def test_an_edited_release_fails_with_its_line(self) -> None:
+        cases = {"- A start.": ("- A different start.", "CHANGELOG.md:15: [0.1.0]"),
+                 "## [0.2.0] - 2026-11-02": ("## [0.2.0] - 2026-11-03", "CHANGELOG.md:5: [0.2.0]"),
+                 "### Fixed\n\n- A fix.\n": ("### Fixed\n\n- A fix.\n- Another.\n",
+                                              "CHANGELOG.md:10: [0.2.0]")}
+        for old, (new, where) in cases.items():
+            with self.subTest(old=old):
+                found, _ = self.frozen(RELEASED.replace(old, new))
+                self.assertEqual(found, [f"{where} differs from its content at tag v"
+                                         f"{where.split('[')[1][:5]}; a released section is "
+                                         "frozen (add 'Corrected after release on YYYY-MM-DD: "
+                                         "<reason>' only "
+                                         "for a reviewed correction)"])
+
+    def test_a_deleted_or_renamed_release_fails(self) -> None:
+        deleted = RELEASED.replace("## [0.1.0] - 2026-10-30\n\n### Added\n\n- A start.\n\n",
+                                   "").replace(f"[0.1.0]: {TAGS}/v0.1.0\n", "")
+        gone = ("CHANGELOG.md: [0.1.0] was released with tag v0.1.0 but its section is gone; "
+                "a released section is frozen")
+        self.assertEqual(self.frozen(deleted), ([gone], []))
+        renamed = RELEASED.replace("[0.1.0]", "[0.1.1]").replace("/v0.1.0", "/v0.1.1")
+        found, notes = self.frozen(renamed)
+        self.assertEqual(found, [gone])
+        self.assertEqual(notes, ["CHANGELOG.md: [0.1.1] has no tag v0.1.1 yet, so it is not "
+                                 "frozen"])
+        # A tag that no released section ever named is not a release of this changelog.
+        self.assertEqual(self.frozen(tags=("v0.1.0", "v0.2.0", "v9.9.9", "vnext")), ([], []))
+
+    def test_an_older_release_checked_out_ignores_newer_tags(self) -> None:
+        first = (
+            "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-30\n\n### Added\n\n"
+            f"- A start.\n\n[Unreleased]: https://github.com/{REPOSITORY}/compare/v0.1.0...HEAD\n"
+            f"[0.1.0]: {TAGS}/v0.1.0\n")
+        with tempfile.TemporaryDirectory(prefix="changelog-") as temporary:
+            root = Path(temporary)
+            git(root, "init", "-q")
+            for text, version in ((first, "0.1.0"), (RELEASED, "0.2.0")):
+                (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
+                (root / "VERSION").write_text(f"{version}\n", encoding="utf-8")
+                git(root, "add", "-A")
+                git(root, "commit", "-qm", f"Release {version}")
+                git(root, "tag", "-a", f"v{version}", "-m", f"v{version}")
+            git(root, "checkout", "-q", "v0.1.0")
+            self.assertEqual(check_changelog.check_with_notes(root, REPOSITORY), ([], 1, []))
+            git(root, "checkout", "-q", "v0.2.0")
+            self.assertEqual(check_changelog.check_with_notes(root, REPOSITORY), ([], 2, []))
+            (root / "CHANGELOG.md").write_text(
+                RELEASED.replace("## [0.1.0] - 2026-10-30\n\n### Added\n\n- A start.\n\n", "")
+                .replace(f"[0.1.0]: {TAGS}/v0.1.0\n", ""), encoding="utf-8")
+            found, _, _ = check_changelog.check_with_notes(root, REPOSITORY)
+            self.assertIn("CHANGELOG.md: [0.1.0] was released with tag v0.1.0 but its section "
+                          "is gone; a released section is frozen", found)
+
+    def test_a_dated_correction_is_a_note(self) -> None:
+        note = "Corrected after release on 2026-11-05: the entry named the wrong file."
+        corrected = RELEASED.replace("- A start.\n", f"- A corrected start.\n\n{note}\n")
+        self.assertEqual(self.frozen(corrected), (
+            [], [f"CHANGELOG.md: [0.1.0] differs from its tag v0.1.0: {note}"]))
+        for invalid in ("Corrected after release: no date.",
+                        "Corrected after release on 2026-02-30: not a calendar date."):
+            with self.subTest(note=invalid):
+                found, _ = self.frozen(RELEASED.replace("- A start.\n",
+                                                        f"- A corrected start.\n\n{invalid}\n"))
+                self.assertEqual(len(found), 1)
+                self.assertIn("[0.1.0] differs from its content at tag v0.1.0", found[0])
+
+    def test_an_untagged_release_is_a_note(self) -> None:
+        self.assertEqual(self.frozen(tags=("v0.2.0",)), (
+            [], ["CHANGELOG.md: [0.1.0] has no tag v0.1.0 yet, so it is not frozen"]))
+
+    def test_a_tag_whose_changelog_lacks_the_section_fails(self) -> None:
+        found, _ = self.frozen(RELEASED, tagged=UNRELEASED_ONLY)
+        self.assertIn("CHANGELOG.md: [0.2.0] is not in CHANGELOG.md at its tag v0.2.0", found)
+
+    def test_without_git_nothing_is_compared(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="changelog-") as temporary:
+            root = Path(temporary)
+            (root / "CHANGELOG.md").write_text(RELEASED, encoding="utf-8")
+            (root / "VERSION").write_text("0.2.0\n", encoding="utf-8")
+            self.assertEqual(check_changelog.frozen_problems(root, RELEASED, ["0.2.0"]), (
+                [], ["CHANGELOG.md: not a Git checkout, so released sections were not compared "
+                     "with their tags"]))
 
 
 if __name__ == "__main__":
