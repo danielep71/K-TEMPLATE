@@ -53,6 +53,12 @@ GitHub copies files from a template, not its settings. In order:
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
 [JSON configuration](docs/setup/repository-settings.json) describe the baseline.
 
+## 📐 Methodology
+
+The [methodology guides](docs/methodology/README.md) record the sources, the
+data contract, the calculation contracts and the validation plan of the
+workbook built from this repository.
+
 ## 🧭 Repository governance
 
 See the [governance index](docs/repo_governance/README.md) for repository settings, issue labels, automation, and setup guidance. To take part, read the [contributing guide](CONTRIBUTING.md) and the [code of conduct](CODE_OF_CONDUCT.md).
