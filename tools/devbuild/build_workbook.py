@@ -7,7 +7,8 @@ test-results/build/Workbook-development.xlsm, which Git ignores.
 
 The workbook has the sheets, code names and defined names of
 tools/devbuild/workbook.json, which tests/test_devbuild.py keeps equal to
-docs/methodology/WORKBOOK_CONTRACT.md. It carries the build stamp on the
+docs/methodology/WORKBOOK_CONTRACT.md. Sheets with the Test role, and their
+names, are built only in the development configuration. It carries the build stamp on the
 reference sheet. Its VBA project is written from source by vba_project.py:
 the standard modules (.bas) and class modules (.cls) of the configuration's
 directories, plus a document module for ThisWorkbook and for each sheet. A
@@ -52,6 +53,10 @@ ROOT = Path(__file__).resolve().parents[2]
 CONFIG = "tools/devbuild/workbook.json"
 DOCUMENT_HOME = "src/workbook"
 CLASS_HOME = "src/classes"
+DEVELOPMENT = "development"
+# Sheet roles of the workbook contract; Test sheets exist only in a development build.
+ROLES = ("Reference", "Input", "Parameter", "Output", "Diagnostics", "Test")
+TEST_ROLE = "Test"
 FORM_HOME = "src/forms"
 VBA_ENCODING = "cp1252"
 NOT_EVIDENCE = " (working tree with changes: NOT evidence-grade)"
@@ -79,6 +84,7 @@ class BuildError(Exception):
 class Sheet:
     tab: str
     code_name: str
+    role: str
 
 
 @dataclass(frozen=True)
@@ -117,7 +123,7 @@ def load_layout(root: Path) -> Layout:
         data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
         layout = Layout(
             data["workbook_code_name"],
-            tuple(Sheet(item["tab"], item["code_name"]) for item in data["sheets"]),
+            tuple(Sheet(item["tab"], item["code_name"], item["role"]) for item in data["sheets"]),
             tuple(DefinedName(item["name"], item["sheet"], item["cell"], item.get("label", ""))
                   for item in data["names"]),
             dict(data["stamp"]),
@@ -155,10 +161,17 @@ def layout_problems(layout: Layout) -> list[str]:
             problems.append(f"defined name {item.name} refers to unknown sheet {item.sheet}")
         if not CELL.match(item.cell):
             problems.append(f"defined name {item.name} refers to {item.cell!r}, not one cell")
+    problems += [f"sheet {sheet.code_name} has role {sheet.role!r}, not one of "
+                 f"{', '.join(ROLES)}" for sheet in layout.sheets if sheet.role not in ROLES]
+    tests = {sheet.code_name for sheet in layout.sheets if sheet.role == TEST_ROLE}
     for role in ("commit", "time", "configuration"):
-        if layout.stamp.get(role) not in {item.name for item in layout.names}:
+        stamp = next((item for item in layout.names if item.name == layout.stamp.get(role)), None)
+        if stamp is None:
             problems.append(f"stamp {role} is not a defined name")
-    if "development" not in layout.configurations:
+        elif stamp.sheet in tests:
+            problems.append(f"stamp {role} is on a {TEST_ROLE} sheet, which a production "
+                            "build leaves out")
+    if DEVELOPMENT not in layout.configurations:
         problems.append("no development configuration")
     return problems
 
@@ -376,9 +389,21 @@ def package(layout: Layout, build: Build, vba_bin: bytes) -> bytes:
     return buffer.getvalue()
 
 
+def for_configuration(layout: Layout, configuration: str) -> Layout:
+    """The layout a configuration builds: Test sheets and their names only in
+    the development configuration, as the workbook contract requires."""
+    if configuration == DEVELOPMENT:
+        return layout
+    sheets = tuple(sheet for sheet in layout.sheets if sheet.role != TEST_ROLE)
+    kept = {sheet.code_name for sheet in sheets}
+    return Layout(layout.workbook_code_name, sheets,
+                  tuple(item for item in layout.names if item.sheet in kept),
+                  layout.stamp, layout.configurations)
+
+
 def build(root: Path, configuration: str, target: Path) -> Build:
     """Write the workbook to ``target`` and describe what it holds."""
-    layout = load_layout(root)
+    layout = for_configuration(load_layout(root), configuration)
     paths = components(root, layout, configuration)
     commit = git(root, "rev-parse", "HEAD")
     result = Build(commit, git(root, "show", "-s", "--format=%cI", "HEAD"),

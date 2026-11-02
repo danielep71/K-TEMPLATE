@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "description": "What tools/devbuild/build_workbook.py builds: the sheets and defined names of docs/methodology/WORKBOOK_CONTRACT.md, the names that carry the build stamp, and the source directories of each configuration. tests/test_devbuild.py keeps the sheets and names equal to the contract's tables.",
+  "description": "What tools/devbuild/build_workbook.py builds: the sheets and defined names of docs/methodology/WORKBOOK_CONTRACT.md, the names that carry the build stamp, and the source directories of each configuration. Each sheet's role is the contract's; sheets with the Test role are built only in the development configuration. tests/test_devbuild.py keeps the sheets and names equal to the contract's tables.",
   "workbook_code_name": "ThisWorkbook",
   "sheets": [
-    {"tab": "Readme", "code_name": "shReadme"},
-    {"tab": "Inputs", "code_name": "shInputs"}
+    {"tab": "Readme", "code_name": "shReadme", "role": "Reference"},
+    {"tab": "Inputs", "code_name": "shInputs", "role": "Input"}
   ],
   "names": [
     {"name": "build_commit", "sheet": "shReadme", "cell": "B3", "label": "Commit"},
