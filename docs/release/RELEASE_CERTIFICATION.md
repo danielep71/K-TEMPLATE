@@ -62,7 +62,8 @@ What was checked by hand, by whom, against which independent values. Write
 
 | File | SHA-256 | Built from |
 | --- | --- | --- |
-| None, or each file attached to the GitHub Release | | Candidate commit |
+| `<repository>-X.Y.Z-source.tar.gz` and `SHA256SUMS`, from the **Release** workflow, with their provenance attestation | | The tag |
+| None, or each other file attached to the GitHub Release | | Candidate commit |
 
 ### Deviations
 

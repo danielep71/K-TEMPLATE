@@ -60,6 +60,11 @@ milestones and their pull requests.
 
 ### Added
 
+- A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
+  the changelog, `VERSION`, the default branch, the tag message and
+  **Repository integrity**. It builds a reproducible source bundle with its
+  checksums, attests their build provenance, and drafts the GitHub Release.
+  A manual run rehearses a ref without attesting or releasing (#161).
 - An OpenSSF Scorecard workflow, which scores the default branch's
   supply-chain posture weekly and on each push to it. It publishes to code
   scanning and the Scorecard service on public repositories only (#164).
