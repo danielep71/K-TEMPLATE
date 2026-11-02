@@ -60,6 +60,9 @@ milestones and their pull requests.
 
 ### Added
 
+- An OpenSSF Scorecard workflow, which scores the default branch's
+  supply-chain posture weekly and on each push to it. It publishes to code
+  scanning and the Scorecard service on public repositories only (#164).
 - `tools/devbuild/build_workbook.py`, which builds a macro-enabled workbook
   from the source of one commit, with the sheets, code names and defined
   names of the workbook contract, a build stamp, and a VBA project written

@@ -25,7 +25,8 @@ workbooks, such as SA-CCR, SFT, FRTB, LCR, and NSFR. It provides:
   *Trust access to the VBA project object model*, with the export bound to the
   workbook it came from;
 - a security policy, a review to record before distribution, CodeQL code
-  scanning of the Python, JavaScript and workflow code, Dependabot updates for
+  scanning of the Python, JavaScript and workflow code, an OpenSSF Scorecard
+  measure of the supply-chain posture, Dependabot updates for
   the pinned Actions and the hash-locked Python dependencies, and optional
   daily traffic collection.
 
