@@ -60,6 +60,11 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/render_docs.py`, which renders documentation facts the code already
+  knows into marked blocks: the list of **Repository integrity** checks in
+  `CONTRIBUTING.md` and the example suite's expected results in
+  `INSTALLATION.md`. **Repository integrity** fails while a block is stale
+  (#163).
 - `tools/devbuild/build_workbook.py`, which builds a macro-enabled workbook
   from the source of one commit, with the sheets, code names and defined
   names of the workbook contract, a build stamp, and a VBA project written
