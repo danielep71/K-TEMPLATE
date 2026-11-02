@@ -256,6 +256,24 @@ Node.js 24.22.2 without the package-manager cache. Dependabot does not update
 these values: change them together, in every workflow, in one pull request. The
 workflow control tests reject floating versions and mixed versions.
 
+**Action pins.** Every `uses:` reference reachable from a workflow is
+immutable:
+
+- a remote action or reusable workflow, called from a step or from a job, is
+  pinned to a full commit SHA;
+- a Docker image (`docker://`) is pinned to an `@sha256:` digest;
+- each pin carries its version as a comment on the same line
+  (`# v7.0.1`), which Dependabot and reviewers read;
+- a local reusable workflow must exist in `.github/workflows/`, and is checked
+  as a workflow in its own right;
+- a local action (`./path`) is followed into its `action.yml` or `action.yaml`,
+  whose steps and image follow the same rules.
+
+`tests/test_workflow_controls.py` fails on any other form, and on a reference
+it cannot read with its comment, such as a flow mapping. A job that calls a
+reusable workflow is exempt from the `timeout-minutes` rule, which GitHub does
+not allow there.
+
 **Repository integrity** also runs Ruff and strict mypy on `tools/` (configured in
 `pyproject.toml`) and actionlint on the workflows. To run Ruff and mypy locally on
 CPython 3.13 for Linux x86_64, the platform the hashes in
