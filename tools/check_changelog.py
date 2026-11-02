@@ -26,9 +26,10 @@ real calendar date, may differ, and the difference is reported as a note, so
 a reviewed correction stays visible. A
 release whose tag does not exist yet is a note, since the tag is created
 after the changelog is dated; so is a directory that is not a Git checkout,
-where nothing can be compared. A vX.Y.Z tag whose CHANGELOG.md released
-[X.Y.Z] fails when the section is no longer in the changelog, so a released
-section cannot be deleted or renamed.
+where nothing can be compared. A vX.Y.Z tag on a commit that HEAD contains,
+whose CHANGELOG.md released [X.Y.Z], fails when the section is no longer in
+the changelog, so a released section cannot be deleted or renamed; a newer
+tag does not apply to an older revision.
 """
 
 from __future__ import annotations
@@ -245,7 +246,9 @@ def frozen_problems(root: Path, text: str, released: list[str]) -> tuple[list[st
     """Each released section against its content at its tag: findings and notes.
 
     A tagged release whose section the changelog no longer holds is a finding
-    too, so that deleting or renaming a section cannot escape the comparison."""
+    too, so that deleting or renaming a section cannot escape the comparison.
+    Only tags on commits that HEAD contains count: an older revision, checked
+    out after a newer tag was created, never held the newer section."""
     if git(root, "rev-parse", "--git-dir") is None:
         return [], [f"{CHANGELOG}: not a Git checkout, so released sections were not compared "
                     "with their tags"] if released else []
@@ -255,6 +258,8 @@ def frozen_problems(root: Path, text: str, released: list[str]) -> tuple[list[st
     for tag in sorted((git(root, "tag", "--list", "v*") or "").split()):
         label = tag[1:]
         if not re.fullmatch(SEMVER, label) or label in released:
+            continue
+        if git(root, "merge-base", "--is-ancestor", f"{tag}^{{commit}}", "HEAD") is None:
             continue
         tagged_text = git(root, "show", f"{tag}:{CHANGELOG}")
         if tagged_text is not None and label in released_versions(tagged_text):

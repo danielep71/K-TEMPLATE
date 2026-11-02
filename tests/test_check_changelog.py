@@ -293,6 +293,31 @@ class FrozenSectionTest(unittest.TestCase):
         # A tag that no released section ever named is not a release of this changelog.
         self.assertEqual(self.frozen(tags=("v0.1.0", "v0.2.0", "v9.9.9", "vnext")), ([], []))
 
+    def test_an_older_release_checked_out_ignores_newer_tags(self) -> None:
+        first = (
+            "# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-10-30\n\n### Added\n\n"
+            f"- A start.\n\n[Unreleased]: https://github.com/{REPOSITORY}/compare/v0.1.0...HEAD\n"
+            f"[0.1.0]: {TAGS}/v0.1.0\n")
+        with tempfile.TemporaryDirectory(prefix="changelog-") as temporary:
+            root = Path(temporary)
+            git(root, "init", "-q")
+            for text, version in ((first, "0.1.0"), (RELEASED, "0.2.0")):
+                (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
+                (root / "VERSION").write_text(f"{version}\n", encoding="utf-8")
+                git(root, "add", "-A")
+                git(root, "commit", "-qm", f"Release {version}")
+                git(root, "tag", "-a", f"v{version}", "-m", f"v{version}")
+            git(root, "checkout", "-q", "v0.1.0")
+            self.assertEqual(check_changelog.check_with_notes(root, REPOSITORY), ([], 1, []))
+            git(root, "checkout", "-q", "v0.2.0")
+            self.assertEqual(check_changelog.check_with_notes(root, REPOSITORY), ([], 2, []))
+            (root / "CHANGELOG.md").write_text(
+                RELEASED.replace("## [0.1.0] - 2026-10-30\n\n### Added\n\n- A start.\n\n", "")
+                .replace(f"[0.1.0]: {TAGS}/v0.1.0\n", ""), encoding="utf-8")
+            found, _, _ = check_changelog.check_with_notes(root, REPOSITORY)
+            self.assertIn("CHANGELOG.md: [0.1.0] was released with tag v0.1.0 but its section "
+                          "is gone; a released section is frozen", found)
+
     def test_a_dated_correction_is_a_note(self) -> None:
         note = "Corrected after release on 2026-11-05: the entry named the wrong file."
         corrected = RELEASED.replace("- A start.\n", f"- A corrected start.\n\n{note}\n")
