@@ -75,6 +75,10 @@ milestones and their pull requests.
   within tolerance, once per variant for a file-based case, with an
   illustrative script for each example case (#115, #117).
 
+- `docs/methodology/WORKBOOK_CONTRACT.md`, a workbook contract to fill in: the
+  sheets and code names, defined names, areas, operations, status after a
+  failure, and what the build creates (#118).
+
 ### Changed
 
 - `docs/licenses/provenance.json` records the source repository, license and

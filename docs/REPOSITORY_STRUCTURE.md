@@ -15,12 +15,12 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | --- | --- | --- |
 | `.github/` | Workflows, issue forms, labels and Dependabot configuration | Present |
 | `docs/` | Governance, setup, structure, style and the API inventory | Present |
-| `docs/methodology/` | Sources, data contract, calculation contracts and validation plan | Present, as guides to fill in |
+| `docs/methodology/` | Sources, data contract, calculation contracts, validation plan, test-case format and [workbook contract](methodology/WORKBOOK_CONTRACT.md) | Present, as guides to fill in |
 | `docs/methodology/sources/` | Byte-preserved copies of regulatory sources | Reserved |
 | `src/core/` | Calculations and pure validation, host-independent standard modules | Reserved |
 | `src/classes/` | Host-independent classes, if the design needs them | Reserved |
 | `src/modules/` | The public facade: the supported entry points | Reserved |
-| `src/workbook/` | Excel adapters, `ThisWorkbook` and sheet document modules, and the optional macro-free `Template.xlsx` | Reserved |
+| `src/workbook/` | Excel adapters, `ThisWorkbook` and sheet document modules, and the optional macro-free `Template.xlsx`, laid out as the [workbook contract](methodology/WORKBOOK_CONTRACT.md) defines | Reserved |
 | `src/forms/` | UserForms, each `.frm` with its `.frx` | Reserved |
 | `tests/` | Python tests of the repository tooling (`test_*.py`) | Present |
 | `tests/modules/` | VBA test modules | Reserved |
@@ -56,7 +56,9 @@ calls back the other way, so there are no cycles.
 - The facade orchestrates and validates; it does not repeat formulas. It
   returns structured results and errors.
 - Workbook and form code maps cells and events to facade inputs and displays
-  results; it contains no regulatory formula.
+  results; it contains no regulatory formula. It addresses sheets by code
+  name and ranges by defined name, as the
+  [workbook contract](methodology/WORKBOOK_CONTRACT.md) lists them.
 - Tests may call the core directly. Examples use only the supported facade.
 - The workbook never calls Python. Reference values are derived from the
   methodology, not by translating the VBA
