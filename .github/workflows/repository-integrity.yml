@@ -118,6 +118,8 @@ jobs:
           exit "$failed"
       - name: Check tracked binary files
         run: python tools/check_binaries.py
+      - name: Check the house-style layout of VBA source
+        run: python tools/format_vba.py --check
       - name: Check the numerical test cases
         run: python tools/check_test_cases.py
       - name: Compare the derivation scripts with the expected values
