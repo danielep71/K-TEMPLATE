@@ -145,12 +145,13 @@ jobs:
           import sys
           from pathlib import Path
 
-          import yaml
+          sys.path.insert(0, 'tests')
+          from strict_yaml import load
 
           path = Path('.github/workflows/codeql.yml')
           if not path.exists():
               sys.exit(0)
-          document = yaml.safe_load(path.read_text(encoding='utf-8'))
+          document = load(path.read_text(encoding='utf-8'))
           triggers = document.get('on', document.get(True)) or {}
           branch = os.environ['DEFAULT_BRANCH']
           failed = False

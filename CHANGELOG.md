@@ -65,4 +65,10 @@ milestones and their pull requests.
   illustrative case under `tests/fixtures/` and `tests/expected/`, and
   `tools/check_test_cases.py`, which **Repository integrity** runs (#75).
 
+### Changed
+
+- **Repository integrity** proves that actionlint rejects an invalid workflow,
+  and the workflow control tests reject duplicate YAML keys in the workflows,
+  Dependabot's configuration and the issue forms (#114).
+
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
