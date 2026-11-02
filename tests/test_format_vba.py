@@ -190,6 +190,22 @@ class MainTest(unittest.TestCase):
         self.assertEqual((root / "src/core/CORE_Probe.bas").read_bytes(),
                          text.encode("latin-1"))
 
+    def test_paths_outside_the_root(self) -> None:
+        # Every file is processed and reported, by its absolute path.
+        with tempfile.TemporaryDirectory(prefix="format-vba-outside-") as outside:
+            files = [Path(outside) / name for name in ("A.bas", "B.bas")]
+            for path in files:
+                path.write_bytes(module("  Private Sub Run()", "End Sub").encode("latin-1"))
+            for mode in ("--check", "--write"):
+                with self.subTest(mode=mode):
+                    code, printed, _ = self.run_main({}, mode, *map(str, files))
+                    for path in files:
+                        self.assertIn(path.resolve().as_posix(), printed)
+            self.assertEqual(code, 0)
+            for path in files:
+                self.assertEqual(path.read_bytes().decode("latin-1"),
+                                 module("Private Sub Run()", "End Sub"))
+
     def test_explicit_paths(self) -> None:
         files = {"elsewhere/CORE_Probe.bas": module("  Private Sub Run()", "End Sub")}
         code, printed, _ = self.run_main(files, "--check", "elsewhere/CORE_Probe.bas")

@@ -127,6 +127,14 @@ def source_files(root: Path) -> list[Path]:
     return sorted(set(files))
 
 
+def shown(path: Path, root: Path) -> str:
+    """A path relative to the root when it is inside it, else absolute."""
+    resolved = path.resolve()
+    if resolved.is_relative_to(root):
+        return resolved.relative_to(root).as_posix()
+    return resolved.as_posix()
+
+
 def read(path: Path) -> str:
     # Latin-1 maps every byte to one character, so any byte round-trips.
     return path.read_bytes().decode("latin-1")
@@ -155,10 +163,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             continue
         if args.write:
             path.write_bytes(formatted.encode("latin-1"))
-            print(f"formatted: {path.relative_to(root).as_posix()}")
+            print(f"formatted: {shown(path, root)}")
         else:
             drifted.append(path)
-            print(f"FAIL: {path.relative_to(root).as_posix()}: not in house-style layout; "
+            print(f"FAIL: {shown(path, root)}: not in house-style layout; "
                   "run python tools/format_vba.py --write and re-import it into the VBE")
     status = "FAIL" if drifted else "PASS"
     print(f"vba-format: {status} ({len(paths)} file(s); layout only, nothing compiled)")
