@@ -327,7 +327,28 @@ MANIFEST: dict[str, Any] = {
     "datasets": ["DS-02", "DS-03"]}
 VARIANT_FILES = {"lf/positions.csv": b"id,notional\nP1,600000\n",
                  "crlf/positions.csv": b"id,notional\r\nP1,600000\r\n",
-                 "crlf/legacy.txt": "caf\u00e9\r\n".encode("cp1252")}
+                 "crlf/legacy.txt": "name\r\ncaf\u00e9\r\n".encode("cp1252")}
+
+
+def contract_dataset(dataset: str, source: str, fields: list[dict[str, Any]],
+                     encoding: str | None = "UTF-8", delimiter: str | None = ",") -> dict[str, Any]:
+    return {"id": dataset, "illustrative": dataset == "DS-01", "description": "A dataset",
+            "provider": "A system", "frequency": "Daily", "granularity": "One row per record",
+            "source": source, "encoding": encoding, "delimiter": delimiter,
+            "decimal_separator": "." if delimiter else None,
+            "fields": [{"unit": None, "required": True, "allowed": None, "notes": "", **item}
+                       for item in fields]}
+
+
+# The machine-readable contract of the datasets in DATA_FILES.
+CONTRACT_FILE: dict[str, Any] = {"schema_version": 1, "kind": "data-contract", "datasets": [
+    contract_dataset("DS-02", "positions.csv", [
+        {"name": "id", "type": "text"},
+        {"name": "notional", "type": "decimal", "allowed": {"min": 0}}]),
+    contract_dataset("DS-03", "legacy.txt", [{"name": "name", "type": "text"}], "cp1252"),
+    contract_dataset("DS-04", "Inputs", [{"name": "id", "type": "text"}], None, None),
+    contract_dataset("DS-01", "example.csv", [{"name": "id", "type": "text"}]),
+]}
 EXPECTED_VARIANTS: dict[str, Any] = {
     "schema_version": 1, "kind": "test-expected", "fixture": "file-one",
     "variants": {"lf": [OUTPUT], "crlf": [OUTPUT]}}
@@ -348,6 +369,7 @@ def file_case(edit: Edit | None = None, files: dict[str, bytes | None] | None = 
         root = Path(directory)
         texts = {"docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
                  "docs/methodology/DATA_CONTRACT.md": DATA_FILES,
+                 "docs/methodology/data-contract.json": json.dumps(CONTRACT_FILE),
                  "docs/methodology/SOURCES.md": SOURCES,
                  "tests/fixtures/file-one/case.json": json.dumps(manifest),
                  "tests/expected/file-one.json": json.dumps(expected), **(extra or {})}
@@ -418,6 +440,55 @@ class FileBasedCaseTest(FindingTest):
         self.assertEqual(file_case(invalid, files={"lf/positions.csv": b"\xff"}), [])
         self.assertFinding(file_case(lambda m, e: m.update(category="invalid")),
                            "variants.lf: an invalid case needs a _status text output")
+
+    def test_variant_files_are_validated_against_the_contract(self) -> None:
+        self.assertFinding(file_case(files={"lf/positions.csv": b"id,notional\nP1,-5\n"}),
+                           "tests/fixtures/file-one/lf/positions.csv: line 2: DC-RANGE: field "
+                           "notional value '-5' is not \u2265 0")
+        findings = file_case(files={"crlf/positions.csv": b"id,amount\r\nP1,1\r\n",
+                                    "crlf/legacy.txt": "nom\r\n".encode("cp1252")})
+        self.assertEqual(findings, [
+            "tests/fixtures/file-one/crlf/legacy.txt: line 1: DC-UNKNOWN-COLUMN: column 'nom' "
+            "is not a field of DS-03",
+            "tests/fixtures/file-one/crlf/legacy.txt: line 1: DC-MISSING-COLUMN: required field "
+            "name has no column",
+            "tests/fixtures/file-one/crlf/positions.csv: line 1: DC-UNKNOWN-COLUMN: column "
+            "'amount' is not a field of DS-02",
+            "tests/fixtures/file-one/crlf/positions.csv: line 1: DC-MISSING-COLUMN: required "
+            "field notional has no column"])
+
+    def test_an_invalid_case_may_break_the_contract(self) -> None:
+        def invalid(m: dict[str, Any], e: dict[str, Any]) -> None:
+            m["category"] = "invalid"
+            status = {"quantity": "import_status", "text": "REJECTED_NEGATIVE", "scope": None,
+                      "rule": "CALC-02.1", "reference": OUTPUT["reference"]}
+            e["variants"] = {"lf": [status], "crlf": [status]}
+        self.assertEqual(file_case(invalid, files={"lf/positions.csv": b"id,notional\nP1,-5\n"}),
+                         [])
+
+    def test_the_contract_must_describe_each_file(self) -> None:
+        self.assertFinding(file_case(files={"lf/limits.csv": b"id\nL1\n"}),
+                           "lf/limits.csv: is not the file of a dataset of "
+                           "docs/methodology/data-contract.json")
+
+    def test_the_contract_must_exist_and_be_valid(self) -> None:
+        missing = file_case(extra={"docs/methodology/data-contract.json": ""})
+        self.assertFinding(missing, "data-contract.json: is not a valid data contract (1 "
+                                    "problem(s); python tools/check_data_contract.py lists them)")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path, text in {"docs/methodology/DATA_CONTRACT.md": DATA_FILES,
+                               "docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
+                               "docs/methodology/SOURCES.md": SOURCES,
+                               "tests/fixtures/file-one/case.json": json.dumps(MANIFEST),
+                               "tests/fixtures/file-one/lf/positions.csv": "id,notional\n",
+                               "tests/expected/file-one.json": json.dumps(
+                                   {**EXPECTED_VARIANTS, "variants": {"lf": [OUTPUT]}})}.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text, encoding="utf-8")
+            self.assertEqual(check_test_cases.check(root)[0], [
+                "docs/methodology/data-contract.json: is missing; the variant files of a "
+                "file-based case are validated against it"])
 
     def test_manifest(self) -> None:
         cases: list[tuple[Edit, str]] = [

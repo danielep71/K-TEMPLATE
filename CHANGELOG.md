@@ -63,6 +63,17 @@ milestones and their pull requests.
 
 ### Added
 
+- A machine-readable data contract, `docs/methodology/data-contract.json`,
+  holds each dataset's file or sheet, encoding and delimited-text format, and
+  each field's type, unit or currency field, required flag and allowed values
+  or range. The *Datasets* table and the field tables of `DATA_CONTRACT.md`
+  are rendered from it, and **Repository integrity** fails while they differ.
+  `tools/check_data_contract.py`, which it runs, checks the contract and, with
+  `--dataset`, validates input files against it, reporting each finding with a
+  stable code such as `DC-TYPE` or `DC-MISSING-COLUMN`.
+  `tools/check_test_cases.py` now runs that validator on every variant file of
+  a file-based case outside an `invalid` case. The illustrative dataset `DS-01`
+  lists the three columns its example file already holds (#238).
 - **Repository integrity** fails a committed Office package, outside the
   regulatory source copies, that carries macros (a `vbaProject` part, a
   reference to one or a macro-enabled content type) or personal metadata (an

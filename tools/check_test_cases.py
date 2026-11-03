@@ -9,10 +9,13 @@ IDs). It never computes or compares a value.
 
 A fixture is a JSON file, <case-id>.json, or a file-based case, a directory
 <case-id>/ with a case.json manifest and one subdirectory per variant holding
-input files named as in the data contract. An invalid case may break any input
-rule, because that is what it tests: in a JSON fixture only the harness
-metadata is checked, and in a file-based case the manifest is checked in full,
-but not the content of its variant files.
+input files named as in the data contract. Outside an invalid case, each
+delimited text file of a variant is validated against the machine-readable
+data contract (docs/methodology/data-contract.json) by the reference validator
+of tools/check_data_contract.py. An invalid case may break any input rule,
+because that is what it tests: in a JSON fixture only the harness metadata is
+checked, and in a file-based case the manifest is checked in full, but not the
+content of its variant files.
 """
 
 from __future__ import annotations
@@ -28,6 +31,10 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import check_data_contract  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 METHODOLOGY = Path("docs/methodology")
@@ -84,6 +91,9 @@ class Methodology:
     sources: dict[str, bool]
     # The files each dataset is read from, with their encodings (Datasets table).
     files: dict[str, dict[str, str]] = field(default_factory=dict)
+    # The datasets of the machine-readable contract by file or sheet, read only
+    # when there is a file-based case; None when it is missing or not valid.
+    contract: dict[str, check_data_contract.Dataset] | None = None
 
 
 @dataclass
@@ -235,12 +245,28 @@ def dataset_files(root: Path, report: Report) -> dict[str, dict[str, str]]:
     return files
 
 
-def read_methodology(root: Path, report: Report) -> Methodology:
+def read_contract(root: Path, report: Report) -> dict[str, check_data_contract.Dataset] | None:
+    """The machine-readable contract's datasets by source, or None after reporting why not."""
+    datasets, problems = check_data_contract.load(root)
+    where = check_data_contract.CONTRACT.as_posix()
+    if problems == [f"{where}: is missing"]:
+        report.add(where, "is missing; the variant files of a file-based case are validated "
+                          "against it")
+        return None
+    if problems:
+        report.add(where, f"is not a valid data contract ({len(problems)} problem(s); python "
+                          "tools/check_data_contract.py lists them)")
+        return None
+    return {dataset.source: dataset for dataset in datasets}
+
+
+def read_methodology(root: Path, report: Report, file_based: bool = False) -> Methodology:
     return Methodology(
         calculations=declared(root, "CALCULATION_CONTRACTS.md", None, HEADING, report),
         datasets=declared(root, "DATA_CONTRACT.md", "Datasets", ROW, report),
         sources=declared(root, "SOURCES.md", "Register", ROW, report),
-        files=dataset_files(root, report))
+        files=dataset_files(root, report),
+        contract=read_contract(root, report) if file_based else None)
 
 
 def input_value_problem(key: str, value: object) -> str | None:
@@ -386,9 +412,24 @@ def check_fixture(path: Path, root: Path, method: Methodology, report: Report) -
     return check_calculation_inputs(data, path.stem, method, where, report)
 
 
-def check_variant(directory: Path, root: Path, allowed: Mapping[str, str], invalid: bool,
+def check_content(entry: Path, text: str, root: Path, method: Methodology,
                   report: Report) -> None:
-    """A variant holds only data-contract files, readable in their encoding."""
+    """Validate a decoded variant file against the machine-readable contract."""
+    if method.contract is None:
+        return  # Reported once, when the contract was read.
+    dataset = method.contract.get(entry.name)
+    if dataset is None:
+        report.add(rel(entry, root), "is not the file of a dataset of "
+                                     f"{check_data_contract.CONTRACT.as_posix()}")
+    elif dataset.validated:
+        for finding in check_data_contract.validate_text(text, dataset):
+            report.add(rel(entry, root), str(finding))
+
+
+def check_variant(directory: Path, root: Path, allowed: Mapping[str, str], invalid: bool,
+                  method: Methodology, report: Report) -> None:
+    """A variant holds only data-contract files, readable in their encoding and, outside
+    an invalid case, valid against the machine-readable contract."""
     where = rel(directory, root)
     entries = sorted(directory.iterdir())
     if not entries:
@@ -400,12 +441,15 @@ def check_variant(directory: Path, root: Path, allowed: Mapping[str, str], inval
             report.add(rel(entry, root), "is not a file the data contract lists for the "
                                          "case's datasets")
         elif not invalid:
-            # An invalid case may test a file that its encoding cannot decode.
+            # An invalid case may test a file that its encoding cannot decode, or
+            # whose content breaks the contract.
             try:
-                entry.read_bytes().decode(allowed[entry.name])
+                text = entry.read_bytes().decode(allowed[entry.name])
             except UnicodeDecodeError as error:
                 report.add(rel(entry, root), f"is not {allowed[entry.name]} ({error.reason} "
                                              f"at byte {error.start})")
+            else:
+                check_content(entry, text, root, method, report)
 
 
 def check_file_fixture(directory: Path, root: Path, method: Methodology,
@@ -439,7 +483,8 @@ def check_file_fixture(directory: Path, root: Path, method: Methodology,
             report.add(rel(entry, root), "is not a kebab-case variant name")
         else:
             variants.add(entry.name)
-            check_variant(entry, root, allowed, data["category"] == "invalid", report)
+            check_variant(entry, root, allowed, data["category"] == "invalid", method,
+                          report)
     if not variants:
         report.add(rel(directory, root), "has no variant directory")
     calculation = data["calculation"] if isinstance(data["calculation"], str) else None
@@ -676,7 +721,7 @@ def check(root: Path) -> tuple[list[str], int, int]:
     expected = sorted((root / EXPECTED).glob("*.json"))
     if not fixtures and not file_cases and not expected:
         return [], 0, 0
-    method = read_methodology(root, report)
+    method = read_methodology(root, report, file_based=bool(file_cases))
     cases: dict[str, Case] = {}
     for path in fixtures:
         if (case := check_fixture(path, root, method, report)) is not None:
