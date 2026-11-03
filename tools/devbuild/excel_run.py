@@ -18,8 +18,9 @@ Excel run, and never needs Trust access to the VBA project object model:
    policy that makes programs follow the user's macro setting
    (VALIDATION_PLAN.md, HB-02), you click Enable Content once, and the
    command waits for that, up to --enable-timeout seconds. Then it runs the
-   suite's certification entry point with the evidence folder and
-   tests/fixtures, closes the workbook without saving and quits Excel;
+   certification entry point of the example suite and of each project suite
+   the policy lists, in order, with the evidence folder and tests/fixtures,
+   closes the workbook without saving and quits Excel;
 4. writes host.txt: Windows from the registry, the references the build
    gives the project, and compile=ON_DEMAND, because nothing can compile the
    whole project without Trust access, so VBA compiled the modules the run
@@ -121,11 +122,19 @@ def quoted(text: str) -> str:
     return "'" + text.replace("'", "''") + "'"
 
 
-def powershell_script(workbook: Path, folder: Path, fixtures: Path, module: str,
-                      entry_point: str, probe: str, enable_timeout: int) -> str:
-    """Open the workbook read-only, wait until its macros run, run the entry point, close
-    without saving, quit. It never changes a macro setting: when the workbook opens with
-    macros disabled, a person enables them with Enable Content (HB-02)."""
+def powershell_script(workbook: Path, folder: Path, fixtures: Path,
+                      entry_points: Sequence[str], probe: str, enable_timeout: int) -> str:
+    """Open the workbook read-only, wait until its macros run, run each certification
+    entry point (``Module.Procedure``) in order, close without saving, quit. Every
+    entry point runs even when an earlier one fails, so each suite leaves its logs; the
+    first failure is reported. It never changes a macro setting: when the workbook opens
+    with macros disabled, a person enables them with Enable Content (HB-02)."""
+    calls = "\n".join(
+        f"""        try {{
+            [void]$excel.Run($prefix + {quoted(entry)}, $evidence, $fixtures)
+        }} catch {{
+            if (-not $failure) {{ $failure = {quoted(entry + ": ")} + $_.Exception.Message }}
+        }}""" for entry in entry_points)
     return f"""$ErrorActionPreference = 'Stop'
 # Progress records would reach the caller as CLIXML on standard error.
 $ProgressPreference = 'SilentlyContinue'
@@ -159,11 +168,7 @@ try {{
     if (-not $enabled) {{
         $failure = "NOT-ENABLED"
     }} else {{
-        try {{
-            [void]$excel.Run($prefix + "{module}.{entry_point}", $evidence, $fixtures)
-        }} catch {{
-            $failure = $_.Exception.Message
-        }}
+{calls}
     }}
 }} catch {{
     $failure = $_.Exception.Message
@@ -186,6 +191,13 @@ if ($failure) {{
 }}
 Write-Output "EXCEL-RUN=DONE"
 """
+
+
+def entry_points(policy: check_excel_run.Policy) -> list[str]:
+    """The certification entry point of the example suite, then of each project suite,
+    as ``Module.Procedure``."""
+    return [f"{Path(policy.suite_source).stem}.{policy.entry_point}",
+            *(f"{Path(item.source).stem}.{item.entry_point}" for item in policy.project_suites)]
 
 
 def encoded(script: str) -> str:
@@ -223,11 +235,10 @@ def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300) ->
         raise RunError("the checkout has local changes, so the build is not evidence-grade: "
                        "commit or remove them, or use a clean clone")
     prepare(folder, root)
-    module = Path(policy.suite_source).stem
     probe = f"{Path(policy.harness).stem}.LastResult"
-    script = powershell_script(workbook, folder.resolve(), (root / FIXTURES).resolve(), module,
-                               policy.entry_point, probe, enable_timeout)
-    print(f"running {module}.{policy.entry_point} in Excel ...")
+    script = powershell_script(workbook, folder.resolve(), (root / FIXTURES).resolve(),
+                               entry_points(policy), probe, enable_timeout)
+    print(f"running {', '.join(entry_points(policy))} in Excel ...")
     print(ENABLE_HINT)
     code, output = run_excel(script, timeout)
     if output:

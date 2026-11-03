@@ -23,6 +23,11 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
 - certification.log, written by TEST_Harness.EndCertification: each mode
   ended as it must, the two failure modes reaching their caller as
   ERR_TEST_FAILED, and CERTIFICATION=PASS with COMPLETE;
+- each project suite the policy lists under "suites": its normal-run log
+  holds what the suite writes, passes and is COMPLETE, from the same host,
+  and its own certification log records that run and CERTIFICATION=PASS.
+  Every suite is read as the policy's Office bitness compiles it, so a case
+  or assertion inside #If Win64 counts only on the host it runs on;
 - host.txt: the Windows build, the references (exactly those of the policy)
   and that Debug > Compile VBAProject completed;
 - results.json, written by TEST_Harness.SaveResults, when the commit holds
@@ -69,12 +74,14 @@ import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from typing import Any
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_accuracy  # noqa: E402
+import check_vba_conditionals  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "devbuild"))
 
@@ -91,6 +98,8 @@ POLICY = ".github/excel-evidence-policy.json"
 # NORMAL may pass, the others are deliberate failures.
 MODE_KINDS = ("NORMAL", "INJECTED_FAILURE", "SKIPPED_CASE")
 OFFICE_BITNESS = ("64-bit", "32-bit")
+# The compilation environment of check_vba_conditionals.py for each bitness.
+BITNESS_ENVIRONMENT = {"64-bit": "vba7-win64", "32-bit": "vba7-win32"}
 MANIFEST_FORMAT = "vba-export-1"
 BUILD_CONFIG = "tools/devbuild/workbook.json"
 ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
@@ -121,6 +130,20 @@ class PolicyError(Exception):
 
 
 @dataclass(frozen=True)
+class ProjectSuite:
+    """A project suite: run once in NORMAL mode by its own certification entry point,
+    which saves its log and its certification log in the evidence folder."""
+
+    name: str
+    source: str
+    entry_point: str
+    expected_cases: int
+    expected_assertions: int
+    log: str
+    certification: str
+
+
+@dataclass(frozen=True)
 class Policy:
     """What an Excel run must leave as evidence (.github/excel-evidence-policy.json)."""
 
@@ -139,6 +162,7 @@ class Policy:
     results: str
     references: tuple[str, ...]
     office: str
+    project_suites: tuple[ProjectSuite, ...] = ()
 
 
 def parse_policy(text: str) -> Policy:
@@ -156,40 +180,61 @@ def parse_policy(text: str) -> Policy:
             str(evidence["certification_log"]), str(evidence["exported"]),
             str(evidence["host_record"]), str(evidence["export_manifest"]),
             str(evidence["results"]),
-            tuple(str(item) for item in host["references"]), str(host["office"]))
+            tuple(str(item) for item in host["references"]), str(host["office"]),
+            tuple(ProjectSuite(str(item["name"]), str(item["source"]),
+                               str(item["certification_entry_point"]), item["expected_cases"],
+                               item["expected_assertions"], str(item["log"]),
+                               str(item["certification_log"]))
+                  for item in data.get("suites", [])))
     except (ValueError, KeyError, TypeError) as error:
         raise PolicyError(f"{POLICY}: {error!r}") from error
+    problems = policy_problems(data, modes, policy)
+    if problems:
+        raise PolicyError(f"{POLICY}: {problems[0]}")
+    return policy
+
+
+def policy_problems(data: dict[str, Any], modes: list[tuple[str, str, Any]],
+                    policy: Policy) -> list[str]:
+    """What is wrong with a policy that parsed, in the order it is reported."""
     problems = []
-    if data.get("schema_version") != 1:
-        problems.append("schema_version must be 1")
+    # Version 1 has no project suites; version 2 adds the optional "suites" list.
+    if data.get("schema_version") not in (1, 2) or \
+            (data.get("schema_version") == 1 and "suites" in data):
+        problems.append("schema_version must be 2, or 1 without suites")
     if [mode for mode, _, _ in modes] != list(MODE_KINDS):
         problems.append(f"modes must be {', '.join(MODE_KINDS)}, in that order")
     if any(not isinstance(must, bool) for _, _, must in modes) or \
             policy.must_pass != frozenset({"NORMAL"}):
         problems.append("only NORMAL must pass; must_pass is true or false")
     files = [*policy.logs.values(), policy.certification, policy.host, policy.manifest,
-             policy.results, policy.exported]
+             policy.results, policy.exported,
+             *(name for item in policy.project_suites for name in (item.log, item.certification))]
     if len(set(files)) != len(files) or not all(files):
         problems.append("the logs and evidence files must be distinct and named")
     if any("/" in name or "\\" in name or name in (".", "..") for name in files):
         problems.append("the logs and evidence files must be plain names in the evidence "
                         "folder")
-    for source in (policy.harness, policy.suite_source):
+    sources = [policy.harness, policy.suite_source,
+               *(item.source for item in policy.project_suites)]
+    names = [policy.suite, *(item.name for item in policy.project_suites)]
+    if len(set(sources)) != len(sources) or len(set(names)) != len(names) or not all(names):
+        problems.append("every suite needs its own name and source, apart from the harness")
+    for source in sources:
         path = PurePosixPath(source)
         if path.is_absolute() or ".." in path.parts or path.suffix != ".bas":
             problems.append(f"{source}: harness and suite sources must be .bas files "
                             "inside the repository")
-    for name in ("expected_cases", "expected_assertions"):
-        value = getattr(policy, name)
-        if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-            problems.append(f"suite {name} must be a positive integer")
+    for suite in (policy, *policy.project_suites):
+        for name in ("expected_cases", "expected_assertions"):
+            value = getattr(suite, name)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+                problems.append(f"suite {name} must be a positive integer")
     if not policy.references or len(set(policy.references)) != len(policy.references):
         problems.append("host references must be listed once each")
     if policy.office not in OFFICE_BITNESS:
         problems.append(f"host office must be one of {', '.join(OFFICE_BITNESS)}")
-    if problems:
-        raise PolicyError(f"{POLICY}: {problems[0]}")
-    return policy
+    return problems
 
 
 def working_policy(root: Path) -> Policy:
@@ -304,8 +349,12 @@ def read_log(path: Path, problems: list[str]) -> list[Record]:
     return records
 
 
-def read_suite(source: bytes) -> Suite:
+def read_suite(source: bytes, office: str = "64-bit") -> Suite:
+    """The suite as a host of ``office`` bitness compiles it: lines inside an #If
+    branch that is inactive there are blank."""
     text = source.decode("ascii", errors="replace").replace("\r\n", "\n")
+    environment = BITNESS_ENVIRONMENT.get(office, BITNESS_ENVIRONMENT["64-bit"])
+    text = check_vba_conditionals.reachable_sources("suite.bas", text)[0][environment]
     bodies = {match.group(1): match.group(0) for match in PROCEDURE.finditer(text)}
     constants = {name: int(value) for name, value in CONSTANT.findall(text)}
     cases: list[str] = []
@@ -383,29 +432,32 @@ class Plan:
     result: dict[str, str]
 
 
-def plans(suite: Suite, policy: Policy) -> list[Plan]:
+def plans(suite: Suite, name: str, modes: Sequence[str] = MODE_KINDS) -> list[Plan]:
+    """The plan of each of ``modes`` for the suite called ``name``."""
     skipped = set(suite.last_case)
     cases = [case for case in suite.cases if case not in skipped]
     assertions = [item for item in suite.assertions if item not in skipped]
 
     def result(verdict: str, operation: str, complete: bool, kept: tuple[list[str], list[str]],
                failures: int) -> dict[str, str]:
-        return {"RESULT": verdict, "suite": policy.suite, "operation": operation,
+        return {"RESULT": verdict, "suite": name, "operation": operation,
                 "completeness": "COMPLETE" if complete else "INCOMPLETE",
                 "cases": str(len(kept[0])), "assertions": str(len(kept[1])),
                 "failures": str(failures), "cleanup": "PASS", "recovery": "NONE"}
 
     every = (suite.cases, suite.assertions)
-    return [Plan("NORMAL", *every, [], result("PASS", "PASS", True, every, 0)),
-            Plan("INJECTED_FAILURE", *every, suite.injected,
-                 result("FAIL", "FAIL", True, every, len(suite.injected))),
-            Plan("SKIPPED_CASE", cases, assertions, ["harness.completeness"],
-                 result("FAIL", "PASS", False, (cases, assertions), 1))]
+    every_plan = [Plan("NORMAL", *every, [], result("PASS", "PASS", True, every, 0)),
+                  Plan("INJECTED_FAILURE", *every, suite.injected,
+                       result("FAIL", "FAIL", True, every, len(suite.injected))),
+                  Plan("SKIPPED_CASE", cases, assertions, ["harness.completeness"],
+                       result("FAIL", "PASS", False, (cases, assertions), 1))]
+    return [plan for plan in every_plan if plan.mode in modes]
 
 
-def sequence(plan: Plan, suite: Suite, policy: Policy) -> list[tuple[str, str]]:
-    """Every record the run writes, as (key, first value), in order."""
-    records = [("RUN", policy.suite), ("ENVIRONMENT", "")]
+def sequence(plan: Plan, name: str) -> list[tuple[str, str]]:
+    """Every record the run of the suite called ``name`` writes, as (key, first
+    value), in order."""
+    records = [("RUN", name), ("ENVIRONMENT", "")]
     for case in plan.cases:
         records.append(("CASE", case))
         for item in (name for name in plan.assertions if name.startswith(f"{case}/")):
@@ -498,24 +550,35 @@ def check_injected(name: str, records: list[Record], plan: Plan, suite: Suite,
                         "FAILURE and PRIMARY_FAILURE")
 
 
-def check_logs(folder: Path, suite: Suite, evidence: Evidence, policy: Policy) -> None:
+def suite_logs(folder: Path, suite: Suite, evidence: Evidence, name: str,
+               logs: dict[str, str]) -> list[dict[str, str]]:
+    """Check the log of each mode in ``logs`` for the suite called ``name``; return
+    the ENVIRONMENT records the logs hold."""
     environments = []
-    for plan in plans(suite, policy):
-        filename = policy.logs[plan.mode]
+    for plan in plans(suite, name, tuple(logs)):
+        filename = logs[plan.mode]
         records = read_log(folder / filename, evidence.findings)
         if not records:
             continue
         result = records[-1]
-        if plan.mode in policy.must_pass and result.key == "RESULT" and \
+        if plan.mode == "NORMAL" and result.key == "RESULT" and \
                 result.fields.get("completeness") != "COMPLETE":
             evidence.findings.append(f"{filename}:{result.line}: the run is "
                                      f"{result.fields.get('completeness') or 'not COMPLETE'}: "
                                      "a mandatory case or assertion did not run")
-        if check_sequence(filename, records, sequence(plan, suite, policy), evidence.findings):
+        if check_sequence(filename, records, sequence(plan, name), evidence.findings):
             check_fields(filename, records, plan, suite, evidence.findings)
             check_injected(filename, records, plan, suite, evidence.findings)
         if len(records) > 1 and records[1].key == "ENVIRONMENT":
             environments.append(records[1].fields)
+    return environments
+
+
+def check_logs(folder: Path, suites: Sequence[tuple[Suite, str, dict[str, str]]],
+               evidence: Evidence) -> None:
+    """Each suite's logs, as (suite, name, log by mode), all from one host."""
+    environments = [environment for suite, name, logs in suites
+                    for environment in suite_logs(folder, suite, evidence, name, logs)]
     for environment in environments:
         missing = [name for name in ENVIRONMENT_FIELDS if not environment.get(name)]
         if missing:
@@ -566,50 +629,50 @@ def test_failed_number(source: bytes) -> int | None:
     return value - (1 << 32) if value >= 1 << 31 else value
 
 
-def certification_plan(failed: int | None, policy: Policy) -> list[tuple[str, dict[str, str]]]:
-    """Every record of certification.log after CERTIFY, as (key, fields)."""
+def certification_plan(failed: int | None, name: str,
+                       modes: Sequence[str]) -> list[tuple[str, dict[str, str]]]:
+    """Every record of the certification log of the suite called ``name``, after
+    CERTIFY, as (key, fields). Only NORMAL must pass."""
     records = []
-    for mode in policy.logs:
-        must_pass = mode in policy.must_pass
+    for mode in modes:
+        must_pass = mode == "NORMAL"
         complete = "INCOMPLETE" if mode == "SKIPPED_CASE" else "COMPLETE"
         records.append(("MODE", {"MODE": mode, "expected": "PASS" if must_pass else "FAIL",
                                  "error": "0" if must_pass else str(failed),
                                  "result": "PASS" if must_pass else "FAIL",
                                  "completeness": complete, "status": "PASS"}))
-    records.append(("CERTIFICATION", {"CERTIFICATION": "PASS", "suite": policy.suite,
+    records.append(("CERTIFICATION", {"CERTIFICATION": "PASS", "suite": name,
                                       "completeness": "COMPLETE",
-                                      "modes": str(len(policy.logs)),
+                                      "modes": str(len(modes)),
                                       "failures": "0"}))
     return records
 
 
 def check_certification(folder: Path, failed: int | None, evidence: Evidence,
-                        policy: Policy) -> None:
-    """certification.log holds CERTIFY, one MODE record per mode in order, each
-    ending as it must, and CERTIFICATION=PASS: written before anything was raised."""
-    if failed is None:
-        evidence.findings.append(f"{policy.harness}: no ERR_TEST_FAILED constant")
-        return
-    records = read_log(folder / policy.certification, evidence.findings)
+                        name: str, modes: Sequence[str], filename: str) -> None:
+    """The certification log ``filename`` of the suite called ``name`` holds CERTIFY,
+    one MODE record per mode in order, each ending as it must, and
+    CERTIFICATION=PASS: written before anything was raised."""
+    records = read_log(folder / filename, evidence.findings)
     if not records:
         return
-    if (records[0].key, records[0].value) != ("CERTIFY", policy.suite):
-        evidence.findings.append(f"{policy.certification}:{records[0].line}: {records[0].key}="
-                                 f"{records[0].value}, expected CERTIFY={policy.suite}")
+    if (records[0].key, records[0].value) != ("CERTIFY", name):
+        evidence.findings.append(f"{filename}:{records[0].line}: {records[0].key}="
+                                 f"{records[0].value}, expected CERTIFY={name}")
         return
-    expected = certification_plan(failed, policy)
+    expected = certification_plan(failed, name, modes)
     for record, (key, fields) in zip(records[1:], expected, strict=False):
         actual = {record.key: record.value, **record.fields}
         if record.key != key or actual != fields:
-            evidence.findings.append(f"{policy.certification}:{record.line}: {record.key}="
+            evidence.findings.append(f"{filename}:{record.line}: {record.key}="
                                      f"{record.value} with {record.fields}, expected {fields}")
     if len(records) - 1 < len(expected):
         key, fields = expected[len(records) - 1]
-        evidence.findings.append(f"{policy.certification}: incomplete log: it ends before "
+        evidence.findings.append(f"{filename}: incomplete log: it ends before "
                                  f"{key}={fields[key]}")
     elif len(records) - 1 > len(expected):
         extra = records[len(expected) + 1]
-        evidence.findings.append(f"{policy.certification}:{extra.line}: {extra.key}={extra.value} "
+        evidence.findings.append(f"{filename}:{extra.line}: {extra.key}={extra.value} "
                                  "after CERTIFICATION (more than one certification?)")
 
 
@@ -837,16 +900,19 @@ def check_results(root: Path, commit: str, folder: Path, evidence: Evidence,
     evidence.findings += [f"{policy.results}: {item}" for item in found]
 
 
-def suite_findings(policy: Policy, suite: Suite, source: bytes, label: str) -> list[str]:
-    """Where the suite's source disagrees with the policy, or cannot be checked."""
+def suite_findings(policy: Policy | ProjectSuite, suite: Suite, source: bytes,
+                   label: str) -> list[str]:
+    """Where a suite's source disagrees with the policy, or cannot be checked. The
+    example suite, the policy itself, must also inject exactly one failure."""
     findings = []
-    where = f"{policy.suite_source} at {label}"
+    path = policy.suite_source if isinstance(policy, Policy) else policy.source
+    where = f"{path} at {label}"
     if not suite.cases:
-        return [f"no example suite in {where}"]
-    if len(suite.injected) != 1:
+        return [f"no suite in {where}"]
+    if isinstance(policy, Policy) and len(suite.injected) != 1:
         findings.append(f"{where}: INJECTED_FAILURE must change exactly one assertion, "
                         f"found {suite.injected}")
-    elif not suite.injected_expected:
+    elif isinstance(policy, Policy) and not suite.injected_expected:
         findings.append(f"{where}: INJECTED_FAILURE sets no numeric expected value")
     for name, stated in (("cases", suite.expected_cases),
                          ("assertions", suite.expected_assertions)):
@@ -879,13 +945,23 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     # The harness and the suite are read at the paths the policy names, never
     # by file name, so a policy cannot point at a module the commit lacks.
     harness = source_at(root, commit, policy.harness, evidence)
-    source = source_at(root, commit, policy.suite_source, evidence)
-    suite = read_suite(source)
-    if source:
-        evidence.findings += suite_findings(policy, suite, source, commit[:12])
-    check_logs(folder, suite, evidence, policy)
-    if harness:
-        check_certification(folder, test_failed_number(harness), evidence, policy)
+    failed = test_failed_number(harness) if harness else None
+    if harness and failed is None:
+        evidence.findings.append(f"{policy.harness}: no ERR_TEST_FAILED constant")
+    runs = []
+    entries: list[tuple[Policy | ProjectSuite, str, str, dict[str, str], str]] = [
+        (policy, policy.suite, policy.suite_source, policy.logs, policy.certification),
+        *((item, item.name, item.source, {"NORMAL": item.log}, item.certification)
+          for item in policy.project_suites)]
+    for item, name, path, logs, certification in entries:
+        source = source_at(root, commit, path, evidence)
+        suite = read_suite(source, policy.office)
+        if source:
+            evidence.findings += suite_findings(item, suite, source, commit[:12])
+        runs.append((suite, name, logs))
+        if harness and failed is not None:
+            check_certification(folder, failed, evidence, name, tuple(logs), certification)
+    check_logs(folder, runs, evidence)
     check_host(folder, evidence, policy, rebuilt)
     check_results(root, commit, folder, evidence, policy)
     if not rebuilt:
