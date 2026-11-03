@@ -14,9 +14,10 @@ Attribute VB_Name = "TEST_Harness"
 '   Suite lifecycle: BeginRun, BeginCase, RecordCaseError, EndRun.
 '   Assertions: AssertEqualDouble, AssertNear, AssertEqualText, AssertTrue,
 '   AssertErrorValue, AssertRaised; WithinTolerance is the comparison rule.
-'   Log: Say, Echo, SaveLog, LastResult. Recovery: ResetTests. Certification:
-'   BeginCertification, CertifyRun, EndCertification. Option Private Module
-'   keeps all of them out of the workbook's external surface.
+'   Log: Say, Echo, SaveLog, LastResult. Results: RecordResult, SaveResults.
+'   Recovery: ResetTests. Certification: BeginCertification, CertifyRun,
+'   EndCertification. Option Private Module keeps all of them out of the
+'   workbook's external surface.
 '
 ' DEPENDENCIES
 '   The VBA and Excel object models only: no reference, workbook fixture,
@@ -24,11 +25,12 @@ Attribute VB_Name = "TEST_Harness"
 '
 ' STATE OWNERSHIP
 '   Owns the run counters, the case identifiers, the failure records, the
-'   retained log, the certification records and the active-run,
-'   recovery-required and active-certification flags. Reads four
+'   retained log, the recorded results, the certification records and the
+'   active-run, recovery-required and active-certification flags. Reads four
 '   Application properties, the number of open workbooks and the caption of
 '   the active window to prove a run left them unchanged; never changes
-'   them, and never touches a workbook or worksheet.
+'   them. Reads the build stamp's commit from ThisWorkbook for SaveResults;
+'   never writes a workbook or worksheet.
 '
 ' ERROR POLICY
 '   Assertion failures are recorded and the run continues. EndRun re-raises
@@ -42,7 +44,8 @@ Attribute VB_Name = "TEST_Harness"
 ' LOG FORMAT
 '   One record per line, KEY=value; fields separated by "; ". The keys and
 '   their order are documented in docs/methodology/TEST_HARNESS.md (Log
-'   format, Certification log).
+'   format, Certification log). SaveResults writes the JSON results file of
+'   docs/methodology/TEST_CASES.md (Accuracy contracts).
 '
 ' COMPATIBILITY
 '   Excel VBA on Windows. The log records the host, its version, the Office
@@ -55,7 +58,7 @@ Attribute VB_Name = "TEST_Harness"
 '   of its own.
 '
 ' UPDATED
-'   2026-11-02
+'   2026-11-03
 '
 ' AUTHOR
 '   Daniele Penza
@@ -77,6 +80,9 @@ Attribute VB_Name = "TEST_Harness"
         Public Const ERR_TEST_DIRTY_START   As Long = &H80040FE0   'vbObjectError + 4064: Run refused: active or recovery required
         Public Const ERR_TEST_FAILED        As Long = &H80040FE1   'vbObjectError + 4065: Run finished without PASS
         Public Const ERR_TEST_USAGE         As Long = &H80040FE2   'vbObjectError + 4066: Lifecycle used out of order
+    'The defined name that carries the build stamp's commit
+    '(tools/devbuild/workbook.json, stamp.commit).
+        Private Const STAMP_COMMIT_NAME     As String = "build_commit"
 
 '------------------------------------------------------------------------------
 ' MODULE STATE
@@ -98,6 +104,7 @@ Attribute VB_Name = "TEST_Harness"
         Private mPrimaryFailure       As String         'First failure recorded in this run
         Private mLastResult           As String         'RESULT record of the last finished run
         Private mLog                  As Collection     'Log since the last BeginRun or ResetTests
+        Private mResults              As Collection     'Results recorded since the last BeginRun or ResetTests
         Private mSnapshotValid        As Boolean        'True once all four properties were read
         Private mInitialCalculation   As XlCalculation  'Calculation at BeginRun
         Private mInitialAlerts        As Boolean        'DisplayAlerts at BeginRun
@@ -182,6 +189,7 @@ Public Sub BeginRun( _
 '------------------------------------------------------------------------------
         ResetRunState
         Set mLog = New Collection
+        Set mResults = New Collection
         mSuite = SuiteName
         mExpectedCases = ExpectedCases
         mExpectedAssertions = ExpectedAssertions
@@ -461,6 +469,7 @@ Public Sub ResetTests()
         mCertActive = False
         Set mCertLog = Nothing
         Set mLog = New Collection
+        Set mResults = New Collection
         Say "RESET=DONE; run_active=no; recovery=NONE"
 
 End Sub
@@ -990,6 +999,114 @@ End Function
 '
 '------------------------------------------------------------------------------
 '
+'                                   RESULTS
+'
+'------------------------------------------------------------------------------
+'
+
+Public Sub RecordResult( _
+    ByVal CaseId As String, _
+    ByVal VariantName As String, _
+    ByVal Quantity As String, _
+    ByVal Scope As String, _
+    ByVal Value As Double)
+'
+'==============================================================================
+'                                 RecordResult
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Keep one computed value of the running suite for SaveResults: the
+'   result of one expected output of a test case, which
+'   tools/check_accuracy.py --results compares with its expected value.
+'
+' INPUTS
+'   CaseId: the test case's id (tests/fixtures/). VariantName: the variant of
+'   a file-based case, or an empty string for a JSON fixture. Quantity: the
+'   output's quantity. Scope: its scope, or an empty string for none. Value:
+'   the result, written with the 15 significant digits of Str$.
+'
+' ERROR POLICY
+'   Raises ERR_TEST_USAGE outside a run. A repeated result is kept; the
+'   accuracy check rejects it.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+        RequireActiveRun "RecordResult"
+        mResults.Add "{""case"": " & JsonText(CaseId) & _
+            ", ""variant"": " & JsonTextOrNull(VariantName) & _
+            ", ""quantity"": " & JsonText(Quantity) & _
+            ", ""scope"": " & JsonTextOrNull(Scope) & _
+            ", ""value"": " & NumberText(Value) & "}"
+
+End Sub
+
+
+Public Sub SaveResults( _
+    ByVal Path As String)
+'
+'==============================================================================
+'                                 SaveResults
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write the results recorded since the last BeginRun or ResetTests as the
+'   results file of docs/methodology/TEST_CASES.md (Accuracy contracts), with
+'   the commit of the workbook's build stamp. The file is ASCII, a subset of
+'   UTF-8, with LF line endings.
+'
+' INPUTS
+'   Path: full path of the file, created or overwritten; outside the
+'   checkout or in the ignored test-results/ directory.
+'
+' OUTCOMES
+'   A workbook without a readable build stamp writes an empty commit, and a
+'   build with local changes writes its marked commit; the accuracy check
+'   rejects both, because the results then name no exact commit.
+'
+' ERROR POLICY
+'   Raises ERR_TEST_USAGE before the first run; a file error is re-raised
+'   after the file is closed.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Text    As String     'The whole file
+    Dim Entry   As Variant    'One recorded result
+    Dim Count   As Long       'Results written so far
+
+'------------------------------------------------------------------------------
+' COMPOSE
+'------------------------------------------------------------------------------
+        If mResults Is Nothing Then
+            Err.Raise ERR_TEST_USAGE, "TEST_Harness.SaveResults", "No run has recorded results."
+        End If
+        Text = "{" & vbLf & "  ""schema_version"": 1," & vbLf & _
+            "  ""kind"": ""test-results""," & vbLf & _
+            "  ""commit"": " & JsonText(StampedCommit()) & "," & vbLf & _
+            "  ""results"": ["
+        For Each Entry In mResults
+            Count = Count + 1
+            Text = Text & IIf(Count = 1, vbNullString, ",") & vbLf & "    " & CStr(Entry)
+        Next Entry
+        Text = Text & IIf(Count = 0, vbNullString, vbLf & "  ") & "]" & vbLf & "}" & vbLf
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
+        WriteText Path, Text
+
+End Sub
+
+
+'
+'------------------------------------------------------------------------------
+'
 '                                   HELPERS
 '
 '------------------------------------------------------------------------------
@@ -1171,6 +1288,154 @@ WriteFailed:
         Err.Raise ErrorNumber, ErrorSource, ErrorDescription
 
 End Sub
+
+
+Private Sub WriteText( _
+    ByVal Path As String, _
+    ByVal Text As String)
+'
+'==============================================================================
+'                                  WriteText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   Write text to a file exactly as given, without a line ending added.
+'
+' INPUTS
+'   Path: full path of the file, created or overwritten. Text: ASCII text.
+'
+' ERROR POLICY
+'   A file error is re-raised after the file is closed.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FileNumber         As Integer    'Handle of the open file
+    Dim ErrorNumber        As Long       'File error number
+    Dim ErrorSource        As String     'File error source
+    Dim ErrorDescription   As String     'File error description
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
+    'The trailing semicolon keeps Print from adding CR LF.
+        FileNumber = FreeFile
+        Open Path For Output As #FileNumber
+        On Error GoTo WriteFailed
+        Print #FileNumber, Text;
+        Close #FileNumber
+        Exit Sub
+
+'------------------------------------------------------------------------------
+' HANDLE A WRITE ERROR
+'------------------------------------------------------------------------------
+WriteFailed:
+        ErrorNumber = Err.Number
+        ErrorSource = Err.Source
+        ErrorDescription = Err.Description
+        On Error GoTo 0
+        Close #FileNumber
+        Err.Raise ErrorNumber, ErrorSource, ErrorDescription
+
+End Sub
+
+
+Private Function StampedCommit() _
+    As String
+'
+'==============================================================================
+'                                StampedCommit
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The commit of the workbook's build stamp: the value of the defined name
+'   STAMP_COMMIT_NAME in ThisWorkbook, the workbook that holds this module.
+'
+' RETURNS
+'   The stamp as written by tools/devbuild/build_workbook.py, or an empty
+'   string when the workbook has no such name or it cannot be read.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+        On Error GoTo ReadFailed
+        StampedCommit = CStr(ThisWorkbook.Names(STAMP_COMMIT_NAME).RefersToRange.Value)
+        Exit Function
+
+ReadFailed:
+        StampedCommit = vbNullString
+
+End Function
+
+
+Private Function JsonText( _
+    ByVal Value As String) _
+    As String
+'
+'==============================================================================
+'                                   JsonText
+'------------------------------------------------------------------------------
+' PURPOSE
+'   A JSON string literal of Value in ASCII: the quote, the backslash, the
+'   control characters and every character above code 126 are escaped.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Index       As Long      'Position in Value
+    Dim Character   As String    'Character at Index
+    Dim Code        As Long      'Its UTF-16 code unit, 0 to 65535
+    Dim Text        As String    'Escaped text so far
+
+'------------------------------------------------------------------------------
+' ESCAPE
+'------------------------------------------------------------------------------
+        For Index = 1 To Len(Value)
+            Character = Mid$(Value, Index, 1)
+            Code = AscW(Character) And &HFFFF&
+            If Character = """" Or Character = "\" Then
+                Text = Text & "\" & Character
+            ElseIf Code < 32 Or Code > 126 Then
+                Text = Text & "\u" & Right$("000" & Hex$(Code), 4)
+            Else
+                Text = Text & Character
+            End If
+        Next Index
+        JsonText = """" & Text & """"
+
+End Function
+
+
+Private Function JsonTextOrNull( _
+    ByVal Value As String) _
+    As String
+'
+'==============================================================================
+'                                JsonTextOrNull
+'------------------------------------------------------------------------------
+' PURPOSE
+'   JSON null for an empty string, otherwise the string literal of Value.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+        If Len(Value) = 0 Then
+            JsonTextOrNull = "null"
+        Else
+            JsonTextOrNull = JsonText(Value)
+        End If
+
+End Function
 
 
 Private Function ActiveWindowCaption() _

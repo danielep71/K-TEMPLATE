@@ -50,6 +50,7 @@ empty or marked `NOT RUN` is never a pass.
 | Harness certification ([recording an Excel run](../../INSTALLATION.md#recording-an-excel-run)) | `CERTIFICATION=PASS` or `FAIL`, `COMPLETE` or `INCOMPLETE` | `certification.log` |
 | Workbook built from the candidate (`tools/devbuild/build_workbook.py`) | Its `build_commit` stamp, which must be the candidate without *NOT evidence-grade* | The workbook's SHA-256 in `export-manifest.json` |
 | `tools/check_excel_run.py --workbook … --require-binding` against the candidate | `Binding: VERIFIED` and `excel-run: PASS`, or each `FAIL` line | Its report, with the Git blob id of every component |
+| Accuracy contracts, measured on `results.json` | Each contract's worst calibration and holdout error against its threshold, from the report's `Accuracy:` lines; `frozen` or `draft` | The report and `results.json` |
 | Regression cases (validation plan) | Number run, passed, failed | Log or evidence folder |
 | Failure paths: invalid input, cleanup after an error | PASS or FAIL | Log lines |
 

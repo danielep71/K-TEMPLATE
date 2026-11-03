@@ -12,8 +12,8 @@ records.
 
 | Module | Holds |
 | --- | --- |
-| `tests/modules/TEST_Harness.bas` | The run lifecycle (`BeginRun`, `BeginCase`, `RecordCaseError`, `EndRun`), the assertions (`AssertEqualDouble`, `AssertNear`, `AssertEqualText`, `AssertTrue`, `AssertErrorValue`, `AssertRaised`, with `WithinTolerance` as the comparison rule), the log (`Say`, `Echo`, `SaveLog`, `LastResult`), recovery (`ResetTests`) and certification (`BeginCertification`, `CertifyRun`, `EndCertification`) |
-| `tests/modules/TEST_Examples.bas` | The example suite: one case per kind of assertion, and the reference implementation of the [cleanup pattern](../VBA_HOUSE_STYLE.md#operation-and-cleanup-outcomes) with its failure paths. It holds no calculation of the workbook |
+| `tests/modules/TEST_Harness.bas` | The run lifecycle (`BeginRun`, `BeginCase`, `RecordCaseError`, `EndRun`), the assertions (`AssertEqualDouble`, `AssertNear`, `AssertEqualText`, `AssertTrue`, `AssertErrorValue`, `AssertRaised`, with `WithinTolerance` as the comparison rule), the log (`Say`, `Echo`, `SaveLog`, `LastResult`), the [results](#results) (`RecordResult`, `SaveResults`), recovery (`ResetTests`) and certification (`BeginCertification`, `CertifyRun`, `EndCertification`) |
+| `tests/modules/TEST_Examples.bas` | The example suite: one case per kind of assertion, one case that reads the illustrative [test cases](TEST_CASES.md) and records their totals, and the reference implementation of the [cleanup pattern](../VBA_HOUSE_STYLE.md#operation-and-cleanup-outcomes) with its failure paths. It holds no calculation of the workbook |
 
 Both use `Option Private Module`, so they never become part of the
 workbook's external surface. A production workbook contains neither.
@@ -23,7 +23,13 @@ each starting with `BeginCase` and ending in an error handler that calls
 `RecordCaseError`; a runner that calls every case once, between `BeginRun`
 and `EndRun`; and the expected case and assertion counts as constants. The
 expected values of a numerical case come from its
-[test case](TEST_CASES.md), with the tolerance that the case states.
+[test case](TEST_CASES.md), with the tolerance that the case states. A case
+that computes an output of an accuracy contract also records it with
+`RecordResult`.
+
+The example suite's entry points take the full path of `tests/fixtures/` in
+the checkout, from which its results case reads the illustrative test cases:
+`RunExampleTests "<fixtures>"`, and so on.
 
 ## Run outcomes
 
@@ -54,12 +60,14 @@ The example suite has three modes:
 | `INJECTED_FAILURE` | `injected.log` | `RESULT=FAIL`, `operation=FAIL`, `COMPLETE`, one failure: the designated assertion |
 | `SKIPPED_CASE` | `skipped.log` | `RESULT=FAIL`, `operation=PASS`, `INCOMPLETE`, one failure: `harness.completeness` |
 
-`TEST_Examples.CertifyExamples "<folder>"` is the certification entry point:
+`TEST_Examples.CertifyExamples "<folder>", "<fixtures>"` is the certification
+entry point:
 
 1. `BeginCertification` refuses to start while a run or a certification is
    active, or while recovery is required.
 2. Each mode runs. Its error is recorded, not raised, and its log is saved,
-   so that every log is written whatever the run did.
+   so that every log is written whatever the run did. After the normal run,
+   `SaveResults` saves its results as `results.json`.
 3. `CertifyRun` records how the run reached its caller. The normal run must
    pass and be complete. Each deliberate failure must reach its caller as
    `ERR_TEST_FAILED` with a description. This is the self-test that a failed
@@ -105,11 +113,31 @@ line by line, apart from `started` and `ENVIRONMENT`.
 | `MODE=<mode>` | One per mode, in run order: `expected` (`PASS` or `FAIL`), `error` (the number that reached the caller, `0` for none), `result` (`PASS`, `FAIL`, or `NONE` when the run wrote no `RESULT`), `completeness` (`COMPLETE`, `INCOMPLETE` or `NONE`), `status` (`PASS` when the run ended as its mode requires) |
 | `CERTIFICATION=PASS` or `FAIL` | `suite`, `completeness` (`COMPLETE` when every run that must pass was complete), `modes`, `failures` |
 
+## Results
+
+`RecordResult` keeps one result of the running suite: its case, its variant
+(an empty string for a JSON fixture), its quantity, its scope (an empty
+string for none) and its value. It raises `ERR_TEST_USAGE` outside a run.
+The results belong to the run, like its log: `BeginRun` and `ResetTests`
+clear them.
+
+`SaveResults "<path>"` writes them as the results file of the
+[accuracy contracts](TEST_CASES.md#accuracy-contracts): ASCII JSON with LF
+line endings, an empty variant or scope written as `null`, and each value
+with the 15 significant digits of `Str$`, whatever the regional settings.
+Its `commit` is the value of the defined name `build_commit` in the
+workbook that holds the harness, the build stamp of
+`tools/devbuild/build_workbook.py`. A workbook without that name writes an
+empty commit, and a build with local changes writes its marked stamp; the
+accuracy check rejects both. This is the only part of a workbook the harness
+reads, and it writes none.
+
 ## Evidence folder
 
 | File | Written by |
 | --- | --- |
 | `examples.log`, `injected.log`, `skipped.log` | `CertifyExamples`, one per mode |
+| `results.json` | `SaveResults`, after the normal run |
 | `certification.log` | `EndCertification` |
 | `exported/` | You: every VBA component exported back from the workbook after the run, each form with its `.frx` |
 | `host.txt` | You: `windows=`, `references=` and `compile=` |
@@ -126,7 +154,7 @@ holds what an Excel run must leave as evidence:
 - `modes`: the three modes in run order, the log each one saves and whether
   it must pass (only `NORMAL`);
 - `evidence`: the names of the certification log, the export folder, the host
-  record and the export manifest in the evidence folder;
+  record, the export manifest and the results file in the evidence folder;
 - `host`: the exact references and the required Office bitness.
 
 `tools/check_excel_run.py` reads the policy from the candidate commit, so a
@@ -145,12 +173,19 @@ and this guide.
 ## What it proves
 
 The example suite exercises the harness itself: assertions, tolerances, error
-values, raised errors, completeness, cleanup and certification. A passing run
-validates no calculation of the workbook. Without Excel,
-`tests/test_vba_harness.py` checks what the source can show: the example
-suite's counts equal its cases and assertions, every case runs once with a
-unique identifier, every record in this guide is written, and
-`EndCertification` writes the log before it raises. `check_excel_run.py`
-proves only that an evidence folder is consistent with a commit. It cannot see
-Excel: the compile result, the references and the Windows build are the
-runner's own record.
+values, raised errors, completeness, cleanup, certification and the results
+file. Its results case reads the illustrative test cases, whose contract is
+illustrative, so a passing run validates no calculation of the workbook.
+Without Excel, `tests/test_vba_harness.py` checks what the source can show:
+- the example suite's counts equal its cases and assertions;
+- every case runs once with a unique identifier;
+- every record in this guide is written;
+- `EndCertification` writes the log before it raises;
+- the results case records exactly the outputs of the contracts' cases, from
+  files that exist;
+- the harness reads the stamp name the build writes.
+
+`check_excel_run.py` proves that an evidence folder is consistent with a
+commit, and measures the commit's accuracy contracts on its results file. It
+cannot see Excel: the compile result, the references and the Windows build
+are the runner's own record.

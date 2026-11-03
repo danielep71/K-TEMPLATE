@@ -5,10 +5,11 @@ Usage: python3 tools/devbuild/lo_smoke.py [WORKBOOK]
 Without WORKBOOK it builds the development workbook first.
 
 It opens the workbook in LibreOffice with VBA compatibility and runs
-TEST_Examples.CertifyExamples into a temporary folder. Then it prints a JSON
+TEST_Examples.CertifyExamples into a temporary folder, with the checkout's
+tests/fixtures as the folder of the test cases. Then it prints a JSON
 summary: the modules LibreOffice loaded, the error the certification raised,
-each run log's RESULT and failures, the certification log, and the failures
-that LibreOffice is not known to cause. It exits 0 when there is none, 1 when
+each run log's RESULT and failures, the certification log, the results file,
+and the failures that LibreOffice is not known to cause. It exits 0 when there is none, 1 when
 there is one or the certification wrote no log, and 2 when LibreOffice or
 its Python UNO bridge (python3-uno) is missing. Run it with the Python that
 provides the bridge.
@@ -42,6 +43,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 LOGS = ("examples.log", "injected.log", "skipped.log", "certification.log")
+RESULTS = "results.json"
 # Assertions of the example suite that fail in LibreOffice only, because
 # Err.Number reads 0 after a call that raised under On Error Resume Next.
 KNOWN_FAILURES = frozenset({
@@ -109,7 +111,7 @@ def certify(context: Any, workbook: Path, folder: Path) -> dict[str, object]:
             "vnd.sun.star.script:VBAProject.TEST_Examples.CertifyExamples"
             "?language=Basic&location=document")
         try:
-            script.invoke((str(folder),), (), ())
+            script.invoke((str(folder), str(ROOT / "tests" / "fixtures")), (), ())
             summary["error"] = None
         except Exception as error:  # noqa: BLE001 - reported, not raised
             summary["error"] = str(error)
@@ -137,6 +139,19 @@ def read_logs(folder: Path) -> dict[str, object]:
                            "failures": [line for line in lines
                                         if line.startswith(("FAILURE=", "ERROR="))]}
     return found
+
+
+def read_results(folder: Path) -> object:
+    """The results file, parsed; its text when it is not JSON; None when it is missing.
+    The workbook's build stamp names the working tree's HEAD, so it is shown, not checked."""
+    matches = sorted(folder.rglob(RESULTS)) + sorted(folder.parent.glob(f"*{RESULTS}"))
+    if not matches:
+        return None
+    text = matches[0].read_text(encoding="utf-8", errors="replace")
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -171,7 +186,10 @@ def main(argv: list[str] | None = None) -> int:
             except subprocess.TimeoutExpired:
                 office.kill()
         summary["logs"] = read_logs(folder)
+        summary["results"] = read_results(folder)
     summary["unexpected"] = unexpected(summary["logs"])  # type: ignore[arg-type]
+    if not isinstance(summary["results"], dict) or summary["results"].get("kind") != "test-results":
+        summary["unexpected"].append(f"{RESULTS}: not written as a test-results file")  # type: ignore[attr-defined]
     summary["note"] = "LibreOffice is not a supported host; this is never Excel evidence"
     print(json.dumps(summary, indent=1, default=str))
     return 1 if summary["unexpected"] else 0
