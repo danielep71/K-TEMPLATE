@@ -315,9 +315,11 @@ release may publish as the calculation's accuracy.
   them is `published` or `independent`. A contract on an illustrative
   calculation stays `draft`, as the template's `ACC-01` does.
 - **Frozen is kept.** Once a release tag holds a frozen contract, it is never
-  removed or returned to `draft`, even by deleting the registry, and its
-  threshold grows only with a new `decision`. The check compares with the
-  newest `vX.Y.Z` tag of the branch.
+  removed or returned to `draft`, even by deleting the registry. With the
+  same `decision`, it may only get stricter: a lower threshold, or added
+  quantities and cases. A change of calculation, regime or metric, a larger
+  threshold, or a dropped quantity or case needs a new `decision`. The check
+  compares with the newest `vX.Y.Z` tag of the branch.
 - **Measured on the workbook.** The contracts measure the workbook's results,
   which exist only after an Excel run. `python tools/check_accuracy.py`, which
   **Repository integrity** runs, checks the registry against the cases. With

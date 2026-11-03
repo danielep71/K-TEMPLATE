@@ -276,10 +276,35 @@ class WideningTest(unittest.TestCase):
         self.assertEqual(self.tagged(FROZEN, FROZEN), [])
         self.assertEqual(self.tagged(FROZEN, {**FROZEN, "threshold": 0.00001}), [])
         widened = self.tagged(FROZEN, {**FROZEN, "threshold": 0.001})
-        self.assertTrue(any("ACC-02 threshold 0.001 is larger than 0.0001 at v1.0.0; widening "
-                            "it needs a new decision" in item for item in widened), widened)
+        self.assertTrue(any("ACC-02 threshold 0.001 is larger than 0.0001 at v1.0.0; a weaker "
+                            "or different guarantee needs a new decision" in item
+                            for item in widened), widened)
         self.assertEqual(self.tagged(FROZEN, {**FROZEN, "threshold": 0.001,
                                               "decision": "#2"}), [])
+
+    def test_any_other_change_to_a_frozen_guarantee_needs_a_new_decision(self) -> None:
+        changes = {
+            "metric is 'absolute', not 'relative'": {"metric": "absolute"},
+            "regime is 'CRR2', not 'CRR3'": {"regime": "CRR2"},
+            "drops holdout cases demo-holdout-2": {"holdout_cases": ["demo-holdout-1"]},
+            "drops calibration cases demo-calibration": {"calibration_cases": []},
+        }
+        for text, change in changes.items():
+            with self.subTest(text=text):
+                found = self.tagged(FROZEN, {**FROZEN, **change})
+                self.assertTrue(any(f"ACC-02 {text} at v1.0.0" in item for item in found),
+                                found)
+                self.assertFalse(any("ACC-02" in item and "v1.0.0" in item for item in
+                                     self.tagged(FROZEN, {**FROZEN, **change,
+                                                          "decision": "#2"})))
+        # Moving a holdout case to calibration drops it from the holdout.
+        moved = {**FROZEN, "calibration_cases": ["demo-calibration", "demo-holdout-2"],
+                 "holdout_cases": ["demo-holdout-1"]}
+        self.assertTrue(any("drops holdout cases demo-holdout-2" in item
+                            for item in self.tagged(FROZEN, moved)))
+        # Adding a case only strengthens the guarantee.
+        self.assertEqual(self.tagged({**FROZEN, "holdout_cases": ["demo-holdout-1"]}, FROZEN),
+                         [])
 
     def test_a_frozen_contract_is_neither_removed_nor_unfrozen(self) -> None:
         for now in (None, {**FROZEN, "status": "draft", "decision": None}):

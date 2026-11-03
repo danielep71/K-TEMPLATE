@@ -16,7 +16,9 @@ Without a results file, the check reads the registry against the cases:
   has at least min_holdout_cases holdout cases, every expected value of which
   is published or independent;
 - a contract frozen at the newest vX.Y.Z tag that HEAD contains is still
-  frozen, and its threshold is no larger unless it names another decision.
+  frozen, and keeps its guarantee unless it names another decision: the same
+  calculation, regime and metric, a threshold no larger, and every quantity
+  and case it had.
 
 With --results, a results file of an Excel run, it also fails:
 - results of another revision: their commit is the full SHA of the candidate,
@@ -92,6 +94,7 @@ class Output:
 class Contract:
     id: str
     calculation: str
+    regime: str
     quantities: list[str]
     metric: str
     threshold: float
@@ -230,7 +233,8 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
         if problems:
             continue
         registry.contracts.append(Contract(
-            item["id"], str(item["calculation"]), list(item["quantities"]), item["metric"],
+            item["id"], str(item["calculation"]), item["regime"], list(item["quantities"]),
+            item["metric"],
             float(item["threshold"]), item["status"], item["decision"],
             list(item["calibration_cases"]), list(item["holdout_cases"])))
     return registry
@@ -318,10 +322,25 @@ def widening_problems(root: Path, registry: Registry, report: Report) -> list[st
         if now is None or now.status != "frozen":
             problems.append(f"{before.id} was frozen at {tag}; a frozen contract is neither "
                             "removed nor returned to draft")
-        elif now.threshold > before.threshold and now.decision == before.decision:
-            problems.append(f"{before.id} threshold {now.threshold!r} is larger than "
-                            f"{before.threshold!r} at {tag}; widening it needs a new decision")
+        elif now.decision == before.decision:
+            problems += [f"{before.id} {change} at {tag}; a weaker or different guarantee "
+                         "needs a new decision" for change in weakened(before, now)]
     return problems
+
+
+def weakened(before: Contract, now: Contract) -> list[str]:
+    """How ``now`` changes or weakens the guarantee ``before`` froze; tightening is no change."""
+    changes = [f"{name} is {getattr(now, name)!r}, not {getattr(before, name)!r}"
+               for name in ("calculation", "regime", "metric")
+               if getattr(now, name) != getattr(before, name)]
+    if now.threshold > before.threshold:
+        changes.append(f"threshold {now.threshold!r} is larger than {before.threshold!r}")
+    for name, label in (("quantities", "quantities"), ("calibration", "calibration cases"),
+                        ("holdout", "holdout cases")):
+        dropped = sorted(set(getattr(before, name)) - set(getattr(now, name)))
+        if dropped:
+            changes.append(f"drops {label} {', '.join(dropped)}")
+    return changes
 
 
 def error(metric: str, actual: float, expected: float) -> float:
