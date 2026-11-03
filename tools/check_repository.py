@@ -221,6 +221,7 @@ def checks(context: Context) -> list[Check]:
         Check("data-contract", [python, "tools/check_data_contract.py"]),
         Check("test-cases", [python, "tools/check_test_cases.py"]),
         Check("derivations", [python, "tools/check_derivations.py"]),
+        Check("independent-implementations", [python, "tools/check_independent.py"]),
         Check("accuracy", [python, "tools/check_accuracy.py"]),
         Check("workbook-protection", [python, "tools/check_workbook_protection.py"]),
         Check("changelog", changelog),

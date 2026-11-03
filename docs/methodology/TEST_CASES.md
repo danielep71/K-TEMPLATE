@@ -23,6 +23,7 @@ two forms:
 | `tests/expected/<case-id>.json` | Expected results, each with its provenance |
 | `tests/derivations/<name>.py` | Optional: a script that computes expected values from the documented method, separately from the code under test |
 | `tests/accuracy/contracts.json` | Optional: the [accuracy contracts](#accuracy-contracts), each stating the worst error a calculation guarantees over a set of cases |
+| `tests/independent/adapters.json` | Optional: the [adapters](#independent-implementations) that run an independent implementation on the cases, with their scripts beside it |
 
 - Use a **JSON fixture** to test a calculation: its inputs are values, already
   read. Use a **file-based case** to test the import of the files the
@@ -242,6 +243,66 @@ agree: the value stays `illustrative`, because the project derived it. The
 scripts use the Python standard library only and are never a runtime
 dependency of the workbook. `tests/derivations/illustrative_total.py` and
 `illustrative_file_total.py` show the format for the two example cases.
+
+<a id="independent-implementations"></a>
+
+## Independent implementations
+
+An `independent` value cites an `IMPL-` source: an implementation by another
+author, such as an R or Python package. An adapter lets the repository run
+that implementation on the cases and compare its results with the expected
+values. `python tools/check_independent.py`, which **Repository integrity**
+runs, does so for each adapter registered in `tests/independent/adapters.json`:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "independent-adapters",
+  "adapters": [
+    {"source": "IMPL-01", "command": ["Rscript", "tests/independent/impl_01.R"]}
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `source` | An `IMPL-` ID of the [source register](SOURCES.md); a source has one adapter at most |
+| `command` | The words of the command that runs the adapter, from the repository root. A first word `python` is the interpreter that runs the check; any other is looked up on `PATH` |
+
+An adapter is a script under `tests/independent/`, written for one
+implementation. The check runs it once per case, with the argument a
+[derivation script](#derivation-scripts) receives: the fixture, or for a
+file-based case each variant's directory in turn. The adapter translates that
+input into the implementation's own, runs the implementation, and prints one
+JSON object:
+
+| Object | When |
+| --- | --- |
+| `{"outputs": [...]}` | The implementation computed the case. The items have the `quantity` and `scope` of an expected output and its `value` or `text`, as a derivation script prints them |
+| `{"unsupported": "<reason>"}` | The implementation cannot represent the case, for example an input it has no field for |
+| `{"unavailable": "<reason>"}` | The implementation is not installed here |
+
+The check then:
+
+- compares each printed output that the expected file holds, whatever its
+  reference class, within the output's [tolerance](#tolerance), or exactly
+  for a text, and ignores a printed quantity that the file does not hold;
+- fails on a mismatch, on an output citing the adapter's source that is not
+  printed, and on an adapter that fails or prints anything else;
+- lists each case or variant the implementation cannot represent, with the
+  reason and the number of values citing the source that stay unchecked, and
+  fails nothing for it;
+- skips the adapter with a note when the first word of its command is not on
+  `PATH` or it answers `unavailable`, so the check runs where the
+  implementation is not installed. A skipped adapter compares nothing:
+  install the implementation in the **Repository integrity** workflow for the
+  comparison to run on every pull request.
+
+With no registry, or no adapter in it, as in the template, the check passes
+and says that nothing was cross-checked. An adapter and its implementation
+are test tools, never a runtime dependency of the workbook. A match shows that
+the implementation and the expected file agree; what class a value has is
+still decided by the [reference classes](#reference-classes).
 
 <a id="tolerance"></a>
 
@@ -469,5 +530,6 @@ It does not check:
 - that an `invalid` case has no numeric output for what it rejects;
 - any value: nothing is computed or compared. `tools/check_derivations.py`
   compares the values that a [derivation script](#derivation-scripts) computes,
-  and running the cases on the workbook is the job of a VBA test harness in
-  Excel.
+  `tools/check_independent.py` those that an
+  [independent implementation](#independent-implementations) computes, and
+  running the cases on the workbook is the job of a VBA test harness in Excel.

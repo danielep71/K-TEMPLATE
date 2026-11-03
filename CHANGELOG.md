@@ -63,6 +63,14 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_independent.py`, which **Repository integrity** runs: it runs
+  each independent implementation that `tests/independent/adapters.json`
+  registers for an `IMPL-` source on the test cases, through an adapter that
+  translates each case into the implementation's input, and compares the
+  results with the expected values within their tolerance. It lists the cases
+  an implementation cannot represent, with the reason, and skips an adapter
+  whose implementation is not installed, with a note. The template registers
+  none, so the check passes and says that nothing was cross-checked (#248).
 - The VBA harness has patterns for three more kinds of test.
   `tests/modules/TEST_Relations.bas` holds illustrative relation tests
   (additivity, symmetry, monotonicity, zero input) on a stand-in total, each
