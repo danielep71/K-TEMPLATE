@@ -72,6 +72,33 @@ milestones and their pull requests.
   runner, which restores the input sheets it writes, and the conventions of a
   volume benchmark, which `check_excel_run.py` refuses as an evidence suite.
   Static checks only: the new module has not been run in Excel (#246).
+- The methodology guides trace each rule. The methodology overview has a
+  support matrix that marks each feature as supported, not supported or
+  entered by the user. The validation plan has a traceability table that
+  maps each `SRC-` paragraph to its `CALC-` step, its VBA procedure, its test
+  cases and a status: Validated, Exercised, Not validated or Not implemented.
+  Each table has one illustrative row. `check_test_cases.py` fails a row whose
+  source, step, procedure under `src/` or case does not exist, whose case
+  tests another calculation, or whose status contradicts what the row names
+  (#247).
+- `RELEASING.md` step 8 checks the published workbook, with a *Published
+  workbook* section in the release certification: the attached workbook's
+  build stamp names the candidate and `production`, a rebuild of the tag
+  gives the same SHA-256 or the same parts, and a downloaded, unblocked copy
+  shows no link to another workbook and no `#REF!` name, and survives run,
+  save and reopen. An optional user manual for workbook recipients, by
+  convention one folder per released version under `docs/user-manual/`, is
+  built to a PDF with a tool the release records (Pandoc as the example; the
+  template installs none) and listed among the certified artifacts (#250).
+- With `src/workbook/Template.xlsx`, `tools/devbuild/build_workbook.py` builds
+  the workbook from a copy of the template, keeping its formats, print areas
+  and protection: it sets the code names, writes the stamp and adds the VBA
+  project, and two builds stay byte-identical. Without a template it writes
+  blank sheets as before. The protection matrix,
+  `docs/methodology/workbook-protection.json`, states each sheet's protection
+  options and its input (unlocked) and output (locked) ranges;
+  `tools/check_workbook_protection.py` fails **Repository integrity** when the
+  template differs from it, and passes as inactive while neither exists (#243).
 - A machine-readable data contract, `docs/methodology/data-contract.json`,
   holds each dataset's file or sheet, encoding and delimited-text format, and
   each field's type, unit or currency field, required flag and allowed values

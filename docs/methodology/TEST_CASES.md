@@ -425,7 +425,8 @@ Three kinds of VBA test complement the cases. Each is described in the
 ## Checking
 
 `tools/check_test_cases.py` checks the files under `tests/fixtures/` and
-`tests/expected/`. With no case present it passes and says so.
+`tests/expected/`, and the traceability table that names them. With no case
+and no traceability row present it passes and says so.
 
 It checks:
 
@@ -453,7 +454,11 @@ It checks:
   - their rule, against the case's calculation;
 - the reference class, its source against the register, and its script;
 - the `illustrative` naming rules, and a `_status` text output in every
-  `invalid` case.
+  `invalid` case;
+- the [traceability table](VALIDATION_PLAN.md#traceability) of the validation
+  plan: each row's source, calculation step, VBA procedures and cases exist,
+  each case tests the row's calculation, and the status agrees with what the
+  row names.
 
 It does not check:
 
