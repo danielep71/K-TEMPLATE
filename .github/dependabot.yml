@@ -9,6 +9,10 @@
 # names a branch that does not exist.
 # Labels must exist in .github/labels.json, include exactly one priority (P3),
 # and the assignee must match the issue forms; Repository integrity checks them.
+# A version update waits 14 days after its release (cooldown), so a package
+# withdrawn soon after publication is never proposed. Security updates do not
+# wait, and they target the default branch whatever target-branch says
+# (docs/repo_governance/PULL_REQUESTS.md, Dependency updates).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -27,6 +31,8 @@ updates:
       - danielep71
     commit-message:
       prefix: ci
+    cooldown:
+      default-days: 14
     groups:
       github-actions:
         patterns:
@@ -47,6 +53,8 @@ updates:
       - danielep71
     commit-message:
       prefix: ci
+    cooldown:
+      default-days: 14
     groups:
       configuration-parser:
         patterns:
@@ -67,6 +75,8 @@ updates:
       - danielep71
     commit-message:
       prefix: ci
+    cooldown:
+      default-days: 14
     groups:
       python-quality-tools:
         patterns:
