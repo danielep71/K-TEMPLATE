@@ -416,17 +416,19 @@ def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Map
     return lines
 
 
-def check(root: Path, results_path: Path | None = None,
-          commit: str | None = None) -> tuple[list[str], int, list[str]]:
+def check(root: Path, results_path: Path | None = None, commit: str | None = None,
+          widening: bool = True) -> tuple[list[str], int, list[str]]:
     """The findings, the number of contracts and the measurement lines.
 
-    ``commit`` is the candidate the results must be of; HEAD when None."""
+    ``commit`` is the candidate the results must be of; HEAD when None.
+    ``widening`` False skips the comparison with the newest release tag, for a
+    copy of a commit's cases without its Git history."""
     report = Report()
     where = REGISTRY.as_posix()
     present = (root / REGISTRY).is_file()
     registry = read_registry(root, None, report, where)
     if registry is None:
-        if not present:
+        if not present and widening:
             # A deleted registry still may not drop a released frozen contract.
             for problem in widening_problems(root, Registry(), report):
                 report.add(where, problem)
@@ -445,7 +447,7 @@ def check(root: Path, results_path: Path | None = None,
             report.add(at, problem)
         if results is not None:
             lines += measure(contract, splits, results, report, at)
-    for problem in widening_problems(root, registry, report):
+    for problem in widening_problems(root, registry, report) if widening else []:
         report.add(where, problem)
     return report.findings, len(registry.contracts), lines
 
