@@ -2,13 +2,13 @@
 
 ![Labels](https://img.shields.io/badge/labels-20-1D76DB)
 
-This repository defines 20 issue labels, each with a name, description, and colour. `.github/labels.json` is authoritative; edit it through a pull request. `prune: true` removes labels outside the catalogue, including their issue associations.
+This repository defines 20 issue labels, each with a name, description, and colour. `.github/labels.json` is authoritative; edit it through a pull request. `prune: true` deletes live labels outside the catalogue, but only unused ones. Before it changes anything, synchronization checks every label it would delete against all issues and pull requests, open and closed. It stops if one still carries the label, or if the name contains a comma, which the check cannot query. Remove such a label from its issues and pull requests, or add it to the catalogue, then rerun.
 
 ## ⚙️ Automation
 
 | Workflow | Purpose |
 | --- | --- |
-| Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Verifies the exact live result. |
+| Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Refuses to delete a label in use. Verifies the exact live result. |
 | Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. |
 | Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, priority, open milestone, target end date or dependency section, a target end date not before the milestone's due date, invalid labels, and inconsistent blocked status. |
 | Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. It never checks out pull-request code. |
