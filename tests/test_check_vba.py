@@ -639,10 +639,10 @@ Option Explicit
 Public Const DEMO_LIMIT As Long = 7
 Private Declare PtrSafe Function Tick Lib "kernel32" () As Long
 Private mStatus As Long
-Public Enum CvaMode
-    smFirst = 1
+Public Enum DemoMode
+    dmFirst = 1
 End Enum
-Public Type CvaPair
+Public Type DemoPair
     Left As Long
     Right As Long
 End Type
@@ -667,8 +667,8 @@ End Sub
 '''
 API_ROWS = [
     ("Const", "DEMO_LIMIT", "Public Const DEMO_LIMIT As Long = 7"),
-    ("Enum", "CvaMode", "Public Enum CvaMode | smFirst = 1 | End Enum"),
-    ("Type", "CvaPair", "Public Type CvaPair | Left As Long | Right As Long | End Type"),
+    ("Enum", "DemoMode", "Public Enum DemoMode | dmFirst = 1 | End Enum"),
+    ("Type", "DemoPair", "Public Type DemoPair | Left As Long | Right As Long | End Type"),
     ("Function", "DEMO_Echo", "Public Function DEMO_Echo(ByVal Value As Long) As Long"),
     ("Property Get", "DEMO_Current", "Public Property Get DEMO_Current() As Long"),
     ("Property Let", "DEMO_Current", "Public Property Let DEMO_Current(ByVal Value As Long)"),

@@ -36,11 +36,13 @@ def printing(outputs: object) -> str:
     return f"import json\nprint(json.dumps({{'outputs': {outputs!r}}}))\n"
 
 
-def run(script: str | None, outputs: list[dict[str, Any]]) -> tuple[list[str], int]:
+def run(script: str | None, outputs: list[dict[str, Any]],
+        extra: dict[str, str] | None = None) -> tuple[list[str], int]:
     with tempfile.TemporaryDirectory(prefix="derivations-") as directory:
         root = Path(directory)
         for path, text in {"tests/fixtures/case-one.json": "{}",
-                           "tests/expected/case-one.json": json.dumps({"outputs": outputs})}.items():
+                           "tests/expected/case-one.json": json.dumps({"outputs": outputs}),
+                           **(extra or {})}.items():
             (root / path).parent.mkdir(parents=True, exist_ok=True)
             (root / path).write_text(text, encoding="utf-8")
         if script is not None:
@@ -98,9 +100,18 @@ class DerivationTest(unittest.TestCase):
         for script, text in cases:
             with self.subTest(text=text):
                 self.assertFinding(run(script, [output()]), text)
-        self.assertFinding(run(None, [output(reference={**output()["reference"],
-                                                        "script": "../outside.py"})]),
-                           "is not an existing file")
+
+    def test_a_script_outside_tests_derivations_is_refused(self) -> None:
+        # The script exists and agrees, and tests/derivations/ exists for the ".." path to
+        # cross, so only the location rule can refuse it.
+        script = printing([{"quantity": "total_amount", "scope": None, "value": 100.0}])
+        self.assertEqual(run(script, [output()]), ([], 1))
+        for path in ("tools/outside.py", "tests/derivations/../../tools/outside.py"):
+            with self.subTest(path=path):
+                reference = {**output()["reference"], "script": path}
+                self.assertFinding(run(script, [output(reference=reference)],
+                                       {"tools/outside.py": script}),
+                                   "is not an existing file under tests/derivations/")
 
     def test_the_script_receives_the_fixture(self) -> None:
         script = ("import json, sys\nfixture = json.load(open(sys.argv[1]))\n"

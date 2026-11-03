@@ -219,8 +219,8 @@ class ResultsTest(unittest.TestCase):
                             "within 0.01" in item for item in found), found)
 
     def test_the_worst_error_is_checked_per_split(self) -> None:
-        # Within each case's own tolerance of 0.01, but above the contract's 1e-4
-        # relative threshold on the holdout only.
+        # Within each case's own tolerance of 0.01, but above the contract's absolute
+        # threshold of 0.001 on the holdout only.
         loose = {**FROZEN, "metric": "absolute", "threshold": 0.001}
         found = findings(registry(loose), results(demo_calibration=100.0005,
                                                   demo_holdout_1=200.005, demo_holdout_2=0))
