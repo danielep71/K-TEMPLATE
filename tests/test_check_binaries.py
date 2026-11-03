@@ -30,7 +30,7 @@ CORE = ('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/
 APP = '<Properties><Company>{company}</Company><Manager>{manager}</Manager></Properties>'
 
 
-def package(extra_types: str = "", parts: dict[str, str] | None = None) -> bytes:
+def package(extra_types: str = "", parts: dict[str, str | bytes] | None = None) -> bytes:
     """A minimal Office Open XML package with the given extra content types and parts."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
@@ -140,6 +140,33 @@ class BinaryCheckTest(unittest.TestCase):
                 found = self.repository({"tests/fixtures/a-case/variant/input.xlsx":
                                          package(parts={part: text})})
                 self.assertFinding(found, f"{part} names a person or organization")
+
+    def test_encoding_and_character_references_hide_nothing(self) -> None:
+        def utf16(text: str) -> bytes:
+            return ('<?xml version="1.0" encoding="UTF-16"?>' + text).encode("utf-16")
+
+        cases = {
+            "utf-16 creator": (package(parts={"docProps/core.xml": utf16(
+                CORE.format(creator="A. Person", editor=""))}),
+                "docProps/core.xml names a person or organization"),
+            "utf-16 relationship": (package(parts={"xl/_rels/workbook.xml.rels": utf16(
+                '<Relationships><Relationship Target="vbaProject.bin"/></Relationships>')}),
+                "carries macros"),
+            "character reference": (package('<Default Extension="bin" ContentType='
+                                            '"application/vnd.ms-office.&#118;baProject"/>'),
+                                    "carries macros"),
+        }
+        for label, (content, text) in cases.items():
+            with self.subTest(label=label):
+                self.assertFinding(self.repository({"src/workbook/Template.xlsx": content}),
+                                   text)
+        clean = package(parts={"docProps/core.xml": utf16(CORE.format(creator="", editor=""))})
+        self.assertEqual(self.repository({"src/workbook/Template.xlsx": clean}), [])
+
+    def test_a_part_that_is_not_xml_fails(self) -> None:
+        broken = package(parts={"docProps/app.xml": "<Properties><Company>"})
+        self.assertFinding(self.repository({"src/workbook/Template.xlsx": broken}),
+                           "docProps/app.xml cannot be read as XML")
 
     def test_regulatory_source_copies_are_not_inspected(self) -> None:
         published = package(parts={"xl/vbaProject.bin": "\0", "docProps/core.xml":

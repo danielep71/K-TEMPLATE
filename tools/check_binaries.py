@@ -22,7 +22,9 @@ An Office Open XML package that passes (a .xlsx, .xltx, .docx or similar
 file, as a ZIP with [Content_Types].xml) also fails when it carries macros, a
 vbaProject.bin part or a reference to one, or personal document metadata: an
 author or last editor in docProps/core.xml, or a company or manager in
-docProps/app.xml. The byte-preserved regulatory sources under
+docProps/app.xml. Each part is parsed as XML in its declared encoding, so a
+UTF-16 part or a character reference hides nothing, and a part that is not
+XML fails too. The byte-preserved regulatory sources under
 docs/methodology/sources/ are exempt: they stay as published. It never
 changes a file.
 """
@@ -40,6 +42,7 @@ import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = Path(".github/binary-allowlist.json")
@@ -115,10 +118,35 @@ def load_allowlist(root: Path, findings: list[str]) -> dict[str, str]:
     return allowed
 
 
-def field_value(xml: str, field: str) -> str:
-    """The text of the first element named ``field``, whatever its namespace prefix."""
-    match = re.search(rf"<(?:\w+:)?{field}\b[^>]*>(.*?)</(?:\w+:)?{field}>", xml, re.S)
-    return match.group(1).strip() if match else ""
+def local_name(tag: str) -> str:
+    """An element or attribute name without its namespace."""
+    return tag.rpartition("}")[2]
+
+
+def read_part(data: bytes) -> ElementTree.Element | None:
+    """The parsed part, read in its declared encoding, or None when it is not XML.
+
+    The parser honours a byte-order mark and the XML declaration, so a UTF-16
+    part is read like a UTF-8 one, and it resolves character references.
+    """
+    try:
+        return ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return None
+
+
+def macro_reference(part: ElementTree.Element) -> bool:
+    """Whether a name, attribute value or text in the part refers to macros."""
+    return any(MACRO_PART.search(text)
+               for element in part.iter()
+               for text in (element.tag, element.text or "", *element.attrib.values()))
+
+
+def personal_fields(part: ElementTree.Element, fields: Sequence[str]) -> list[str]:
+    """The fields that have a non-blank value in the part, whatever their namespace."""
+    return [field for field in fields
+            if any(local_name(element.tag) == field and (element.text or "").strip()
+                   for element in part.iter())]
 
 
 def package_problems(path: Path) -> list[str]:
@@ -128,21 +156,28 @@ def package_problems(path: Path) -> list[str]:
             names = package.namelist()
             if "[Content_Types].xml" not in names:
                 return []
-            problems = []
-            texts = {name: package.read(name).decode("utf-8", "replace") for name in names
-                     if name == "[Content_Types].xml" or name.endswith(".rels")
-                     or name in PERSONAL_FIELDS}
+            data = {name: package.read(name) for name in names
+                    if name == "[Content_Types].xml" or name.endswith(".rels")
+                    or name in PERSONAL_FIELDS}
     except (zipfile.BadZipFile, OSError):
         return []
+    problems = []
+    parts = {name: read_part(content) for name, content in data.items()}
+    unreadable = sorted(name for name, part in parts.items() if part is None)
+    if unreadable:
+        problems.append(f"{', '.join(unreadable)} cannot be read as XML, so it cannot be "
+                        "checked for macros or personal metadata")
     if any(MACRO_PART.search(name) for name in names) or \
-            any(MACRO_PART.search(texts[name]) for name in texts if name not in PERSONAL_FIELDS):
+            any(part is not None and macro_reference(part)
+                for name, part in parts.items() if name not in PERSONAL_FIELDS):
         problems.append("carries macros (a vbaProject part, a reference to one or a "
                         "macro-enabled content type); commit "
                         "the macro-free package and keep the code as exported source")
-    for part, fields in PERSONAL_FIELDS.items():
-        found = [field for field in fields if field_value(texts.get(part, ""), field)]
+    for name, fields in PERSONAL_FIELDS.items():
+        part = parts.get(name)
+        found = personal_fields(part, fields) if part is not None else []
         if found:
-            problems.append(f"{part} names a person or organization ({', '.join(found)}); "
+            problems.append(f"{name} names a person or organization ({', '.join(found)}); "
                             "clear it, as DISTRIBUTION.md describes")
     return problems
 
