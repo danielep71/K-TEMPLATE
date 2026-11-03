@@ -161,7 +161,7 @@ inherited policies may impose additional restrictions.
 | `docs/setup/REPOSITORY_SETUP.md` | **Keep or retire after handover** | Optional operational guide; remove links to it if you retire it. |
 | `.github/PULL_REQUEST_TEMPLATE.md` | **Keep and adapt** | Records linked issues, validation, final-head review and what was not validated. Add the project's own checks to *Validated*. |
 | `.github/workflows/traffic-history.yml`, `tools/traffic_history.py`, `tests/test_traffic_history.py`, `docs/repo_governance/TRAFFIC.md` | **Keep; enable if wanted** | Optional traffic collection. It does nothing until you follow *Enabling* in `TRAFFIC.md`. Point the README's traffic badges at the new repository, or remove them; **Repository integrity** fails while they read another repository. Remove all four files and the badges together if you never want it, and update `docs/licenses/THIRD_PARTY_NOTICES.txt`, which lists the files. |
-| `pyproject.toml`, `tools/requirements-quality-ci.txt` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling, strict mode and actionlint are active, and `tests/strict_yaml.py` makes the workflow control tests reject duplicate YAML keys. |
+| `pyproject.toml`, `tools/requirements-quality-ci.txt` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling, strict mode, the unreachable-code warning and actionlint are active, and `tests/strict_yaml.py` makes the workflow control tests reject duplicate YAML keys. |
 | `.github/dependabot.yml`, `.github/requirements.txt` | **Keep** | Proposes updates to the SHA-pinned Actions, the hash-locked configuration parser that the workflow control tests use, and the hash-locked quality tools. Its `target-branch` names the active release branch: set it to this repository's release branch or remove it to target the default branch. **Repository integrity** fails while it names a branch that does not exist. |
 | `.github/workflows/release.yml`, `tools/release.py`, `tests/test_release.py` | **Keep** | On a pushed `vX.Y.Z` tag, verifies it against the changelog, `VERSION`, the default branch, its message and **Repository integrity**. It then builds a reproducible source bundle, attests its provenance (on a private repository only with GitHub Enterprise Cloud and the repository variable `RELEASE_ATTESTATIONS` set to `enabled`) and drafts the release. A manual run is a rehearsal. Publication stays manual ([RELEASING.md](../../RELEASING.md)). |
 | `.github/workflows/scorecard.yml` | **Keep; public repositories** | Scores the default branch's supply-chain posture with OpenSSF Scorecard weekly and on each push to it, and publishes the results to the Scorecard service and to code scanning. It is skipped on a private repository and is not a required check; delete it if you never want the results published. |
@@ -280,7 +280,8 @@ reusable workflow is exempt from the `timeout-minutes` rule, which GitHub does
 not allow there.
 
 **Repository integrity** also runs Ruff and strict mypy on `tools/` (configured in
-`pyproject.toml`) and actionlint on the workflows. To run Ruff and mypy locally on
+`pyproject.toml`, with `warn_unreachable` on top of strict mode) and actionlint on
+the workflows. To run Ruff and mypy locally on
 CPython 3.13 for Linux x86_64, the platform the hashes in
 `tools/requirements-quality-ci.txt` cover:
 

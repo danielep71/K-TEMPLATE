@@ -1,4 +1,5 @@
-"""Prove that the Ruff complexity ceiling, mypy strict mode and actionlint are active.
+"""Prove that the Ruff complexity ceiling, mypy strict mode with warn_unreachable,
+and actionlint are active.
 
 Ruff and mypy are installed from tools/requirements-quality-ci.txt, and
 actionlint as a checksum-verified release. The Repository integrity job sets
@@ -55,6 +56,21 @@ class QualityGateTests(unittest.TestCase):
         self.assertEqual(ok_code, 0, ok_log)
         self.assertNotEqual(bad_code, 0, bad_log)
         self.assertIn('[no-untyped-def]', bad_log)
+
+    @tool('mypy')
+    def test_unreachable_code_is_reported(self):
+        narrowed = ('def probe(value: int | str) -> str:\n'
+                    '    if isinstance(value, int):\n        return str(value)\n'
+                    '    if isinstance(value, str):\n        return value\n')
+        with tempfile.TemporaryDirectory() as directory:
+            probe = Path(directory) / 'unreachable_probe.py'
+            probe.write_text(narrowed, encoding='utf-8')
+            ok_code, ok_log = run(['mypy', '--no-pretty', '--no-incremental', str(probe)])
+            probe.write_text(narrowed + "    return 'never'\n", encoding='utf-8')
+            bad_code, bad_log = run(['mypy', '--no-pretty', '--no-incremental', str(probe)])
+        self.assertEqual(ok_code, 0, ok_log)
+        self.assertNotEqual(bad_code, 0, bad_log)
+        self.assertIn('[unreachable]', bad_log)
 
     @tool('actionlint')
     def test_actionlint_rejects_an_unknown_key(self):

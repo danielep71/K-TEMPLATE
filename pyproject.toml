@@ -23,3 +23,5 @@ pretty = true
 show_error_codes = true
 warn_unused_configs = true
 strict = true
+# Not part of strict: report code that type narrowing proves can never run.
+warn_unreachable = true
