@@ -17,6 +17,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `docs/` | Governance, setup, structure, style and the API inventory | Present |
 | `docs/methodology/` | Sources, data contract, calculation contracts, validation plan, test-case format and [workbook contract](methodology/WORKBOOK_CONTRACT.md) | Present, as guides to fill in |
 | `docs/methodology/sources/` | Byte-preserved copies of regulatory sources | Reserved |
+| `docs/user-manual/` | Optional manual for workbook recipients, one folder per released version (`docs/user-manual/X.Y.Z/MANUAL.md`), built to the PDF attached to the release ([user manual](../RELEASING.md#user-manual)) | Reserved |
 | `src/core/` | Calculations and pure validation, host-independent standard modules | Reserved |
 | `src/classes/` | Host-independent classes, if the design needs them | Reserved |
 | `src/modules/` | The public facade: the supported entry points | Reserved |
