@@ -1,9 +1,11 @@
 <!--
   Base: the default branch, or the active release branch when development
-  happens on one. State which route applies below.
+  happens on one. State which applies, and the merge method, on the Base line.
   Write NOT RUN or NOT APPLICABLE with a reason; never claim evidence that
   was not produced. Synthetic data only; no secrets or vulnerability details.
 -->
+
+Base: <!-- the default branch or `release/X.Y.Z`; squash, or a merge commit for an integration or sync PR -->
 
 ## 🔗 Linked issues
 

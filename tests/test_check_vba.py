@@ -441,6 +441,14 @@ Handler:
         Resume Next
 End Sub
 ''',
+    # Resume 0 is VBA's spelling of Resume: it names no label.
+    "resume-zero": '''Public Sub First()
+        On Error GoTo Handler
+        Exit Sub
+Handler:
+        Resume 0
+End Sub
+''',
     "same-label-in-two-procedures": '''Private Sub First()
 Shared:
         Exit Sub
@@ -631,10 +639,10 @@ Option Explicit
 Public Const DEMO_LIMIT As Long = 7
 Private Declare PtrSafe Function Tick Lib "kernel32" () As Long
 Private mStatus As Long
-Public Enum CvaMode
-    smFirst = 1
+Public Enum DemoMode
+    dmFirst = 1
 End Enum
-Public Type CvaPair
+Public Type DemoPair
     Left As Long
     Right As Long
 End Type
@@ -659,8 +667,8 @@ End Sub
 '''
 API_ROWS = [
     ("Const", "DEMO_LIMIT", "Public Const DEMO_LIMIT As Long = 7"),
-    ("Enum", "CvaMode", "Public Enum CvaMode | smFirst = 1 | End Enum"),
-    ("Type", "CvaPair", "Public Type CvaPair | Left As Long | Right As Long | End Type"),
+    ("Enum", "DemoMode", "Public Enum DemoMode | dmFirst = 1 | End Enum"),
+    ("Type", "DemoPair", "Public Type DemoPair | Left As Long | Right As Long | End Type"),
     ("Function", "DEMO_Echo", "Public Function DEMO_Echo(ByVal Value As Long) As Long"),
     ("Property Get", "DEMO_Current", "Public Property Get DEMO_Current() As Long"),
     ("Property Let", "DEMO_Current", "Public Property Let DEMO_Current(ByVal Value As Long)"),
@@ -724,6 +732,20 @@ class PublicApiTest(unittest.TestCase):
         self.assertTrue(any("implicit public procedure: Hidden" in f for f in findings), findings)
         self.assertTrue(any("implicit public module-level declaration: Enum Mode" in f
                             for f in findings), findings)
+
+    def test_module_level_dim_and_const_state_their_visibility(self) -> None:
+        unstated = 'Attribute VB_Name = "CORE_Unstated"\nOption Explicit\nOption Private Module\n' \
+                   "Dim mCount As Long\nConst LIMIT As Long = 5\n" \
+                   "Private Sub Work()\n        Dim Local As Long\n        Const STEP As Long = 1\n" \
+                   "End Sub\n"
+        findings = self.findings({"src/core/CORE_Unstated.bas": unstated,
+                                  "docs/PUBLIC_API.txt": "# None\n"})
+        for text in ("Dim mCount As Long", "Const LIMIT As Long = 5"):
+            with self.subTest(text=text):
+                self.assertTrue(any(f"module-level declaration without Private or Public: {text}"
+                                    in f for f in findings), findings)
+        # Declarations inside a procedure need no visibility.
+        self.assertEqual(len(findings), 2, findings)
 
     def test_one_identifier_per_public_statement(self) -> None:
         self.assertFinding(api_files(API_FACADE.replace("Private mHidden As Long",

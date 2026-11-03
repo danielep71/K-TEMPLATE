@@ -67,6 +67,22 @@ def yaml_list(text, key):
     return items
 
 
+class IgnoreRuleTests(unittest.TestCase):
+    def test_regulatory_source_copies_are_never_ignored_for_their_office_type(self):
+        text = (ROOT / '.gitignore').read_text(encoding='utf-8')
+        section = text[text.index('# GENERATED OFFICE PACKAGES'):
+                       text.index('# Reserve one exact path')]
+        types = [line.strip()[1:] for line in section.splitlines() if line.startswith('*.')]
+        self.assertIn('.xltx', types)
+        for suffix in [*types, '.log']:
+            with self.subTest(suffix=suffix):
+                def ignored(path):
+                    return subprocess.run(['git', '-C', str(ROOT), 'check-ignore', '-q',
+                                           '--no-index', path], check=False).returncode == 0
+                self.assertTrue(ignored(f'build/source{suffix}'))
+                self.assertFalse(ignored(f'docs/methodology/sources/eba/source{suffix}'))
+
+
 class DependabotTests(unittest.TestCase):
     def test_labels_exist_and_assignee_matches_the_issue_forms(self):
         text = (ROOT / '.github/dependabot.yml').read_text(encoding='utf-8')

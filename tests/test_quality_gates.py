@@ -24,10 +24,19 @@ def run(command, stdin=None):
     return result.returncode, result.stdout + result.stderr
 
 
+INSTALL = {
+    'ruff': 'python -m pip install --only-binary=:all: --require-hashes '
+            '-r tools/requirements-quality-ci.txt',
+    'mypy': 'python -m pip install --only-binary=:all: --require-hashes '
+            '-r tools/requirements-quality-ci.txt',
+    'actionlint': 'install the checksum-verified release that '
+                  '.github/workflows/repository-integrity.yml downloads',
+}
+
+
 def tool(name):
     return unittest.skipIf(shutil.which(name) is None and not REQUIRED,
-                           f'{name} is not installed: python -m pip install --only-binary=:all: '
-                           '--require-hashes -r tools/requirements-quality-ci.txt')
+                           f'{name} is not installed: {INSTALL[name]}')
 
 
 class QualityGateTests(unittest.TestCase):
