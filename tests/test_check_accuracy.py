@@ -184,6 +184,17 @@ class RegistryTest(unittest.TestCase):
 
 
 class ResultsTest(unittest.TestCase):
+    def test_a_malformed_results_file_outside_the_root_is_a_finding(self) -> None:
+        # An Excel run's results file lives in its evidence folder, not in the checkout.
+        with repository(registry(FROZEN)) as root, \
+                tempfile.TemporaryDirectory() as outside:
+            path = Path(outside) / "results.json"
+            path.write_text("{broken", "utf-8")
+            found, _, lines = check_accuracy.check(root, path, CANDIDATE)
+        self.assertEqual(lines, [])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"{path}: not valid UTF-8 JSON", found[0])
+
     def test_results_within_every_bound_pass_and_are_reported(self) -> None:
         good = results(demo_calibration=100.005, demo_holdout_1=200.001, demo_holdout_2=0)
         with repository(registry(FROZEN)) as root:
@@ -260,7 +271,8 @@ class ResultsTest(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("git"), "needs Git")
 class WideningTest(unittest.TestCase):
-    def tagged(self, before: dict[str, Any], now: dict[str, Any] | None) -> list[str]:
+    def tagged(self, before: dict[str, Any], now: dict[str, Any] | None,
+               widening: bool = True) -> list[str]:
         """Commit and tag ``before`` as v1.0.0, then check ``now`` in the working tree."""
         with repository(registry(before)) as root:
             git(root, "init", "-q")
@@ -270,7 +282,15 @@ class WideningTest(unittest.TestCase):
             contracts = [] if now is None else [now]
             (root / "tests/accuracy/contracts.json").write_text(
                 json.dumps(registry(*contracts)), "utf-8")
-            return check_accuracy.check(root)[0]
+            return check_accuracy.check(root, widening=widening)[0]
+
+    def test_the_tag_comparison_can_be_skipped_for_a_copy_of_a_commit(self) -> None:
+        # check_excel_run.py measures a copy of a commit's cases, with no history.
+        widened = {**FROZEN, "threshold": 0.001}
+        self.assertTrue(self.tagged(FROZEN, widened))
+        self.assertEqual(self.tagged(FROZEN, widened, widening=False), [])
+        self.assertEqual(self.tagged(FROZEN, {**FROZEN, "status": "draft", "decision": None},
+                                     widening=False), [])
 
     def test_a_frozen_threshold_widens_only_with_a_new_decision(self) -> None:
         self.assertEqual(self.tagged(FROZEN, FROZEN), [])

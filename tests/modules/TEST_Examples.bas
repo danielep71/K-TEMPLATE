@@ -4,7 +4,8 @@ Attribute VB_Name = "TEST_Examples"
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Neutral example suite of TEST_Harness: one case per kind of assertion,
-'   and the reference implementation of the cleanup pattern of
+'   one case that records the results of the illustrative test cases, and
+'   the reference implementation of the cleanup pattern of
 '   docs/VBA_HOUSE_STYLE.md (Operation and cleanup outcomes) with its
 '   failure-path cases. Nothing here is a calculation of the workbook or a
 '   regulatory value.
@@ -13,15 +14,17 @@ Attribute VB_Name = "TEST_Examples"
 '   RunExampleTests is the documented test entry point.
 '   RunExampleTestsWithInjectedFailure and RunExampleTestsWithSkippedCase
 '   show what a failed and an incomplete run report. CertifyExamples
-'   certifies all three and saves their logs and the certification log as
-'   the evidence of an Excel run.
+'   certifies all three and saves their logs, the certification log and the
+'   results of the normal run as the evidence of an Excel run. Each takes
+'   the folder of the test cases, tests/fixtures/ of the checkout.
 '   Option Private Module keeps them out of the workbook's external surface.
 '
 ' DEPENDENCIES
 '   TEST_Harness; the VBA and Excel object models.
 '
 ' STATE OWNERSHIP
-'   Owns the mode of the running suite. RunExampleOperation changes
+'   Owns the mode and the fixtures folder of the running suite. Reads the
+'   illustrative test cases of tests/fixtures/. RunExampleOperation changes
 '   Application.Calculation and Application.ScreenUpdating and restores them
 '   before it returns, on the success and the error path.
 '
@@ -34,12 +37,13 @@ Attribute VB_Name = "TEST_Examples"
 '
 ' USAGE
 '   In a development workbook holding the modules of tests/modules/, type
-'   TEST_Examples.RunExampleTests in the Immediate window. To record an
-'   Excel run, type TEST_Examples.CertifyExamples "<folder>" instead
-'   (INSTALLATION.md, Recording an Excel run).
+'   TEST_Examples.RunExampleTests "<checkout>\tests\fixtures" in the
+'   Immediate window. To record an Excel run, type
+'   TEST_Examples.CertifyExamples "<folder>", "<checkout>\tests\fixtures"
+'   instead (INSTALLATION.md, Recording an Excel run).
 '
 ' UPDATED
-'   2026-11-02
+'   2026-11-03
 '
 ' AUTHOR
 '   Daniele Penza
@@ -57,8 +61,8 @@ Attribute VB_Name = "TEST_Examples"
 '------------------------------------------------------------------------------
     'A complete run starts every case and evaluates every assertion once.
         Private Const SUITE_NAME              As String = "examples"
-        Private Const EXPECTED_CASES          As Long = 12
-        Private Const EXPECTED_ASSERTIONS     As Long = 27
+        Private Const EXPECTED_CASES          As Long = 13
+        Private Const EXPECTED_ASSERTIONS     As Long = 30
     'Errors of the example procedures, test-only, as literals equal to
     'vbObjectError + n (see TEST_Harness, Module constants).
         Private Const ERR_EXAMPLE_INVALID     As Long = &H80040FF0   'vbObjectError + 4080: Input outside the domain
@@ -66,11 +70,15 @@ Attribute VB_Name = "TEST_Examples"
         Private Const ERR_EXAMPLE_RESTORE     As Long = &H80040FF2   'vbObjectError + 4082: Simulated restore failure
         Private Const ERR_CLEANUP_FAILED      As Long = &H80040FF3   'vbObjectError + 4083: Only the cleanup failed
         Private Const ERR_EXAMPLE_HOST        As Long = &H80040FF4   'vbObjectError + 4084: Simulated capture or change failure
+        Private Const ERR_EXAMPLE_FIXTURE     As Long = &H80040FF5   'vbObjectError + 4085: Test case file not as expected
+    'The quantity of the illustrative test cases (tests/expected/).
+        Private Const ILLUSTRATIVE_QUANTITY   As String = "illustrative_total_notional_amount"
 
 '------------------------------------------------------------------------------
 ' MODULE STATE
 '------------------------------------------------------------------------------
-        Private mMode   As String    'NORMAL, INJECTED_FAILURE or SKIPPED_CASE
+        Private mMode       As String    'NORMAL, INJECTED_FAILURE or SKIPPED_CASE
+        Private mFixtures   As String    'Folder of the test cases, tests/fixtures/
 
 
 '
@@ -81,7 +89,8 @@ Attribute VB_Name = "TEST_Examples"
 '------------------------------------------------------------------------------
 '
 
-Public Sub RunExampleTests()
+Public Sub RunExampleTests( _
+    ByVal Fixtures As String)
 '
 '==============================================================================
 '                               RunExampleTests
@@ -89,37 +98,46 @@ Public Sub RunExampleTests()
 ' PURPOSE
 '   Run the example suite. A passing run ends with
 '   RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE;
-'   cases=12; assertions=27; failures=0; cleanup=PASS; recovery=NONE.
+'   cases=13; assertions=30; failures=0; cleanup=PASS; recovery=NONE.
+'
+' INPUTS
+'   Fixtures: the full path of tests/fixtures/ in the checkout, without a
+'   trailing separator.
 '
 ' UPDATED
-'   2026-10-24
+'   2026-11-03
 '==============================================================================
 '
-        RunSuite "NORMAL"
+        RunSuite "NORMAL", Fixtures
 
 End Sub
 
 
-Public Sub RunExampleTestsWithInjectedFailure()
+Public Sub RunExampleTestsWithInjectedFailure( _
+    ByVal Fixtures As String)
 '
 '==============================================================================
 '                      RunExampleTestsWithInjectedFailure
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Show the failure path: exact-double expects a wrong value. Expected
-'   end: RESULT=FAIL; ...; operation=FAIL; completeness=COMPLETE; cases=12;
-'   assertions=27; failures=1, then the error ERR_TEST_FAILED.
+'   end: RESULT=FAIL; ...; operation=FAIL; completeness=COMPLETE; cases=13;
+'   assertions=30; failures=1, then the error ERR_TEST_FAILED.
+'
+' INPUTS
+'   Fixtures: as RunExampleTests.
 '
 ' UPDATED
-'   2026-10-24
+'   2026-11-03
 '==============================================================================
 '
-        RunSuite "INJECTED_FAILURE"
+        RunSuite "INJECTED_FAILURE", Fixtures
 
 End Sub
 
 
-Public Sub RunExampleTestsWithSkippedCase()
+Public Sub RunExampleTestsWithSkippedCase( _
+    ByVal Fixtures As String)
 '
 '==============================================================================
 '                        RunExampleTestsWithSkippedCase
@@ -127,20 +145,24 @@ Public Sub RunExampleTestsWithSkippedCase()
 ' PURPOSE
 '   Show that an incomplete run is never a pass: the last case is skipped.
 '   Expected end: RESULT=FAIL; ...; operation=PASS;
-'   completeness=INCOMPLETE; cases=11; assertions=25; failures=1, the
+'   completeness=INCOMPLETE; cases=12; assertions=28; failures=1, the
 '   failure being harness.completeness, then ERR_TEST_FAILED.
 '
+' INPUTS
+'   Fixtures: as RunExampleTests.
+'
 ' UPDATED
-'   2026-10-24
+'   2026-11-03
 '==============================================================================
 '
-        RunSuite "SKIPPED_CASE"
+        RunSuite "SKIPPED_CASE", Fixtures
 
 End Sub
 
 
 Public Sub CertifyExamples( _
-    ByVal Folder As String)
+    ByVal Folder As String, _
+    ByVal Fixtures As String)
 '
 '==============================================================================
 '                               CertifyExamples
@@ -148,13 +170,15 @@ Public Sub CertifyExamples( _
 ' PURPOSE
 '   The certification entry point: refuse state left by an earlier run,
 '   run the suite in its three modes, save each complete log in Folder
-'   (examples.log, injected.log and skipped.log), then save
-'   certification.log. tools/check_excel_run.py checks the folder against
-'   the commit.
+'   (examples.log, injected.log and skipped.log) and the results of the
+'   normal run (results.json), then save certification.log.
+'   tools/check_excel_run.py checks the folder against the commit.
 '
 ' INPUTS
 '   Folder: an existing folder outside the checkout or in the ignored
-'   test-results/ directory, without a trailing backslash.
+'   test-results/ directory, without a trailing backslash. Fixtures: the
+'   full path of tests/fixtures/ in the same checkout, without a trailing
+'   separator.
 '
 ' OUTCOMES
 '   The normal run must pass and be complete. The injected-failure and
@@ -167,16 +191,18 @@ Public Sub CertifyExamples( _
 '   is written. EndCertification raises ERR_TEST_FAILED after writing
 '   certification.log when the certification did not pass. A refused start
 '   raises TEST_Harness.ERR_TEST_DIRTY_START before any run. An error of
-'   SaveLog propagates; run TEST_Harness.ResetTests before trying again.
+'   SaveLog or SaveResults propagates; run TEST_Harness.ResetTests before
+'   trying again.
 '
 ' UPDATED
-'   2026-11-02
+'   2026-11-03
 '==============================================================================
 '
         TEST_Harness.BeginCertification SUITE_NAME
-        CertifyMode "NORMAL", True, Folder & "\examples.log"
-        CertifyMode "INJECTED_FAILURE", False, Folder & "\injected.log"
-        CertifyMode "SKIPPED_CASE", False, Folder & "\skipped.log"
+        CertifyMode "NORMAL", True, Folder & "\examples.log", Fixtures
+        TEST_Harness.SaveResults Folder & "\results.json"
+        CertifyMode "INJECTED_FAILURE", False, Folder & "\injected.log", Fixtures
+        CertifyMode "SKIPPED_CASE", False, Folder & "\skipped.log", Fixtures
         TEST_Harness.EndCertification Folder & "\certification.log"
 
 End Sub
@@ -191,7 +217,8 @@ End Sub
 '
 
 Private Sub RunSuite( _
-    ByVal Mode As String)
+    ByVal Mode As String, _
+    ByVal Fixtures As String)
 '
 '==============================================================================
 '                                   RunSuite
@@ -200,7 +227,8 @@ Private Sub RunSuite( _
 '   Run every case in a fixed order between BeginRun and EndRun.
 '
 ' INPUTS
-'   Mode: NORMAL, INJECTED_FAILURE or SKIPPED_CASE.
+'   Mode: NORMAL, INJECTED_FAILURE or SKIPPED_CASE. Fixtures: the folder of
+'   the test cases, as RunExampleTests.
 '
 ' ERROR POLICY
 '   An error escaping a case handler is passed to EndRun, which reports it
@@ -222,6 +250,7 @@ Private Sub RunSuite( _
 ' RUN
 '------------------------------------------------------------------------------
         mMode = Mode
+        mFixtures = Fixtures
         TEST_Harness.BeginRun SUITE_NAME, Mode, EXPECTED_CASES, EXPECTED_ASSERTIONS
         On Error GoTo RunFailed
         CaseExactDouble
@@ -230,6 +259,7 @@ Private Sub RunSuite( _
         CaseExactText
         CaseErrorValue
         CaseRaisedError
+        CaseIllustrativeResults
         CaseCleanupRestoresState
         CaseCleanupKeepsPrimaryError
         CaseCleanupPartialCapture
@@ -242,6 +272,7 @@ Private Sub RunSuite( _
 Finish:
         On Error GoTo 0
         mMode = vbNullString
+        mFixtures = vbNullString
         TEST_Harness.EndRun ErrNumber, ErrSource, ErrDescription
         Exit Sub
 
@@ -257,7 +288,8 @@ End Sub
 Private Sub CertifyMode( _
     ByVal Mode As String, _
     ByVal MustPass As Boolean, _
-    ByVal Path As String)
+    ByVal Path As String, _
+    ByVal Fixtures As String)
 '
 '==============================================================================
 '                                 CertifyMode
@@ -268,6 +300,7 @@ Private Sub CertifyMode( _
 '
 ' INPUTS
 '   MustPass: True for the normal run, False for a deliberate failure mode.
+'   Fixtures: the folder of the test cases, as RunExampleTests.
 '
 ' ERROR POLICY
 '   The run's own error is captured, printed and certified after the log is
@@ -288,7 +321,7 @@ Private Sub CertifyMode( _
 ' RUN AND SAVE
 '------------------------------------------------------------------------------
         On Error Resume Next
-        RunSuite Mode
+        RunSuite Mode, Fixtures
         RunErrorNumber = Err.Number
         RunErrorDescription = Err.Description
         On Error GoTo 0
@@ -482,6 +515,61 @@ Private Sub CaseRaisedError()
         RaisedError = Err.Number
         On Error GoTo CaseFailed
         TEST_Harness.AssertRaised "valid-input", 0, RaisedError
+        Exit Sub
+
+CaseFailed:
+        TEST_Harness.RecordCaseError
+
+End Sub
+
+
+Private Sub CaseIllustrativeResults()
+'
+'==============================================================================
+'                           CaseIllustrativeResults
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The results of an Excel run: read the illustrative test cases from the
+'   fixtures folder, add up the notional amounts of each, and record each
+'   total with TEST_Harness.RecordResult, for the accuracy contract ACC-01
+'   (tests/accuracy/contracts.json). tools/check_accuracy.py compares the
+'   totals with their expected values; this case checks only that each file
+'   held amounts. 3 assertions.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Total     As Double    'Sum of the notional amounts of one file
+    Dim Records   As Long      'Amounts read from that file
+
+'------------------------------------------------------------------------------
+' RUN CASE
+'------------------------------------------------------------------------------
+        On Error GoTo CaseFailed
+        TEST_Harness.BeginCase "illustrative-results"
+        Total = SumJsonNumbers(FixturePath("illustrative-format-example.json"), _
+            "notional_amount", Records)
+        TEST_Harness.AssertTrue "format-example-amounts", Records > 0, _
+            "illustrative-format-example.json holds no notional_amount"
+        TEST_Harness.RecordResult "illustrative-format-example", vbNullString, _
+            ILLUSTRATIVE_QUANTITY, vbNullString, vbNullString, Total
+        Total = SumCsvColumn(FixturePath( _
+            "illustrative-file-import-example/crlf-line-endings/positions.csv"), "notional", Records)
+        TEST_Harness.AssertTrue "crlf-variant-amounts", Records > 0, _
+            "the crlf-line-endings positions.csv holds no notional amount"
+        TEST_Harness.RecordResult "illustrative-file-import-example", "crlf-line-endings", _
+            ILLUSTRATIVE_QUANTITY, vbNullString, vbNullString, Total
+        Total = SumCsvColumn(FixturePath( _
+            "illustrative-file-import-example/lf-line-endings/positions.csv"), "notional", Records)
+        TEST_Harness.AssertTrue "lf-variant-amounts", Records > 0, _
+            "the lf-line-endings positions.csv holds no notional amount"
+        TEST_Harness.RecordResult "illustrative-file-import-example", "lf-line-endings", _
+            ILLUSTRATIVE_QUANTITY, vbNullString, vbNullString, Total
         Exit Sub
 
 CaseFailed:
@@ -796,6 +884,229 @@ Private Function ExampleSquareRoot( _
                 "Value must be >= 0; got " & CStr(Value) & "."
         End If
         ExampleSquareRoot = Sqr(Value)
+
+End Function
+
+
+Private Function FixturePath( _
+    ByVal Relative As String) _
+    As String
+'
+'==============================================================================
+'                                 FixturePath
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The full path of a file of tests/fixtures/, given relative to it with
+'   "/" separators. The separator is the one the fixtures folder uses: "/"
+'   when it has only forward slashes, as in LibreOffice on Linux, otherwise
+'   "\".
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Separator   As String    'Path separator of the fixtures folder
+
+'------------------------------------------------------------------------------
+' COMPOSE
+'------------------------------------------------------------------------------
+        If Len(mFixtures) = 0 Then
+            Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.FixturePath", _
+                "No fixtures folder: pass the full path of tests/fixtures."
+        End If
+        Separator = "\"
+        If InStr(mFixtures, "/") > 0 And InStr(mFixtures, "\") = 0 Then
+            Separator = "/"
+        End If
+        FixturePath = mFixtures & Separator & Replace(Relative, "/", Separator)
+
+End Function
+
+
+Private Function ReadFixture( _
+    ByVal Path As String) _
+    As String
+'
+'==============================================================================
+'                                 ReadFixture
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The bytes of an ASCII test case file, as text with its line endings
+'   kept.
+'
+' ERROR POLICY
+'   A missing or unreadable file raises the file error; a byte above 127
+'   raises ERR_EXAMPLE_FIXTURE. The file is closed first.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim FileNumber         As Integer    'Handle of the open file
+    Dim Text               As String     'Content of the file
+    Dim Index              As Long       'Position in Text
+    Dim ErrorNumber        As Long       'File error number
+    Dim ErrorSource        As String     'File error source
+    Dim ErrorDescription   As String     'File error description
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
+    'Access Read raises on a missing file instead of creating it.
+        FileNumber = FreeFile
+        Open Path For Binary Access Read As #FileNumber
+        On Error GoTo ReadFailed
+        Text = Space$(LOF(FileNumber))
+        Get #FileNumber, , Text
+        Close #FileNumber
+        On Error GoTo 0
+
+'------------------------------------------------------------------------------
+' REQUIRE ASCII
+'------------------------------------------------------------------------------
+        For Index = 1 To Len(Text)
+            If AscW(Mid$(Text, Index, 1)) > 127 Or AscW(Mid$(Text, Index, 1)) < 0 Then
+                Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.ReadFixture", _
+                    Path & " is not ASCII at byte " & CStr(Index) & "."
+            End If
+        Next Index
+        ReadFixture = Text
+        Exit Function
+
+'------------------------------------------------------------------------------
+' HANDLE A READ ERROR
+'------------------------------------------------------------------------------
+ReadFailed:
+        ErrorNumber = Err.Number
+        ErrorSource = Err.Source
+        ErrorDescription = Err.Description
+        On Error GoTo 0
+        Close #FileNumber
+        Err.Raise ErrorNumber, ErrorSource, ErrorDescription
+
+End Function
+
+
+Private Function SumJsonNumbers( _
+    ByVal Path As String, _
+    ByVal Key As String, _
+    ByRef Records As Long) _
+    As Double
+'
+'==============================================================================
+'                                SumJsonNumbers
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The sum of every number that follows "Key": in a JSON fixture, and how
+'   many there are. Enough for the illustrative fixture, whose amounts are
+'   plain numbers; not a JSON parser.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Text       As String    'Content of the fixture
+    Dim Marker     As String    'The key and its colon
+    Dim Position   As Long      'Position of the next marker
+    Dim Total      As Double    'Sum so far
+
+'------------------------------------------------------------------------------
+' ADD UP
+'------------------------------------------------------------------------------
+    'Val reads the number after the marker with a period as the decimal
+    'separator, whatever the regional settings, and skips the blanks.
+        Text = ReadFixture(Path)
+        Marker = """" & Key & """:"
+        Records = 0
+        Position = InStr(1, Text, Marker, vbBinaryCompare)
+        Do While Position > 0
+            Total = Total + Val(Mid$(Text, Position + Len(Marker)))
+            Records = Records + 1
+            Position = InStr(Position + Len(Marker), Text, Marker, vbBinaryCompare)
+        Loop
+        SumJsonNumbers = Total
+
+End Function
+
+
+Private Function SumCsvColumn( _
+    ByVal Path As String, _
+    ByVal Column As String, _
+    ByRef Records As Long) _
+    As Double
+'
+'==============================================================================
+'                                 SumCsvColumn
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The sum of one column of a comma-separated file with a header row, and
+'   how many rows there are. Lines end in CR LF or LF; empty lines are
+'   ignored. Enough for the illustrative positions file, whose fields hold
+'   no comma or quote; not a general CSV reader.
+'
+' ERROR POLICY
+'   Raises ERR_EXAMPLE_FIXTURE when the header lacks Column or a row lacks
+'   the field.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Lines     As Variant    'The file's lines
+    Dim Header    As Variant    'The header's fields
+    Dim Fields    As Variant    'One row's fields
+    Dim Target    As Long       'Index of Column, -1 until found
+    Dim Index     As Long       'Line or field index
+    Dim Total     As Double     'Sum so far
+
+'------------------------------------------------------------------------------
+' FIND THE COLUMN
+'------------------------------------------------------------------------------
+        Lines = Split(Replace(ReadFixture(Path), vbCr, vbNullString), vbLf)
+        Header = Split(Lines(0), ",")
+        Target = -1
+        For Index = 0 To UBound(Header)
+            If Header(Index) = Column Then
+                Target = Index
+            End If
+        Next Index
+        If Target < 0 Then
+            Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.SumCsvColumn", _
+                Path & " has no column " & Column & "."
+        End If
+
+'------------------------------------------------------------------------------
+' ADD UP
+'------------------------------------------------------------------------------
+        Records = 0
+        For Index = 1 To UBound(Lines)
+            If Len(Lines(Index)) > 0 Then
+                Fields = Split(Lines(Index), ",")
+                If UBound(Fields) < Target Then
+                    Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.SumCsvColumn", _
+                        Path & " line " & CStr(Index + 1) & " has no " & Column & "."
+                End If
+                Total = Total + Val(Fields(Target))
+                Records = Records + 1
+            End If
+        Next Index
+        SumCsvColumn = Total
 
 End Function
 

@@ -25,6 +25,11 @@ docs/methodology/TEST_HARNESS.md describes them:
   ERR_TEST_FAILED, and CERTIFICATION=PASS with COMPLETE;
 - host.txt: the Windows build, the references (exactly those of the policy)
   and that Debug > Compile VBAProject completed;
+- results.json, written by TEST_Harness.SaveResults, when the commit holds
+  accuracy contracts (tests/accuracy/contracts.json): tools/check_accuracy.py
+  measures them on it, against the commit's own test cases, so the results
+  must be of the commit, cover every output of the contracts' cases, lie
+  within each output's tolerance and within each contract's threshold;
 - with --workbook, the binding of the export to the workbook it came from:
   export-manifest.json (tools/devbuild/export_manifest.py) records the
   SHA-256 of the workbook and of every exported file, and the workbook's
@@ -33,7 +38,8 @@ docs/methodology/TEST_HARNESS.md describes them:
   but VERIFIED.
 
 It proves only that this evidence is consistent with the commit. It does not
-run Excel, and a PASS validates no calculation of the workbook.
+run Excel, and a PASS validates a calculation only as far as the commit's
+accuracy contracts and their reference values do.
 """
 
 from __future__ import annotations
@@ -45,6 +51,7 @@ import posixpath
 import re
 import subprocess
 import sys
+import tempfile
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -52,6 +59,10 @@ from pathlib import Path, PurePosixPath
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import check_accuracy  # noqa: E402
+
 VBA_SUFFIXES = (".bas", ".cls", ".frm")
 # A form's binary resources, exported beside its .frm and compared byte for byte.
 RESOURCE_SUFFIXES = (".frx",)
@@ -67,6 +78,9 @@ MANIFEST_FORMAT = "vba-export-1"
 BUILD_CONFIG = "tools/devbuild/workbook.json"
 ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
 HOST_FIELDS = ("windows", "references", "compile")
+# What tools/check_accuracy.py reads of a commit to measure its contracts.
+CASE_PATHS = ("docs/methodology", "tests/fixtures", "tests/expected",
+              check_accuracy.REGISTRY.parent.as_posix())
 
 VB_OBJECT_ERROR = -2147221504
 # ERR_TEST_FAILED as vbObjectError + n, or as the literal &H8004xxxx equal to it.
@@ -101,6 +115,7 @@ class Policy:
     exported: str
     host: str
     manifest: str
+    results: str
     references: tuple[str, ...]
     office: str
 
@@ -119,6 +134,7 @@ def parse_policy(text: str) -> Policy:
             frozenset(mode for mode, _, must in modes if must is True),
             str(evidence["certification_log"]), str(evidence["exported"]),
             str(evidence["host_record"]), str(evidence["export_manifest"]),
+            str(evidence["results"]),
             tuple(str(item) for item in host["references"]), str(host["office"]))
     except (ValueError, KeyError, TypeError) as error:
         raise PolicyError(f"{POLICY}: {error!r}") from error
@@ -131,7 +147,7 @@ def parse_policy(text: str) -> Policy:
             policy.must_pass != frozenset({"NORMAL"}):
         problems.append("only NORMAL must pass; must_pass is true or false")
     files = [*policy.logs.values(), policy.certification, policy.host, policy.manifest,
-             policy.exported]
+             policy.results, policy.exported]
     if len(set(files)) != len(files) or not all(files):
         problems.append("the logs and evidence files must be distinct and named")
     if any("/" in name or "\\" in name or name in (".", "..") for name in files):
@@ -205,6 +221,7 @@ class Evidence:
     host: dict[str, str] = field(default_factory=dict)
     binding: str = "UNVERIFIED"
     binding_notes: list[str] = field(default_factory=list)
+    accuracy: list[str] = field(default_factory=list)
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -698,6 +715,40 @@ def workbook_findings(root: Path, commit: str, workbook: Path, digest: str,
     return findings
 
 
+def copy_cases(root: Path, commit: str, target: Path) -> None:
+    """The commit's files under CASE_PATHS, written below ``target``."""
+    listed = git(root, "ls-tree", "-r", "-z", "--name-only", commit, "--", *CASE_PATHS)
+    for name in filter(None, listed.decode("utf-8").split("\0")):
+        path = PurePosixPath(name)
+        if path.is_absolute() or ".." in path.parts:
+            continue
+        destination = target.joinpath(*path.parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(git(root, "show", f"{commit}:{name}"))
+
+
+def check_results(root: Path, commit: str, folder: Path, evidence: Evidence,
+                  policy: Policy) -> None:
+    """Measure the commit's accuracy contracts on the run's results file."""
+    registry = check_accuracy.REGISTRY.as_posix()
+    try:
+        git(root, "cat-file", "-e", f"{commit}:{registry}")
+    except RuntimeError:
+        evidence.accuracy.append(f"not measured: commit {commit[:12]} has no {registry}")
+        return
+    path = folder / policy.results
+    if not path.is_file():
+        evidence.findings.append(f"{policy.results}: missing, but {registry} at {commit[:12]} "
+                                 "holds the accuracy contracts it must measure")
+        return
+    with tempfile.TemporaryDirectory(prefix="excel-run-cases-") as temporary:
+        cases = Path(temporary)
+        copy_cases(root, commit, cases)
+        found, _, lines = check_accuracy.check(cases, path, commit, widening=False)
+    evidence.accuracy += lines
+    evidence.findings += [f"{policy.results}: {item}" for item in found]
+
+
 def suite_findings(policy: Policy, suite: Suite, source: bytes, label: str) -> list[str]:
     """Where the suite's source disagrees with the policy, or cannot be checked."""
     findings = []
@@ -742,6 +793,7 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     if harness:
         check_certification(folder, test_failed_number(harness), evidence, policy)
     check_host(folder, evidence, policy)
+    check_results(root, commit, folder, evidence, policy)
     check_binding(root, commit, folder, workbook, evidence, policy)
     if require_binding and evidence.binding == "UNVERIFIED":
         evidence.findings.append("binding UNVERIFIED, but --require-binding needs VERIFIED: "
@@ -759,12 +811,14 @@ def report(commit: str, evidence: Evidence) -> str:
              f"Compile: {evidence.host.get('compile', '')}",
              "Imported components (Git blob ids at the commit):"]
     lines += [f"  {name} {blob}" for name, blob in sorted(evidence.hashes.items())]
+    lines += [f"Accuracy: {line}" for line in evidence.accuracy]
     notes = f" ({'; '.join(evidence.binding_notes)})" if evidence.binding_notes else ""
     lines.append(f"Binding: {evidence.binding}{notes}")
     lines += [f"FAIL: {finding}" for finding in evidence.findings]
     status = "FAIL" if evidence.findings else "PASS"
     lines.append(f"excel-run: {status} (evidence checked against the commit; Excel is not run "
-                 "here and no calculation of the workbook is validated)")
+                 "here, and a calculation is validated only as far as its accuracy contracts "
+                 "are)")
     return "\n".join(lines)
 
 

@@ -344,7 +344,13 @@ release may publish as the calculation's accuracy.
 ```
 
 A result names its case, its variant (`null` for a JSON fixture), its
-quantity and its scope as in the expected file.
+quantity and its scope as in the expected file. In an Excel run, a suite
+records each result with `TEST_Harness.RecordResult`, and the certification
+saves them with `TEST_Harness.SaveResults` as `results.json` in the evidence
+folder, with the commit of the workbook's build stamp
+([harness guide](TEST_HARNESS.md#results)). `tools/check_excel_run.py` then
+measures the commit's contracts on that file, and fails the run when they do
+not hold.
 
 <a id="categories"></a>
 

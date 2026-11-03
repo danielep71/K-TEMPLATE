@@ -69,7 +69,13 @@ milestones and their pull requests.
   calibration and holdout cases. Freezing it needs enough `published` or
   `independent` holdout cases, and a frozen threshold grows only with a new
   decision. With `--results`, the check measures the results of an Excel run.
-  The template's illustrative contract stays a draft (#162).
+  The template's illustrative contract stays a draft (#162). An Excel run now
+  writes those results: a suite records them with `TEST_Harness.RecordResult`,
+  and the certification saves them as `results.json`, with the commit of the
+  workbook's build stamp. The example suite records the illustrative cases'
+  totals from `tests/fixtures/`, so its entry points take that folder.
+  `tools/check_excel_run.py` requires the file when the commit holds
+  contracts, and fails the run when they do not hold (#184).
 - A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
   the changelog, `VERSION`, the default branch, the tag message and
   **Repository integrity**. It builds a reproducible source bundle with its

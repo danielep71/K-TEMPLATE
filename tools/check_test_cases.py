@@ -133,7 +133,12 @@ def keys_problem(data: Mapping[str, Any], allowed: frozenset[str]) -> str | None
 
 
 def rel(path: Path, root: Path) -> str:
-    return path.relative_to(root).as_posix()
+    """The path below ``root``, or the path itself for a file outside it, such as the
+    results file in an Excel run's evidence folder."""
+    try:
+        return path.relative_to(root).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def load_json(path: Path, root: Path, report: Report) -> Any:

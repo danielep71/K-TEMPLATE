@@ -9,6 +9,7 @@ that every record the harness writes is documented.
 
 from __future__ import annotations
 
+import json
 import re
 import unittest
 from pathlib import Path
@@ -18,6 +19,8 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "tests/modules/TEST_Examples.bas"
 HARNESS = ROOT / "tests/modules/TEST_Harness.bas"
 GUIDE = ROOT / "docs/methodology/TEST_HARNESS.md"
+REGISTRY = ROOT / "tests/accuracy/contracts.json"
+BUILD_CONFIG = ROOT / "tools/devbuild/workbook.json"
 CASE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
@@ -86,8 +89,75 @@ class ExampleSuiteTest(unittest.TestCase):
                       (ROOT / "INSTALLATION.md").read_text(encoding="utf-8"))
 
 
+    def test_the_results_case_records_every_output_of_the_contracts(self) -> None:
+        body = self.cases["CaseIllustrativeResults"]
+        strings = dict(re.findall(r'^\s*Private Const (\w+)\s+As String = "([^"]*)"', self.text,
+                                  re.M))
+
+        def value(token: str) -> str | None:
+            if token == "vbNullString":
+                return None
+            return token.strip('"') if token.startswith('"') else strings[token]
+        recorded = [(case, value(variant), value(quantity), value(dataset), value(record))
+                    for case, variant, quantity, dataset, record in re.findall(
+                        r'TEST_Harness\.RecordResult "([^"]+)", (vbNullString|"[^"]+"), _\s+'
+                        r'(\w+|"[^"]+"), (vbNullString|"[^"]*"), (vbNullString|"[^"]*"), Total',
+                        body)]
+        registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+        expected = []
+        for contract in registry["contracts"]:
+            for case in [*contract["calibration_cases"], *contract["holdout_cases"]]:
+                data = json.loads((ROOT / "tests/expected" / f"{case}.json")
+                                  .read_text(encoding="utf-8"))
+                groups = [(None, data["outputs"])] if "outputs" in data \
+                    else sorted(data["variants"].items())
+                expected += [(case, variant, output["quantity"],
+                              *((output["scope"]["dataset"], output["scope"]["record"])
+                                if output["scope"] else (None, None)))
+                             for variant, outputs in groups for output in outputs
+                             if output["quantity"] in contract["quantities"]]
+        self.assertEqual(len(recorded), 3, recorded)
+        self.assertEqual(sorted(recorded, key=str), sorted(expected, key=str))
+        self.assertEqual(len(recorded), len(set(recorded)))
+
+    def test_the_results_case_reads_files_that_exist(self) -> None:
+        body = self.cases["CaseIllustrativeResults"]
+        paths = re.findall(r'FixturePath\(\s*(?:_\s*)?"([^"]+)"\)', body)
+        self.assertEqual(len(paths), 3, paths)
+        for path in paths:
+            with self.subTest(path=path):
+                self.assertTrue((ROOT / "tests/fixtures" / path).is_file())
+
+    def test_the_certification_saves_the_results_of_the_normal_run(self) -> None:
+        body = self.bodies["CertifyExamples"]
+        self.assertRegex(body, r'CertifyMode "NORMAL"[^\n]*\n\s+TEST_Harness\.SaveResults ')
+
+
 class HarnessTest(unittest.TestCase):
     text = source(HARNESS)
+
+    def test_the_stamp_name_is_the_one_the_build_writes(self) -> None:
+        match = re.search(r'Const STAMP_COMMIT_NAME\s+As String = "([^"]+)"', self.text)
+        self.assertIsNotNone(match)
+        assert match is not None
+        layout = json.loads(BUILD_CONFIG.read_text(encoding="utf-8"))
+        self.assertEqual(match.group(1), layout["stamp"]["commit"])
+
+    def test_a_result_scope_is_the_object_of_the_expected_format(self) -> None:
+        # The accuracy check matches a scope only as {"dataset": ..., "record": ...}.
+        bodies = procedures(self.text)
+        self.assertIn('""scope"": " & ScopeJson(Dataset, Record)', bodies["RecordResult"])
+        scope = re.sub(r" _\n\s+", " ", bodies["ScopeJson"])  # join continued lines
+        self.assertIn('"{""dataset"": " & JsonText(Dataset) & ", ""record"": " & '
+                      'JsonText(Record) & "}"', scope)
+        self.assertIn('ScopeJson = "null"', scope)
+
+    def test_results_are_cleared_with_the_log(self) -> None:
+        bodies = procedures(self.text)
+        for name in ("BeginRun", "ResetTests"):
+            with self.subTest(procedure=name):
+                self.assertIn("Set mResults = New Collection", bodies[name])
+        self.assertIn('RequireActiveRun "RecordResult"', bodies["RecordResult"])
 
     def test_every_documented_record_is_written(self) -> None:
         guide = GUIDE.read_text(encoding="utf-8")

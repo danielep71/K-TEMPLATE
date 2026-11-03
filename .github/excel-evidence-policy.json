@@ -6,8 +6,8 @@
     "name": "examples",
     "source": "tests/modules/TEST_Examples.bas",
     "certification_entry_point": "CertifyExamples",
-    "expected_cases": 12,
-    "expected_assertions": 27
+    "expected_cases": 13,
+    "expected_assertions": 30
   },
   "modes": [
     {"mode": "NORMAL", "log": "examples.log", "must_pass": true},
@@ -18,7 +18,8 @@
     "certification_log": "certification.log",
     "exported": "exported",
     "host_record": "host.txt",
-    "export_manifest": "export-manifest.json"
+    "export_manifest": "export-manifest.json",
+    "results": "results.json"
   },
   "host": {
     "references": [

@@ -36,7 +36,8 @@ import check_repository  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 MARKER = re.compile(r"^<!-- (BEGIN|END) generated: ([a-z0-9-]+) -->$", re.M)
-ENTRY_POINT = re.compile(r'^Public Sub (\w+)\(\)\s*$(?:(?!^End Sub).)*?^\s+RunSuite "(\w+)"',
+# An entry point that runs the suite in one mode, with or without arguments.
+ENTRY_POINT = re.compile(r'^Public Sub (\w+)\((?:(?!^End Sub).)*?^\s+RunSuite "(\w+)"',
                          re.M | re.S)
 WINDOWS_SUFFIXES = frozenset({"exe", "cmd", "bat"})
 COUNTS = {1: "One", 2: "Two", 3: "Three", 4: "Four"}

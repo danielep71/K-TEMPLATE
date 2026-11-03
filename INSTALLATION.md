@@ -161,18 +161,21 @@ evidence.
 ## 🧪 Running the harness
 
 In a **development** workbook built as above, with the modules of
-`tests/modules/`, open the Immediate window (**Ctrl+G**) and type:
+`tests/modules/`, open the Immediate window (**Ctrl+G**) and type, with the
+full path of `tests\fixtures` in your checkout and no trailing backslash:
 
 ```text
-TEST_Examples.RunExampleTests
+TEST_Examples.RunExampleTests "C:\path\to\checkout\tests\fixtures"
 ```
 
 It runs the example suite through `TEST_Harness` and writes one record per
-line. A passing run ends with:
+line. One case reads the illustrative test cases from that folder and
+records their totals as results. The two entry points below take the same
+argument. A passing run ends with:
 
 <!-- BEGIN generated: example-suite-results -->
 ```text
-RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=12; assertions=27; failures=0; cleanup=PASS; recovery=NONE
+RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=13; assertions=30; failures=0; cleanup=PASS; recovery=NONE
 ```
 
 Anything else, or the error *Suite examples did not pass*, is a failure.
@@ -181,7 +184,7 @@ Two more entry points show the failure paths and are expected to fail:
 | Entry point | Expected end |
 | --- | --- |
 | `TEST_Examples.RunExampleTestsWithInjectedFailure` | `RESULT=FAIL`, `operation=FAIL`, `completeness=COMPLETE`, `failures=1`, then *Suite examples did not pass* |
-| `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=11`, `assertions=25`, `failures=1`, then *Suite examples did not pass* |
+| `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=12`, `assertions=28`, `failures=1`, then *Suite examples did not pass* |
 <!-- END generated: example-suite-results -->
 
 - **Complete log.** The Immediate window keeps only its last 200 lines. To
@@ -218,16 +221,19 @@ macro-security level and no *Trust access to the VBA project object model*.
    checked, not the binding of steps 7 and 9.
 4. **Compile** with **Debug → Compile VBAProject**.
 5. **Certify.** In the Immediate window type, with the full path of the
-   folder and no trailing backslash:
+   evidence folder and of `tests\fixtures` in the same checkout, both with no
+   trailing backslash:
 
    ```text
-   TEST_Examples.CertifyExamples "C:\path\to\test-results\excel-run"
+   TEST_Examples.CertifyExamples "C:\path\to\test-results\excel-run", "C:\path\to\checkout\tests\fixtures"
    ```
 
    It refuses to start if an earlier run left state behind. It runs the
    suite normally, with the injected failure and with the skipped case, and
    saves each complete log as `examples.log`, `injected.log` and
-   `skipped.log`. Then it writes `certification.log`. Each run prints a
+   `skipped.log`. After the normal run it saves `results.json`: the
+   results that run recorded, with the commit of the workbook's
+   `build_commit` stamp. Then it writes `certification.log`. Each run prints a
    `SAVED=` line: the normal run with `error=0`, the two failure runs with
    the error *Suite examples did not pass*. Those errors are recorded, not
    raised, so that every log is written. The certification ends with
@@ -268,7 +274,9 @@ macro-security level and no *Trust access to the VBA project object model*.
    ```
 
    It must end with `Binding: VERIFIED` and `excel-run: PASS`. It prints
-   the commit, the host and the Git blob id of every imported component. For
+   the commit, the host and the Git blob id of every imported component. When
+   the commit holds accuracy contracts, an `Accuracy:` line gives each
+   contract's worst error over its calibration and its holdout cases. For
    a workbook imported by hand, omit `--workbook` and `--require-binding`:
    the binding is then `UNVERIFIED`, which a release does not accept.
 10. **Record.** Copy the report into the issue, the pull request or the
@@ -293,10 +301,13 @@ macro-security level and no *Trust access to the VBA project object model*.
 | `host.txt` lacks a field, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), or `compile` is not `PASS` | The host record is incomplete |
 | `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |
 | With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
+| The commit holds `tests/accuracy/contracts.json`, and `results.json` is missing, names another commit or a build with local changes, lacks a result, holds a result outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
 
 It cannot see Excel: the compile result, the references and the Windows
 build are the runner's own record. A PASS says the evidence is consistent
-with the commit; it validates no calculation of the workbook.
+with the commit. It validates a calculation only as far as its accuracy
+contracts and their reference values do; the template's illustrative
+contract validates none.
 
 ## 🔄 Upgrading to a new revision
 
