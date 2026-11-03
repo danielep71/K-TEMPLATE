@@ -34,8 +34,12 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   harness or a suite is rejected.
   Every suite is read as the policy's Office bitness compiles it, so a case
   or assertion inside #If Win64 counts only on the host it runs on;
-- host.txt: the Windows build, the references (exactly those of the policy)
-  and that Debug > Compile VBAProject completed;
+- host.txt, the host record: who ran it, when it started and finished (with
+  the UTC offset), Windows, the Excel build and bitness, the macro policy
+  (AutomationSecurity) and the Trust access to the VBA project as found, the
+  references (exactly those of the policy), that Debug > Compile VBAProject
+  completed, and the outcome. An outcome other than PASS is evidence of that
+  outcome, never of a pass;
 - results.json, written by TEST_Harness.SaveResults, when the commit holds
   accuracy contracts (tests/accuracy/contracts.json): tools/check_accuracy.py
   measures them on it, against the commit's own test cases, so the results
@@ -79,6 +83,7 @@ import tempfile
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 from xml.etree import ElementTree
@@ -126,7 +131,19 @@ BITNESS_ENVIRONMENT = {"64-bit": "vba7-win64", "32-bit": "vba7-win32"}
 MANIFEST_FORMAT = "vba-export-1"
 BUILD_CONFIG = "tools/devbuild/workbook.json"
 ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
-HOST_FIELDS = ("windows", "references", "compile")
+# The host record, one key=value line each (docs/methodology/TEST_HARNESS.md).
+HOST_FIELDS = ("operator", "started", "finished", "windows", "excel", "bitness",
+               "automation_security", "vba_project_access", "references", "compile", "outcome")
+# How a run ended. Only PASS can pass; any other outcome is evidence of itself.
+OUTCOMES = ("PASS", "FAIL", "IMPORT_FAILED", "COMPILE_FAILED", "EXECUTION_TIMEOUT",
+            "INCOMPLETE", "NOT_ENABLED", "UNAVAILABLE")
+# What a run that stopped early writes for a host value it could not read; the
+# record of a PASS has none.
+UNKNOWN = "UNKNOWN"
+# Excel's AutomationSecurity, as msoAutomationSecurityLow, ByUI and ForceDisable.
+AUTOMATION_SECURITY = ("Low", "ByUI", "ForceDisable")
+VBA_PROJECT_ACCESS = ("TRUSTED", "NOT_TRUSTED")
+EXCEL_BUILD = re.compile(r"^\d+\.\d+ build \d+$")
 # compile= of a run whose whole project could not be compiled: VBA compiled on
 # demand the modules the run called. Accepted only with identity by rebuild.
 COMPILE_ON_DEMAND = "ON_DEMAND"
@@ -701,6 +718,13 @@ def check_host(folder: Path, evidence: Evidence, policy: Policy,
     for key in HOST_FIELDS:
         if not host.get(key):
             evidence.findings.append(f"{policy.host}: no {key}=")
+    evidence.findings += host_findings(host, policy, evidence.environment)
+    outcome = host.get("outcome")
+    if outcome in OUTCOMES and outcome != "PASS":
+        # The rest of the evidence is still checked: it shows what the run left.
+        evidence.findings.append(f"{policy.host}: outcome={outcome}: the record is evidence "
+                                 f"of a run that ended {outcome}, never of a pass")
+        return
     references = tuple(item.strip() for item in host.get("references", "").split(";"))
     if host.get("references") and sorted(references) != sorted(policy.references):
         evidence.findings.append(f"{policy.host}: references must be exactly "
@@ -713,6 +737,63 @@ def check_host(folder: Path, evidence: Evidence, policy: Policy,
                                     "identity by rebuild)"))
     if evidence.environment and evidence.environment.get("office") != policy.office:
         evidence.findings.append(f"not the supported target: Office is not {policy.office}")
+    if host.get("bitness") in OFFICE_BITNESS and host["bitness"] != policy.office:
+        evidence.findings.append(f"{policy.host}: not the supported target: bitness is not "
+                                 f"{policy.office}")
+
+
+def time_findings(host: dict[str, str], policy: Policy) -> list[str]:
+    """Where started= and finished= are not ISO 8601 times with their UTC offset,
+    or the run finished before it started."""
+    findings = []
+    times = []
+    for key in ("started", "finished"):
+        try:
+            moment = datetime.fromisoformat(host.get(key, ""))
+        except ValueError:
+            moment = None
+        if moment is not None and moment.utcoffset() is not None:
+            times.append(moment)
+        elif host.get(key):
+            findings.append(f"{policy.host}: {key}={host[key]} is not an ISO 8601 time with "
+                            "its UTC offset, such as 2026-11-03T14:05:09+01:00")
+    if len(times) == 2 and times[1] < times[0]:
+        findings.append(f"{policy.host}: finished before it started")
+    return findings
+
+
+def host_findings(host: dict[str, str], policy: Policy,
+                  environment: dict[str, str]) -> list[str]:
+    """What is wrong with the values of a host record, whatever its outcome. A run
+    that stopped early may write UNKNOWN for what it could not read, apart from
+    who ran it, when and how it ended."""
+    outcome = host.get("outcome", "")
+    findings = time_findings(host, policy)
+    expected = {"outcome": ", ".join(OUTCOMES), "bitness": ", ".join(OFFICE_BITNESS),
+                "automation_security": ", ".join(AUTOMATION_SECURITY),
+                "vba_project_access": ", ".join(VBA_PROJECT_ACCESS)}
+    stopped = outcome in OUTCOMES and outcome != "PASS"
+    for key in ("windows", "excel", *expected):
+        value = host.get(key)
+        if not value or (value == UNKNOWN and stopped and key != "outcome"):
+            continue
+        if value == UNKNOWN and key != "outcome":
+            findings.append(f"{policy.host}: {key}={UNKNOWN}, but only a run that stopped early "
+                            "may leave a value unread")
+        elif key == "excel" and not EXCEL_BUILD.match(value):
+            findings.append(f"{policy.host}: excel={value}, expected <version> build <build>, "
+                            "such as 16.0 build 17928")
+        elif key in expected and value not in expected[key].split(", "):
+            findings.append(f"{policy.host}: {key}={value}, expected one of {expected[key]}")
+    if outcome == "PASS" and environment:
+        logged = f"{environment.get('version')} build {environment.get('build')}"
+        if host.get("excel") and host["excel"] != logged:
+            findings.append(f"{policy.host}: excel={host['excel']}, but the logs' ENVIRONMENT "
+                            f"is {logged}")
+        if host.get("bitness") and host["bitness"] != environment.get("office"):
+            findings.append(f"{policy.host}: bitness={host['bitness']}, but the logs' "
+                            f"ENVIRONMENT is office={environment.get('office')}")
+    return findings
 
 
 def test_failed_number(source: bytes) -> int | None:
@@ -1074,9 +1155,16 @@ def report(commit: str, evidence: Evidence) -> str:
                             for key in ENVIRONMENT_FIELDS)
     lines = [f"Candidate commit: {commit}",
              f"Environment: {environment}",
+             f"Operator: {evidence.host.get('operator', '')}",
+             f"Run: {evidence.host.get('started', '')} to {evidence.host.get('finished', '')}",
              f"Windows: {evidence.host.get('windows', '')}",
+             f"Excel: {evidence.host.get('excel', '')}, {evidence.host.get('bitness', '')}",
+             f"Macro policy found: AutomationSecurity="
+             f"{evidence.host.get('automation_security', '')}; VBA project access "
+             f"{evidence.host.get('vba_project_access', '')}",
              f"References: {evidence.host.get('references', '')}",
              f"Compile: {evidence.host.get('compile', '')}",
+             f"Outcome: {evidence.host.get('outcome', '')}",
              "Imported components (Git blob ids at the commit):"]
     lines += [f"  {name} {blob}" for name, blob in sorted(evidence.hashes.items())]
     lines += [f"Note: {note}" for note in evidence.notes]

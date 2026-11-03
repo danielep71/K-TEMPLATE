@@ -299,8 +299,42 @@ reads, and it writes none.
 | `certification.log` | `EndCertification` |
 | A log and a certification log per project suite, as `suites` names them | Its certification entry point |
 | `exported/` | By hand only: every VBA component exported back from the workbook after the run, each form with its `.frx`. Without it, `check_excel_run.py --workbook` proves identity by rebuilding the commit |
-| `host.txt` | You, or `tools/devbuild/excel_run.py`: `windows=`, `references=` and `compile=` (`ON_DEMAND` for a run without Trust access) |
+| `host.txt` | You, or `tools/devbuild/excel_run.py`: the [host record](#host-record), also for a run that stopped early |
 | `export-manifest.json` | By hand only: `tools/devbuild/export_manifest.py`, the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
+
+<a id="host-record"></a>
+
+### Host record
+
+`host.txt` holds one `key=value` line per field, in this order:
+
+| Field | Value |
+| --- | --- |
+| `operator` | Who ran it |
+| `started`, `finished` | When the run started and finished, in ISO 8601 with the UTC offset, such as `2026-11-03T14:05:09+01:00` |
+| `windows` | The Windows version, as `winver` shows it |
+| `excel` | `Application.Version` and `Application.Build`, such as `16.0 build 17928` |
+| `bitness` | `64-bit` or `32-bit`: the bitness of Excel |
+| `automation_security` | `Application.AutomationSecurity` as found: `Low`, `ByUI` or `ForceDisable` (1, 2 or 3). It is read, never set |
+| `vba_project_access` | *Trust access to the VBA project object model* as found: `TRUSTED` or `NOT_TRUSTED` |
+| `references` | The ticked references, separated by `; ` |
+| `compile` | `PASS` when **Debug → Compile VBAProject** completed, `ON_DEMAND` for a run without Trust access, or what the compile reported |
+| `outcome` | How the run ended: `PASS`, `FAIL`, `IMPORT_FAILED`, `COMPILE_FAILED`, `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE` |
+
+`PASS` means every certification entry point returned, and `FAIL` that one
+raised. The other outcomes say where the run stopped: the components could
+not be imported, the project did not compile, Excel did not finish in time,
+the run stopped before its end, the macros were not enabled, or Excel could
+not be started. A value that could not be read, such as a registry value whose
+read was denied, is `UNKNOWN`, never a default or a setting of lower
+precedence. Only the record of a run that stopped early may hold it; the check
+rejects it in the record of a `PASS`.
+
+`check_excel_run.py` rejects a record that lacks a field or holds a value
+outside this table, a time without its UTC offset, a finish before the start,
+or, for a `PASS`, an `excel` or `bitness` other than the logs' `ENVIRONMENT`.
+It accepts any other outcome only as evidence of that outcome: the check then
+fails, whatever the rest of the folder holds.
 
 ## Evidence policy
 
@@ -354,5 +388,5 @@ Without Excel, `tests/test_vba_harness.py` checks what the source can show:
 
 `check_excel_run.py` proves that an evidence folder is consistent with a
 commit, and measures the commit's accuracy contracts on its results file. It
-cannot see Excel: the compile result, the references and the Windows build
-are the runner's own record.
+cannot see Excel: the host record, from the operator to the outcome, is the
+runner's own record.
