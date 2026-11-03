@@ -662,6 +662,8 @@ class EvidenceTest(unittest.TestCase):
                                 "windows=UNKNOWN"), "windows=UNKNOWN, but only a run")
         self.assertFinding(edit("host.txt", "automation_security=ByUI",
                                 "automation_security=UNKNOWN"), "may leave a value unread")
+        self.assertFinding(edit("host.txt", "vba_project_access=NOT_TRUSTED",
+                                "vba_project_access=UNKNOWN"), "vba_project_access=UNKNOWN, but")
 
     def test_an_outcome_other_than_pass_is_evidence_of_itself_only(self) -> None:
         for outcome in check_excel_run.OUTCOMES[1:]:

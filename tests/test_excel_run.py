@@ -10,12 +10,14 @@ it empties, and the PowerShell script that drives Excel, which is faked.
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -40,6 +42,24 @@ def pe_header(machine: int) -> bytes:
     """The start of a Windows executable whose PE header names ``machine``."""
     return b"MZ" + bytes(0x3A) + (0x40).to_bytes(4, "little") + b"PE\0\0" + \
         machine.to_bytes(2, "little")
+
+
+def fake_winreg(values: dict[str, object], failures: dict[str, type[OSError]]) -> object:
+    """A stand-in for winreg: each value is found by a part of its path
+    (hive\\key\\name); a path holding a part of ``failures`` raises that error, and
+    any other path is missing (FileNotFoundError), as winreg reports them."""
+    def query(handle: str, name: str) -> tuple[object, int]:
+        path = f"{handle}\\{name}"
+        for part, error in failures.items():
+            if part in path:
+                raise error(5, "Access is denied")
+        for part, value in values.items():
+            if part in path:
+                return value, 4
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+    return types.SimpleNamespace(
+        HKEY_CURRENT_USER="HKEY_CURRENT_USER", HKEY_LOCAL_MACHINE="HKEY_LOCAL_MACHINE",
+        OpenKey=lambda hive, key: contextlib.nullcontext(f"{hive}\\{key}"), QueryValueEx=query)
 
 
 def read_host(path: Path) -> dict[str, str]:
@@ -112,6 +132,31 @@ class HostRecordTest(unittest.TestCase):
                          values: dict[str, int] = values) -> object | None:
                     return values.get(f"{hive}\\{key}\\{name}")
                 self.assertEqual(excel_run.vba_project_access("16.0", read), expected)
+
+    def test_a_failed_registry_read_is_unknown_never_a_lower_setting(self) -> None:
+        # Only a missing key or value falls through to the next location; a read that
+        # fails at any of them leaves the setting unknown.
+        for failing in ("HKEY_CURRENT_USER\\Software\\Policies", "HKEY_LOCAL_MACHINE",
+                        "HKEY_CURRENT_USER\\Software\\Microsoft"):
+            with self.subTest(failing=failing):
+                with mock.patch.dict(sys.modules, {"winreg": fake_winreg(
+                        {r"HKEY_CURRENT_USER\Software\Microsoft": 1},
+                        {failing: PermissionError})}):
+                    self.assertEqual(excel_run.vba_project_access("16.0"), "UNKNOWN")
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg({}, {"HKEY": PermissionError})}):
+            self.assertEqual(excel_run.vba_project_access("16.0"), "UNKNOWN")
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg(
+                {r"HKEY_CURRENT_USER\Software\Microsoft": 1}, {})}):
+            self.assertEqual(excel_run.vba_project_access("16.0"), "TRUSTED")
+
+    def test_a_failed_windows_read_is_unknown_not_a_shorter_description(self) -> None:
+        values = {"ProductName": "Windows 10 Pro", "CurrentBuild": "26100", "UBR": 4061}
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg(values, {})}):
+            # A value that is absent is left out, as on a Windows without DisplayVersion.
+            self.assertEqual(excel_run.windows_found(), "Windows 11 Pro, OS build 26100.4061")
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg(
+                values, {"UBR": PermissionError})}):
+            self.assertEqual(excel_run.windows_found(), "UNKNOWN")
 
     def test_the_excel_fields_come_from_what_the_script_prints(self) -> None:
         with mock.patch.object(excel_run, "executable_bitness", return_value="64-bit") as bits, \

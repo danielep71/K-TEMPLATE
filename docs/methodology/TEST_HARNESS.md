@@ -188,8 +188,10 @@ reads, and it writes none.
 raised. The other outcomes say where the run stopped: the components could
 not be imported, the project did not compile, Excel did not finish in time,
 the run stopped before its end, the macros were not enabled, or Excel could
-not be started. A run that stopped early writes `UNKNOWN` for a value it could
-not read; the record of a `PASS` has none.
+not be started. A value that could not be read, such as a registry value whose
+read was denied, is `UNKNOWN`, never a default or a setting of lower
+precedence. Only the record of a run that stopped early may hold it; the check
+rejects it in the record of a `PASS`.
 
 `check_excel_run.py` rejects a record that lacks a field or holds a value
 outside this table, a time without its UTC offset, a finish before the start,

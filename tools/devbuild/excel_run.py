@@ -105,6 +105,8 @@ def describe_windows(values: Mapping[str, object]) -> str:
 
 
 def windows_version() -> str:
+    """The Windows description; a value that is absent is left out, and a read
+    that fails otherwise raises OSError, so that it is not mistaken for one."""
     import winreg  # Windows only
 
     values: dict[str, object] = {}
@@ -112,7 +114,7 @@ def windows_version() -> str:
         for name in ("ProductName", "DisplayVersion", "CurrentBuild", "UBR"):
             try:
                 values[name] = winreg.QueryValueEx(key, name)[0]  # type: ignore[attr-defined]
-            except OSError:
+            except FileNotFoundError:
                 continue
     return describe_windows(values)
 
@@ -149,13 +151,15 @@ def executable_bitness(path: Path) -> str:
 
 
 def registry_value(hive: str, key: str, name: str) -> object | None:
-    """A registry value, read only; None when it is absent."""
+    """A registry value, read only; None when the key or the value is absent
+    (FileNotFoundError). Any other failure, such as a denied read, raises
+    OSError: an unread value is not an absent one."""
     import winreg  # Windows only
 
     try:
         with winreg.OpenKey(getattr(winreg, hive), key) as handle:  # type: ignore[attr-defined]
             value: object = winreg.QueryValueEx(handle, name)[0]  # type: ignore[attr-defined]
-    except OSError:
+    except FileNotFoundError:
         return None
     return value
 
@@ -163,12 +167,17 @@ def registry_value(hive: str, key: str, name: str) -> object | None:
 def vba_project_access(version: str,
                        read: Callable[[str, str, str], object | None] = registry_value) -> str:
     """Trust access to the VBA project object model, as the AccessVBOM value
-    holds it: a policy value before the user's own setting, off when none is set."""
+    holds it: a policy value before the user's own setting, off when none is set.
+    UNKNOWN when a location could not be read, rather than a setting of lower
+    precedence."""
     security = rf"Microsoft\Office\{version}\Excel\Security"
     for hive, key in (("HKEY_CURRENT_USER", rf"Software\Policies\{security}"),
                       ("HKEY_LOCAL_MACHINE", rf"SOFTWARE\Policies\{security}"),
                       ("HKEY_CURRENT_USER", rf"Software\{security}")):
-        value = read(hive, key, "AccessVBOM")
+        try:
+            value = read(hive, key, "AccessVBOM")
+        except OSError:
+            return check_excel_run.UNKNOWN
         if value is not None:
             return "TRUSTED" if value == 1 else "NOT_TRUSTED"
     return "NOT_TRUSTED"
