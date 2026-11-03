@@ -71,7 +71,7 @@ the methodology guides; remove them when you replace those.
 | Calculation | A `CALC-` ID declared by a heading of the [calculation contracts](CALCULATION_CONTRACTS.md) |
 | Datasets | A non-empty object whose keys are `DS-` IDs declared in the *Datasets* table of the [data contract](DATA_CONTRACT.md); each holds a non-empty list of records |
 | Records | Each record has an `id`, unique in the fixture, and an `inputs` object |
-| Inputs | Keys are lower snake case and end in a unit suffix (below). The field tables of the data contract decide which keys exist |
+| Inputs | Keys are lower snake case and end in a unit suffix (below). The field tables of the data contract decide which fields exist; a key is the field's name with the suffix of its unit, unless the name already ends in one, so the illustrative `notional` and `currency` are `notional_amount` and `currency_code`. Input files of a [file-based case](#file-based-cases) keep the field names of the data contract |
 | Currencies | `reporting_currency_code` is the currency of results. A record whose `inputs` hold an `_amount` key also holds `currency_code`, the currency of all its amounts, so a currency mismatch is always visible |
 | Illustrative entries | A `CALC-` or `DS-` ID marked *Illustrative* in its guide may be used only by an `illustrative-` case |
 
