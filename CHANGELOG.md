@@ -63,6 +63,10 @@ milestones and their pull requests.
 
 ### Added
 
+- Dependabot version updates wait 14 days after a release (`cooldown`), and a
+  workflow control test requires it. The pull request guide describes how
+  security updates, the manual actionlint update and the files GitHub reads
+  only from the default branch behave with a release branch (#239).
 - `tools/devbuild/excel_run.py` records an Excel run with one command on
   Windows. It builds the workbook, runs the certification in Excel through
   COM, closes without saving and writes `host.txt`, then checks the
