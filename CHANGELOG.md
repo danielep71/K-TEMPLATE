@@ -230,4 +230,12 @@ milestones and their pull requests.
   longer breaks the code span or table row of the label synchronization and
   drift summaries (#189).
 
+### Validation
+
+- First Excel run of the template, with `tools/devbuild/excel_run.py` at
+  50c0658 on Microsoft 365 Excel 16.0 build 20430, 64-bit, Windows 11
+  Enterprise 25H2: `excel-run: PASS`, binding `VERIFIED` by rebuild, ACC-01
+  worst error 0.0, `compile=ON_DEMAND`. The host behaviours `HB-02` to `HB-04`
+  of the validation plan are measured on that host (#204, #211).
+
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
