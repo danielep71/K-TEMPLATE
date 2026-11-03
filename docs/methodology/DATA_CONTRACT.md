@@ -45,7 +45,7 @@ Read from `positions.csv`, delimited text in `UTF-8`, with `,` between cells and
 | --- | --- | --- | --- | --- | --- |
 | *Illustrative:* `position_id` | Text | — | Yes | Any | Identifies the position |
 | *Illustrative:* `currency` | Currency code, ISO 4217 | — | Yes | Any | Currency of the position's amounts |
-| *Illustrative:* `notional` | Decimal | Currency in field `currency` | Yes | ≥ 0 | Sign is given by `direction` |
+| *Illustrative:* `notional` | Decimal | Currency in field `currency` | Yes | ≥ 0 | Absolute amount, never negative |
 <!-- END generated: data-contract-fields -->
 
 State the unit of every amount, rate and period explicitly: a percentage, a

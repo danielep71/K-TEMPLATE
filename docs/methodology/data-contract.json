@@ -19,7 +19,7 @@
         {"name": "currency", "type": "currency", "unit": null, "required": true, "allowed": null,
          "notes": "Currency of the position's amounts"},
         {"name": "notional", "type": "decimal", "unit": {"currency_field": "currency"},
-         "required": true, "allowed": {"min": 0}, "notes": "Sign is given by `direction`"}
+         "required": true, "allowed": {"min": 0}, "notes": "Absolute amount, never negative"}
       ]
     }
   ]
