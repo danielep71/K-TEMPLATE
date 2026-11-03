@@ -37,6 +37,18 @@ docs/methodology/TEST_HARNESS.md describes them:
   when no workbook or manifest is given; --require-binding fails anything
   but VERIFIED.
 
+Without an exported folder, --workbook proves source identity instead by
+rebuild: the commit is checked out in a temporary worktree and built with
+tools/devbuild/build_workbook.py, and the workbook Excel ran, closed without
+saving, must hold the same parts as that build, in the same order and byte for
+byte once decompressed (binding VERIFIED, or FAIL). The parts, not the
+compressed package, are compared, because another platform's zlib may pack
+the same parts into other bytes.
+Excel compiles the project from source on open, so the code that ran is the
+commit's. Such a run, as tools/devbuild/excel_run.py records it without Trust
+access to the VBA project, may record compile=ON_DEMAND: only the modules the
+run called were compiled.
+
 It proves only that this evidence is consistent with the commit. It does not
 run Excel, and a PASS validates a calculation only as far as the commit's
 accuracy contracts and their reference values do.
@@ -46,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import posixpath
 import re
@@ -63,6 +76,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_accuracy  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent / "devbuild"))
+
+import build_workbook  # noqa: E402
+
 VBA_SUFFIXES = (".bas", ".cls", ".frm")
 # A form's binary resources, exported beside its .frm and compared byte for byte.
 RESOURCE_SUFFIXES = (".frx",)
@@ -78,6 +95,10 @@ MANIFEST_FORMAT = "vba-export-1"
 BUILD_CONFIG = "tools/devbuild/workbook.json"
 ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
 HOST_FIELDS = ("windows", "references", "compile")
+# compile= of a run whose whole project could not be compiled: VBA compiled on
+# demand the modules the run called. Accepted only with identity by rebuild.
+COMPILE_ON_DEMAND = "ON_DEMAND"
+REBUILT_CONFIGURATION = "development"
 # What tools/check_accuracy.py reads of a commit to measure its contracts.
 CASE_PATHS = ("docs/methodology", "tests/fixtures", "tests/expected",
               check_accuracy.REGISTRY.parent.as_posix())
@@ -505,7 +526,8 @@ def check_logs(folder: Path, suite: Suite, evidence: Evidence, policy: Policy) -
         evidence.environment = environments[0]
 
 
-def check_host(folder: Path, evidence: Evidence, policy: Policy) -> None:
+def check_host(folder: Path, evidence: Evidence, policy: Policy,
+               rebuilt: bool = False) -> None:
     path = folder / policy.host
     if not path.is_file():
         evidence.findings.append(f"{policy.host}: missing")
@@ -523,8 +545,12 @@ def check_host(folder: Path, evidence: Evidence, policy: Policy) -> None:
     if host.get("references") and sorted(references) != sorted(policy.references):
         evidence.findings.append(f"{policy.host}: references must be exactly "
                                  f"{'; '.join(policy.references)}")
-    if host.get("compile") and host["compile"] != "PASS":
-        evidence.findings.append(f"{policy.host}: compile={host['compile']}, expected PASS")
+    allowed = ("PASS", COMPILE_ON_DEMAND) if rebuilt else ("PASS",)
+    if host.get("compile") and host["compile"] not in allowed:
+        evidence.findings.append(f"{policy.host}: compile={host['compile']}, expected "
+                                 f"{' or '.join(allowed)}"
+                                 + ("" if rebuilt else f" ({COMPILE_ON_DEMAND} only with "
+                                    "identity by rebuild)"))
     if evidence.environment and evidence.environment.get("office") != policy.office:
         evidence.findings.append(f"not the supported target: Office is not {policy.office}")
 
@@ -650,6 +676,68 @@ def load_manifest(path: Path) -> tuple[str, dict[str, str]]:
         raise ValueError(f"format is {data.get('format')!r}, expected {MANIFEST_FORMAT}")
     files = {str(item["file"]): str(item["sha256"]).lower() for item in data["files"]}
     return str(data["workbook"]["sha256"]).lower(), files
+
+
+def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -> None:
+    """Source identity without an export: the workbook equals a fresh build of the commit."""
+    for name, data in sorted(components(root, commit).items()):
+        evidence.hashes[name] = git_blob(data)
+    evidence.binding = "FAIL"
+    if not workbook.is_file():
+        evidence.findings.append(f"workbook {workbook}: missing")
+        return
+    with tempfile.TemporaryDirectory(prefix="excel-run-rebuild-") as temporary:
+        tree = Path(temporary) / "tree"
+        target = Path(temporary) / "rebuilt.xlsm"
+        try:
+            git(root, "worktree", "add", "--detach", "--quiet", str(tree), commit)
+        except RuntimeError as error:
+            evidence.findings.append(f"cannot check out {commit[:12]} to rebuild it: {error}")
+            return
+        try:
+            build_workbook.build(tree, REBUILT_CONFIGURATION, target)
+            rebuilt = target.read_bytes()
+        except (build_workbook.BuildError, ValueError, OSError, RuntimeError) as error:
+            evidence.findings.append(f"cannot rebuild {commit[:12]}: {error}")
+            return
+        finally:
+            try:
+                git(root, "worktree", "remove", "--force", str(tree))
+            except RuntimeError:
+                pass
+    try:
+        actual = package_parts(workbook.read_bytes())
+    except (zipfile.BadZipFile, OSError, ValueError) as error:
+        evidence.findings.append(f"workbook {workbook.name}: not a readable package: {error}")
+        return
+    difference = parts_difference(actual, package_parts(rebuilt))
+    if difference:
+        evidence.findings.append(
+            f"workbook {workbook.name}: {difference} the {REBUILT_CONFIGURATION} build of "
+            f"{commit[:12]}: it was saved after the build, or not built from that commit")
+        return
+    evidence.binding = "VERIFIED"
+    evidence.binding_notes.append(f"workbook parts byte-identical to the "
+                                  f"{REBUILT_CONFIGURATION} build of {commit[:12]}; no export "
+                                  "needed")
+
+
+def package_parts(data: bytes) -> list[tuple[str, bytes]]:
+    """The files of a ZIP package, in order, decompressed."""
+    with zipfile.ZipFile(io.BytesIO(data)) as package:
+        return [(info.filename, package.read(info)) for info in package.infolist()]
+
+
+def parts_difference(actual: list[tuple[str, bytes]], expected: list[tuple[str, bytes]]) -> str:
+    """How the parts differ, as the start of a sentence that ends by naming the build;
+    empty when they are the same."""
+    names = [name for name, _ in actual]
+    if names != [name for name, _ in expected]:
+        return f"its parts ({', '.join(names)}) differ from those of"
+    for (name, data), (_, other) in zip(actual, expected):
+        if data != other:
+            return f"{name} (SHA-256 {sha256(data)[:16]}...) differs from"
+    return ""
 
 
 def check_binding(root: Path, commit: str, folder: Path, workbook: Path | None,
@@ -781,7 +869,13 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     except PolicyError as error:
         evidence.findings.append(str(error))
         return evidence
-    check_sources(root, commit, folder, evidence, policy)
+    # Without an export, a given workbook proves identity by rebuild instead.
+    rebuilt = workbook is not None and not (folder / policy.exported).exists()
+    if rebuilt:
+        assert workbook is not None
+        check_rebuild(root, commit, workbook, evidence)
+    else:
+        check_sources(root, commit, folder, evidence, policy)
     # The harness and the suite are read at the paths the policy names, never
     # by file name, so a policy cannot point at a module the commit lacks.
     harness = source_at(root, commit, policy.harness, evidence)
@@ -792,9 +886,10 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     check_logs(folder, suite, evidence, policy)
     if harness:
         check_certification(folder, test_failed_number(harness), evidence, policy)
-    check_host(folder, evidence, policy)
+    check_host(folder, evidence, policy, rebuilt)
     check_results(root, commit, folder, evidence, policy)
-    check_binding(root, commit, folder, workbook, evidence, policy)
+    if not rebuilt:
+        check_binding(root, commit, folder, workbook, evidence, policy)
     if require_binding and evidence.binding == "UNVERIFIED":
         evidence.findings.append("binding UNVERIFIED, but --require-binding needs VERIFIED: "
                                  + "; ".join(evidence.binding_notes))
@@ -829,7 +924,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--commit", required=True, help="the commit the workbook was built from")
     parser.add_argument("--workbook", type=Path,
                         help="the workbook the export came from, checked against "
-                             f"the export manifest named in {POLICY} and its build stamp")
+                             f"the export manifest named in {POLICY} and its build stamp; "
+                             "without an exported folder, compared part by part with a "
+                             "rebuild of the commit")
     parser.add_argument("--require-binding", action="store_true",
                         help="fail unless the binding is VERIFIED (release evidence)")
     parser.add_argument("--root", type=Path, default=ROOT)

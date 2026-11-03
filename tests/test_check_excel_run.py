@@ -26,7 +26,7 @@ import unittest
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
@@ -51,7 +51,7 @@ FORM = {"src/forms/frmFixture.frm": b'VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E
 
 
 def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
-                    with_cases: bool = True) -> tuple[Path, str]:
+                    with_cases: bool = True, with_form: bool = True) -> tuple[Path, str]:
     """A temporary repository whose one commit holds the working tree's modules and
     evidence policy, or ``policy`` in its place, or no policy at all, and with
     ``with_cases`` the working tree's test cases and accuracy contracts."""
@@ -65,7 +65,7 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
         target = root / module.relative_to(SOURCE)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(module.read_bytes().replace(b"\r\n", b"\n"))
-    for name, data in FORM.items():
+    for name, data in FORM.items() if with_form else ():
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(data)
     config = root / check_excel_run.BUILD_CONFIG
@@ -227,6 +227,114 @@ def workbook_bytes(commit: str, clean: bool = True) -> bytes:
     layout = build_workbook.load_layout(SOURCE)
     build = build_workbook.Build(commit, "2026-11-02T10:00:00+01:00", clean, "development", ())
     return build_workbook.package(layout, build, b"not a VBA project")
+
+
+@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+class RebuildTest(unittest.TestCase):
+    """Identity without an export: the workbook equals a rebuild of the commit."""
+
+    # The build stops on a form, so this repository has none.
+    root: ClassVar[Path]
+    commit: ClassVar[str]
+    temporary: ClassVar[tempfile.TemporaryDirectory[str]]
+    workbook: ClassVar[Path]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root, cls.commit = make_repository(with_form=False)
+        cls.temporary = tempfile.TemporaryDirectory(prefix="excel-run-built-")
+        cls.workbook = Path(cls.temporary.name) / "Workbook-development.xlsm"
+        built = build_workbook.build(cls.root, "development", cls.workbook)
+        assert built.clean and built.commit == cls.commit, built
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.temporary.cleanup()
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def automated(self, folder: Path) -> None:
+        """What tools/devbuild/excel_run.py leaves: no export, compile=ON_DEMAND."""
+        shutil.rmtree(folder / POLICY.exported)
+        write_results(folder, results_document(self.commit))
+        (folder / POLICY.host).write_text(HOST.replace("compile=PASS", "compile=ON_DEMAND"),
+                                          encoding="utf-8")
+
+    def checked(self, workbook: Path, change: Callable[[Path], None] | None = None
+                ) -> check_excel_run.Evidence:
+        def apply(folder: Path) -> None:
+            self.automated(folder)
+            if change:
+                change(folder)
+        with evidence(apply) as folder:
+            return check_excel_run.check(self.root, self.commit, folder, workbook,
+                                         require_binding=True)
+
+    def test_a_workbook_equal_to_a_rebuild_is_verified_without_an_export(self) -> None:
+        result = self.checked(self.workbook)
+        self.assertEqual(result.findings, [])
+        self.assertEqual(result.binding, "VERIFIED")
+        self.assertIn("byte-identical", " ".join(result.binding_notes))
+        self.assertEqual(set(result.hashes), set(components(self.root, self.commit)))
+        self.assertIn("Binding: VERIFIED", check_excel_run.report(self.commit, result))
+
+    def repacked(self, name: str, change: Callable[[str, bytes], bytes] = lambda _, data: data,
+                 **options: Any) -> Path:
+        """The workbook's parts written again into a new package with ``options``."""
+        target = Path(self.temporary.name) / name
+        with zipfile.ZipFile(self.workbook) as source, \
+                zipfile.ZipFile(target, "w", **options) as package:
+            for info in source.infolist():
+                package.writestr(info.filename, change(info.filename, source.read(info)))
+        return target
+
+    def test_the_parts_not_the_compression_decide(self) -> None:
+        # Another platform or zlib packs the same parts into other bytes.
+        other = self.repacked("other-compression.xlsm", compression=zipfile.ZIP_DEFLATED,
+                              compresslevel=1)
+        self.assertNotEqual(other.read_bytes(), self.workbook.read_bytes())
+        result = self.checked(other)
+        self.assertEqual((result.findings, result.binding), ([], "VERIFIED"))
+
+    def test_a_changed_part_fails_and_is_named(self) -> None:
+        def project(name: str, data: bytes) -> bytes:
+            return data + b"\0" if name == "xl/vbaProject.bin" else data
+        result = self.checked(self.repacked("changed-project.xlsm", project,
+                                            compression=zipfile.ZIP_DEFLATED))
+        self.assertEqual(result.binding, "FAIL")
+        self.assertTrue(any("xl/vbaProject.bin (SHA-256" in item and
+                            "differs from the development build of" in item
+                            for item in result.findings), result.findings)
+
+    def test_a_package_that_is_not_a_zip_fails(self) -> None:
+        broken = Path(self.temporary.name) / "broken.xlsm"
+        broken.write_bytes(b"not a workbook")
+        result = self.checked(broken)
+        self.assertEqual(result.binding, "FAIL")
+        self.assertTrue(any("not a readable package" in item for item in result.findings),
+                        result.findings)
+
+    def test_a_missing_workbook_fails(self) -> None:
+        result = self.checked(Path(self.temporary.name) / "absent.xlsm")
+        self.assertEqual(result.binding, "FAIL")
+        self.assertTrue(any("missing" in item for item in result.findings), result.findings)
+
+    def test_compile_on_demand_is_accepted_only_with_identity_by_rebuild(self) -> None:
+        def on_demand(folder: Path) -> None:
+            (folder / POLICY.host).write_text(
+                HOST.replace("compile=PASS", "compile=ON_DEMAND"), encoding="utf-8")
+        manual = findings(on_demand)
+        self.assertTrue(any("compile=ON_DEMAND, expected PASS (ON_DEMAND only with identity "
+                            "by rebuild)" in item for item in manual), manual)
+        failed = self.checked(self.workbook, lambda folder: (folder / POLICY.host).write_text(
+            HOST.replace("compile=PASS", "compile=FAIL"), encoding="utf-8"))
+        self.assertTrue(any("compile=FAIL, expected PASS or ON_DEMAND" in item
+                            for item in failed.findings), failed.findings)
+
+    def test_without_an_export_or_a_workbook_the_sources_are_missing(self) -> None:
+        with evidence(self.automated) as folder:
+            result = check_excel_run.check(self.root, self.commit, folder)
+        self.assertTrue(any("not exported from the workbook" in item
+                            for item in result.findings), result.findings)
 
 
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")

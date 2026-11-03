@@ -141,9 +141,9 @@ reads, and it writes none.
 | `examples.log`, `injected.log`, `skipped.log` | `CertifyExamples`, one per mode |
 | `results.json` | `SaveResults`, after the normal run |
 | `certification.log` | `EndCertification` |
-| `exported/` | You: every VBA component exported back from the workbook after the run, each form with its `.frx` |
-| `host.txt` | You: `windows=`, `references=` and `compile=` |
-| `export-manifest.json` | `tools/devbuild/export_manifest.py`: the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
+| `exported/` | By hand only: every VBA component exported back from the workbook after the run, each form with its `.frx`. Without it, `check_excel_run.py --workbook` proves identity by rebuilding the commit |
+| `host.txt` | You, or `tools/devbuild/excel_run.py`: `windows=`, `references=` and `compile=` (`ON_DEMAND` for a run without Trust access) |
+| `export-manifest.json` | By hand only: `tools/devbuild/export_manifest.py`, the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
 
 ## Evidence policy
 
