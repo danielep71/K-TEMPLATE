@@ -63,6 +63,14 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_independent.py`, which **Repository integrity** runs: it runs
+  each independent implementation that `tests/independent/adapters.json`
+  registers for an `IMPL-` source on the test cases, through an adapter that
+  translates each case into the implementation's input, and compares the
+  results with the expected values within their tolerance. It lists the cases
+  an implementation cannot represent, with the reason, and skips an adapter
+  whose implementation is not installed, with a note. The template registers
+  none, so the check passes and says that nothing was cross-checked (#248).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs

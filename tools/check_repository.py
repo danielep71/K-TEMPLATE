@@ -220,6 +220,7 @@ def checks(context: Context) -> list[Check]:
                        "identifiers")],
         Check("test-cases", [python, "tools/check_test_cases.py"]),
         Check("derivations", [python, "tools/check_derivations.py"]),
+        Check("independent-implementations", [python, "tools/check_independent.py"]),
         Check("accuracy", [python, "tools/check_accuracy.py"]),
         Check("changelog", changelog),
         Check("generated-docs", [python, "tools/render_docs.py", "--check"]),
