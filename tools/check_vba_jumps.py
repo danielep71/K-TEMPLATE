@@ -72,7 +72,8 @@ def label_at_start(code: str) -> str | None:
 def statement_jumps(code: str) -> list[tuple[str, str]]:
     """``(operation, target)`` for each jump to a label in one statement.
 
-    ``Resume``, ``Resume Next`` and ``On Error GoTo 0`` or ``-1`` name no label;
+    ``Resume``, ``Resume 0``, ``Resume Next`` and ``On Error GoTo 0`` or ``-1`` name no
+    label;
     ``On <expression> GoTo`` and ``GoSub`` name every target of their list.
     """
     jumps: list[tuple[str, str]] = []
@@ -84,7 +85,8 @@ def statement_jumps(code: str) -> list[tuple[str, str]]:
             code[computed.end():]
     for match in JUMP.finditer(code):
         operation, target = match.group(1), match.group(2)
-        if target is None or (operation.casefold() == "resume" and target.casefold() == "next"):
+        if target is None or (operation.casefold() == "resume"
+                              and target.casefold() in {"next", "0"}):
             continue
         if operation.casefold() == "goto" and target in {"0", "-1"} \
                 and ON_ERROR.search(code[:match.start()]):

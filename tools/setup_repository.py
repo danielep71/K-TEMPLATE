@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Apply the portable baseline through an authenticated GitHub CLI (github.com)."""
-# Postponed annotations let the version check in main() run on Python 3.9 and older.
+# Postponed annotations let the version check in main() run on older Python versions.
 from __future__ import annotations
 
 import argparse
@@ -12,7 +12,7 @@ import sys
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 CONFIG = Path(__file__).resolve().parents[1] / 'docs/setup/repository-settings.json'
@@ -30,9 +30,12 @@ SECURITY_PUBLIC_ONLY = {
 ANALYSIS_KEYS = ('secret_scanning', 'secret_scanning_push_protection')
 
 # GitHub API values are JSON; a call takes a method, an endpoint and an optional payload.
+# The aliases appear only in annotations, which are never evaluated, so Python 3.8
+# imports the module and reaches the version check.
 Json = Any
-Call = Callable[..., Json]
-Plan = list[tuple[str, str, Json]]
+if TYPE_CHECKING:
+    Call = Callable[..., Json]
+    Plan = list[tuple[str, str, Json]]
 
 
 class SetupError(Exception):
