@@ -30,6 +30,8 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
 - each project suite the policy lists under "suites": its normal-run log
   holds what the suite writes, passes and is COMPLETE, from the same host,
   and its own certification log records that run and CERTIFICATION=PASS.
+  A policy that names a volume benchmark (a TEST_Benchmark module) as the
+  harness or a suite is rejected.
   Every suite is read as the policy's Office bitness compiles it, so a case
   or assertion inside #If Win64 counts only on the host it runs on;
 - host.txt: the Windows build, the references (exactly those of the policy)
@@ -116,6 +118,9 @@ POLICY = ".github/excel-evidence-policy.json"
 # NORMAL may pass, the others are deliberate failures.
 MODE_KINDS = ("NORMAL", "INJECTED_FAILURE", "SKIPPED_CASE")
 OFFICE_BITNESS = ("64-bit", "32-bit")
+# The module prefix of a volume benchmark, which is never certified evidence
+# (docs/methodology/TEST_HARNESS.md, Volume benchmarks).
+BENCHMARK_PREFIX = "TEST_Benchmark"
 # The compilation environment of check_vba_conditionals.py for each bitness.
 BITNESS_ENVIRONMENT = {"64-bit": "vba7-win64", "32-bit": "vba7-win32"}
 MANIFEST_FORMAT = "vba-export-1"
@@ -243,6 +248,8 @@ def policy_problems(data: dict[str, Any], modes: list[tuple[str, str, Any]],
         if path.is_absolute() or ".." in path.parts or path.suffix != ".bas":
             problems.append(f"{source}: harness and suite sources must be .bas files "
                             "inside the repository")
+        if path.stem.casefold().startswith(BENCHMARK_PREFIX.casefold()):
+            problems.append(f"{source}: a volume benchmark is never certified evidence")
     for suite in (policy, *policy.project_suites):
         for name in ("expected_cases", "expected_assertions"):
             value = getattr(suite, name)

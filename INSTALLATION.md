@@ -123,6 +123,10 @@ ignores, with:
 - the sheets, code names and defined names of the
   [workbook contract](docs/methodology/WORKBOOK_CONTRACT.md), read from
   `tools/devbuild/workbook.json`;
+- the layout of `src/workbook/Template.xlsx`, when the project has one: the
+  build starts from a copy of it and keeps its formats and protection
+  ([build](docs/methodology/WORKBOOK_CONTRACT.md#build)). Without it, the
+  sheets are blank;
 - the build stamp on the reference sheet: the commit, its committer time and
   the configuration. A tracked change, or an untracked file in a source
   directory, adds *NOT evidence-grade* to the commit;

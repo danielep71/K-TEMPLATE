@@ -842,6 +842,8 @@ class PolicyTest(unittest.TestCase):
             "distinct and named": mode(1, "log", "examples.log"),
             "plain names": section("evidence", "host_record", "../host.txt"),
             "inside the repository": section("suite", "source", "/tmp/TEST_Examples.bas"),
+            "never certified evidence": lambda data: data["suites"].append(
+                dict(PROJECT_ENTRY, source="tests/modules/TEST_BenchmarkTotals.bas")),
             "positive integer": section("suite", "expected_cases", 0),
             "listed once each": section("host", "references", []),
             "host office": section("host", "office", "ARM"),
