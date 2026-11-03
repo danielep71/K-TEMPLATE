@@ -9,9 +9,10 @@ IDs). It never computes or compares a value.
 
 A fixture is a JSON file, <case-id>.json, or a file-based case, a directory
 <case-id>/ with a case.json manifest and one subdirectory per variant holding
-input files named as in the data contract. In an invalid case only the harness
-metadata is checked: its calculation inputs, or the content of its files, may
-break any input rule, because that is what the case tests.
+input files named as in the data contract. An invalid case may break any input
+rule, because that is what it tests: in a JSON fixture only the harness
+metadata is checked, and in a file-based case the manifest is checked in full,
+but not the content of its variant files.
 """
 
 from __future__ import annotations

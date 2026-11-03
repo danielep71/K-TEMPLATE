@@ -128,6 +128,18 @@ class ChangelogTest(unittest.TestCase):
         copied = UNRELEASED_ONLY.replace(REPOSITORY, "example/repository-template")
         self.assertFinding(copied, "does not point to example/repository", None, REPOSITORY)
 
+    def test_every_github_link_reference_points_to_the_repository(self) -> None:
+        # Not only the version headings: a copied issue link fails too.
+        foreign = UNRELEASED_ONLY + "[#12]: https://github.com/other/template/issues/12\n"
+        self.assertFinding(foreign, "the link reference for [#12] does not point to "
+                           f"{REPOSITORY}", None, REPOSITORY)
+        self.assertEqual(findings(foreign), [])
+        own = UNRELEASED_ONLY + f"[#12]: https://github.com/{REPOSITORY}/issues/12\n"
+        outside = UNRELEASED_ONLY + "[semver]: https://semver.org/\n"
+        for text in (own, outside):
+            with self.subTest(text=text.splitlines()[-1]):
+                self.assertEqual(findings(text, None, REPOSITORY), [])
+
 
 class ReleaseStateTest(unittest.TestCase):
     def assertFinding(self, found: list[str], text: str) -> None:
