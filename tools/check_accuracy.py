@@ -225,9 +225,11 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
             report.add(at, f"keys are not {', '.join(sorted(CONTRACT_KEYS))}")
             continue
         problems = contract_problems(item)
-        if item["id"] in seen:
-            problems.append("id appears twice")
-        seen.add(str(item["id"]))
+        # A malformed id is already a problem; only a text id can repeat.
+        if isinstance(item["id"], str):
+            if item["id"] in seen:
+                problems.append("id appears twice")
+            seen.add(item["id"])
         for problem in problems:
             report.add(at, problem)
         if problems:
@@ -383,7 +385,12 @@ def read_results(path: Path, root: Path, candidate: str | None,
             report.add(where, f"results[{index}] is not case, variant, quantity, scope and a "
                               "finite value")
             continue
-        key = (str(item["case"]), item["variant"], str(item["quantity"]),
+        if not isinstance(item["case"], str) or not isinstance(item["quantity"], str) or \
+                not isinstance(item["variant"], (str, type(None))):
+            report.add(where, f"results[{index}] case and quantity are not text, or its "
+                              "variant is not text or null")
+            continue
+        key = (item["case"], item["variant"], item["quantity"],
                scope_text(item["scope"]))
         if key in results:
             report.add(where, f"results[{index}] repeats {label(key)}")
