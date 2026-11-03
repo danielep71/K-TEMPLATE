@@ -285,7 +285,6 @@ class ExpectedTest(FindingTest):
             (ref(source="IMPL-01"), "published value needs"),
             (ref(**{"class": "independent"}), "independent value needs"),
             (ref(**{"class": "illustrative"}), "illustrative value needs a derivation"),
-            (ref(script="tools/x.py"), "is not an existing file under tests/derivations/"),
             (ref(script="tests/derivations/missing.py"), "is not an existing file"),
             (ref(date="02/11/2026"), "reference date is not"),
             (ref(derived_by=" "), "derived_by is not a text or null"),
@@ -293,6 +292,16 @@ class ExpectedTest(FindingTest):
         for edit, text in cases:
             with self.subTest(text=text):
                 self.assertFinding(run(edit), text)
+
+    def test_a_script_outside_tests_derivations_is_refused(self) -> None:
+        # The script exists, and so does tests/derivations/ for the ".." path to cross,
+        # so only the location rule can refuse it.
+        files = {"tools/x.py": "print(1000000)\n", "tests/derivations/total.py": "print(1)\n"}
+        for path in ("tools/x.py", "tests/derivations/../../tools/x.py"):
+            with self.subTest(path=path):
+                self.assertFinding(run(lambda f, e: output(e)["reference"].update(script=path),
+                                       extra=files),
+                                   "is not an existing file under tests/derivations/")
 
     def test_existing_derivation_script(self) -> None:
         self.assertEqual(run(lambda f, e: output(e)["reference"].update(

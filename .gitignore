@@ -255,14 +255,32 @@ pnpm-debug.log*
 #------------------------------------------------------------------------------
 # Regulators publish templates and worked examples as workbooks and logs.
 # Byte-preserved copies under docs/methodology/sources/ (see .gitattributes)
-# are evidence, so the Office and log rules above do not apply there. These
-# negations come last so that they override those rules.
+# are evidence, so the Office package rules and the *.log rule above do not
+# apply there: each type ignored under GENERATED OFFICE PACKAGES has its
+# negation here. These negations come last so that they override those rules.
 !/docs/methodology/sources/**/*.xls
 !/docs/methodology/sources/**/*.xlsx
 !/docs/methodology/sources/**/*.xlsm
 !/docs/methodology/sources/**/*.xlsb
+!/docs/methodology/sources/**/*.xlt
+!/docs/methodology/sources/**/*.xltx
+!/docs/methodology/sources/**/*.xltm
+!/docs/methodology/sources/**/*.xla
+!/docs/methodology/sources/**/*.xlam
+!/docs/methodology/sources/**/*.xll
+!/docs/methodology/sources/**/*.xlw
 !/docs/methodology/sources/**/*.docm
+!/docs/methodology/sources/**/*.dotm
 !/docs/methodology/sources/**/*.pptm
+!/docs/methodology/sources/**/*.potm
+!/docs/methodology/sources/**/*.ppsm
+!/docs/methodology/sources/**/*.ppam
+!/docs/methodology/sources/**/*.accdb
+!/docs/methodology/sources/**/*.accde
+!/docs/methodology/sources/**/*.accdr
+!/docs/methodology/sources/**/*.mdb
+!/docs/methodology/sources/**/*.mde
+!/docs/methodology/sources/**/*.ade
 !/docs/methodology/sources/**/*.log
 
 #------------------------------------------------------------------------------

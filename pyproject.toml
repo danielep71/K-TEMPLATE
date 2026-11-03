@@ -1,7 +1,9 @@
 # Quality settings for the repository's Python tooling. The tools and tests
 # need only the Python standard library, plus PyYAML for the workflow control
 # tests; they also run Node.js for the label scripts and git to list files.
-# The setup script also runs the GitHub CLI, and the external link check curl.
+# The setup script and the release check also run the GitHub CLI, and the
+# external link check curl. The optional hosts of tools/devbuild/ are Excel
+# through PowerShell on Windows (excel_run.py) and LibreOffice (lo_smoke.py).
 # Ruff and mypy are CI and development tools, installed from
 # tools/requirements-quality-ci.txt.
 

@@ -49,8 +49,7 @@ class ExampleSuiteTest(unittest.TestCase):
     def test_runner_calls_every_case_once_in_order(self) -> None:
         runner = self.bodies["RunSuite"]
         called = re.findall(r"^\s+(Case\w+)$", runner, re.M)
-        self.assertEqual(sorted(called), sorted(self.cases))
-        self.assertEqual(len(called), len(set(called)))
+        self.assertEqual(called, list(self.cases))
 
     def test_each_case_begins_once_with_a_unique_identifier(self) -> None:
         identifiers = []
@@ -166,6 +165,13 @@ class HarnessTest(unittest.TestCase):
         written = set(re.findall(r'"([A-Z_]+)=', self.text))
         self.assertEqual(documented, written - {"RESET"})
         self.assertIn("RESET=DONE", guide)
+
+    def test_a_refused_start_writes_its_result_last(self) -> None:
+        # The guide: RESULT is always the last record of a run, after RECOVERY.
+        body = procedures(self.text)["BeginRun"]
+        refused = body[body.index("If mRecoveryRequired Then"):body.index("Err.Raise ERR_TEST_DIRTY_START")]
+        self.assertLess(refused.index('Say "RECOVERY=REQUIRED'), refused.index("Say mLastResult"))
+        self.assertEqual(refused.count("Say "), 2)
 
     def test_certification_raises_only_after_writing(self) -> None:
         body = procedures(self.text)["EndCertification"]

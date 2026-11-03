@@ -1,4 +1,5 @@
 import argparse
+import ast
 import copy
 import io
 import json
@@ -338,6 +339,30 @@ class SetupTests(unittest.TestCase):
                 setup.api('GET', 'repos/a/b')
         self.assertIn('HTTP 403', str(caught.exception))
         self.assertNotIn('secret token', str(caught.exception))
+
+
+
+class VersionGuardTests(unittest.TestCase):
+    def test_the_module_imports_on_older_python_versions(self):
+        # main() refuses Python before 3.11 with a message, but only if the module imports
+        # first: a subscripted generic evaluated at import, such as list[str] or
+        # Callable[..., Any], stops Python 3.8 with a TypeError before main() runs.
+        tree = ast.parse(Path(setup.__file__).read_text(encoding='utf-8'))
+        generics = {'list', 'dict', 'tuple', 'set', 'frozenset', 'type'}
+        generics.update(alias.asname or alias.name for node in tree.body
+                        if isinstance(node, ast.ImportFrom)
+                        and node.module in {'collections.abc', 'typing'}
+                        for alias in node.names)
+        evaluated = []
+        for node in tree.body:
+            if isinstance(node, ast.If) and ast.unparse(node.test) == 'TYPE_CHECKING':
+                continue
+            values = [node.value] if isinstance(node, (ast.Assign, ast.AnnAssign)) and \
+                node.value is not None else []
+            evaluated.extend(ast.unparse(item) for value in values for item in ast.walk(value)
+                             if isinstance(item, ast.Subscript)
+                             and isinstance(item.value, ast.Name) and item.value.id in generics)
+        self.assertEqual(evaluated, [])
 
 
 if __name__ == '__main__':
