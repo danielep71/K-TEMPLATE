@@ -77,6 +77,13 @@ class BinaryCheckTest(unittest.TestCase):
         self.assertFinding(self.repository({"payload.bin": b"\0\1\2"}),
                            "payload.bin: binary content")
 
+    def test_nul_byte_late_in_a_text_file_fails(self) -> None:
+        # Git reads only the first 8000 bytes, so it treats this file as text.
+        late = b"x" * 9000 + b"\0" + b"y" * 100
+        self.assertFinding(self.repository({"late.txt": late}), "late.txt")
+        tail = b"x" * (1 << 16) + b"\0"  # the NUL in the second chunk read
+        self.assertFinding(self.repository({"tail.txt": tail}), "tail.txt")
+
     def test_allowlist(self) -> None:
         digest = hashlib.sha256(PNG).hexdigest()
         entry = {"sha256": digest, "reason": "Social preview image"}
