@@ -182,6 +182,14 @@ milestones and their pull requests.
 
 ### Changed
 
+- **Repository integrity** cancels the run of a pull request commit that a
+  newer commit replaces; a push run is never cancelled. CI runs
+  `tools/check_repository.py` with `--ci`, which fails when, after the
+  checks, the working tree differs from the commit. mypy checks `tests/` as
+  well as `tools/`; four unannotated test files need no annotations, but their
+  code is checked. The bug form has an optional field for evidence, a
+  workaround and recovery, and the enhancement form one for alternatives
+  considered (#251).
 - mypy also reports unreachable code (`warn_unreachable`), such as a branch
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,

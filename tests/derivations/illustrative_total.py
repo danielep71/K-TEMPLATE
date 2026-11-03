@@ -11,7 +11,7 @@ import sys
 from decimal import Decimal
 
 
-def main(path):
+def main(path: str) -> None:
     with open(path, encoding="utf-8") as handle:
         fixture = json.load(handle, parse_float=Decimal, parse_int=Decimal)
     total = sum((record["inputs"]["notional_amount"]

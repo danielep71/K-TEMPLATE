@@ -169,7 +169,7 @@ class FixtureTest(FindingTest):
                                  ("reporting_date", "2026-02-30", "reporting_date is not"),
                                  ("reporting_currency_code", "eur", "is not a currency code")):
             with self.subTest(key=key):
-                self.assertFinding(run(lambda f, e, k=key, v=value: f.update({k: v})), text)
+                self.assertFinding(run(lambda f, e: f.update({key: value})), text)
 
     def test_missing_and_unknown_keys(self) -> None:
         self.assertFinding(run(lambda f, e: f.pop("datasets")), "missing datasets")
@@ -251,7 +251,7 @@ class ExpectedTest(FindingTest):
                                  ("tolerance", {"absolute": 0}, "exactly absolute and relative"),
                                  ("tolerance", {"absolute": -1, "relative": 0}, "at least 0")):
             with self.subTest(key=key):
-                self.assertFinding(run(lambda f, e, k=key, v=value: output(e).update({k: v})),
+                self.assertFinding(run(lambda f, e: output(e).update({key: value})),
                                    text)
         self.assertFinding(run(lambda f, e: output(e).pop("tolerance")), "missing tolerance")
         self.assertFinding(run(lambda f, e: output(e).update(text=1)), "unknown")

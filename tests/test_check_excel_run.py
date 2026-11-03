@@ -259,7 +259,7 @@ class RebuildTest(unittest.TestCase):
         (folder / POLICY.host).write_text(HOST.replace("compile=PASS", "compile=ON_DEMAND"),
                                           encoding="utf-8")
 
-    def checked(self, workbook: Path, change: Callable[[Path], None] | None = None
+    def checked(self, workbook: Path, change: Callable[[Path], object] | None = None
                 ) -> check_excel_run.Evidence:
         def apply(folder: Path) -> None:
             self.automated(folder)
@@ -655,8 +655,7 @@ class ResultsTest(unittest.TestCase):
     def test_a_marked_or_missing_stamp_fails(self) -> None:
         for commit in (COMMIT + "+local-changes", ""):
             with self.subTest(commit=commit):
-                found = self.changed(lambda document, commit=commit: document.update(
-                    commit=commit))
+                found = self.changed(lambda document: document.update(commit=commit))
                 self.assertIn("commit is not a full lower-case commit SHA", " ".join(found))
 
     def test_a_missing_or_wrong_result_fails(self) -> None:

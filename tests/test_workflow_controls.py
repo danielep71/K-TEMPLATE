@@ -5,6 +5,9 @@ The parser is pinned in .github/requirements.txt; install it with
 are skipped locally and fail in GitHub Actions.
 """
 
+# mypy checks the bodies of these tests but does not require them to be annotated.
+# mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
+
 import os
 import re
 import sys
@@ -146,7 +149,7 @@ def pin_problems(root=ROOT):
     reusable workflow must exist in .github/workflows; a local action is followed
     into its action.yml, recursively and once."""
     problems = []
-    seen = set()
+    seen: set[Path] = set()
     for path in workflow_paths(root):
         source = Source(path.read_text(encoding='utf-8'))
         document = load_text(source.text) or {}
@@ -298,6 +301,23 @@ class WorkflowControlTests(unittest.TestCase):
         # settings file against it while the setup tooling is kept.
         self.assertEqual(job['name'], REQUIRED_CHECK)
 
+    def test_every_workflow_declares_concurrency(self):
+        for name, document in workflows().items():
+            with self.subTest(workflow=name):
+                self.assertTrue(document.get('concurrency', {}).get('group'))
+                self.assertIn('cancel-in-progress', document['concurrency'])
+
+    def test_integrity_cancels_only_a_superseded_pull_request_run(self):
+        concurrency = workflows()[REQUIRED_JOB[0]]['concurrency']
+        # A pull request's runs share a group; every other run, a push to a
+        # protected branch included, has its own and is never cancelled.
+        self.assertIn("github.event_name == 'pull_request'", concurrency['group'])
+        self.assertIn('github.event.pull_request.number', concurrency['group'])
+        self.assertIn('github.run_id', concurrency['group'])
+        self.assertNotIn('github.ref', concurrency['group'])
+        self.assertEqual(concurrency['cancel-in-progress'],
+                         "${{ github.event_name == 'pull_request' }}")
+
     def test_live_label_reconciliation_runs_only_on_the_default_branch(self):
         condition = workflows()['labels-sync.yml']['jobs']['reconcile']['if']
         self.assertIn("github.event_name != 'pull_request'", condition)
@@ -407,7 +427,9 @@ class WorkflowControlTests(unittest.TestCase):
             'DEFAULT_BRANCH': '${{ github.event.repository.default_branch }}',
             'PR_HEAD_SHA': '${{ github.event.pull_request.head.sha }}'})
         # The default branch lets the run check that CodeQL covers it.
-        for argument in ('tools/check_repository.py --strict', '--repository "$GITHUB_REPOSITORY"',
+        # --ci fails a working tree that an earlier step or a check changed.
+        for argument in ('tools/check_repository.py --strict', '--ci',
+                         '--repository "$GITHUB_REPOSITORY"',
                          '--default-branch "$DEFAULT_BRANCH"', '--template "$IS_TEMPLATE"',
                          '--summary "$GITHUB_STEP_SUMMARY"'):
             self.assertIn(argument, step['run'])
@@ -472,8 +494,10 @@ class WorkflowControlTests(unittest.TestCase):
         # Floating versions let a new patch release change CI without a commit.
         exact = re.compile(r'^\d+\.\d+\.\d+$')
         minimum_job = ('repository-integrity.yml', 'minimum-python')
-        minimum = re.search(r'^python_version = "(\d+\.\d+)"$',
-                            (ROOT / 'pyproject.toml').read_text(encoding='utf-8'), re.M).group(1)
+        floor = re.search(r'^python_version = "(\d+\.\d+)"$',
+                          (ROOT / 'pyproject.toml').read_text(encoding='utf-8'), re.M)
+        assert floor, 'pyproject.toml sets no python_version'
+        minimum = floor.group(1)
         python, node = set(), set()
         for name, document in workflows().items():
             for job_id, job in document['jobs'].items():
@@ -543,7 +567,9 @@ class FakeGitHub:
 
     def __call__(self, method, path, data=None):
         if path.startswith('/repos/o/r/pulls?'):
-            page = int(re.search(r'[?&]page=(\d+)', path).group(1))
+            match = re.search(r'[?&]page=(\d+)', path)
+            assert match, path
+            page = int(match.group(1))
             pulls = [item for item in self.items.values() if 'pull_request' in item]
             return pulls[(page - 1) * 100:page * 100]
         number = int(path.rsplit('/', 1)[1])

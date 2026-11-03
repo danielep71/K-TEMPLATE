@@ -48,6 +48,14 @@ body:
       required: true
 
   - type: textarea
+    id: alternatives
+    attributes:
+      label: "🔀 Alternatives considered"
+      description: Optional. Other ways to meet the need, doing nothing included, and why you prefer the requested behavior.
+    validations:
+      required: false
+
+  - type: textarea
     id: scope
     attributes:
       label: "📐 Scope and non-goals"

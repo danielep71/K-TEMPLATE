@@ -91,7 +91,10 @@ blocks between `BEGIN generated` and `END generated` markers from the code;
 **Repository integrity** fails while one differs from a fresh render. Edit
 the renderer in `tools/render_docs.py`, never the block. A check whose tool or GitHub
 context is missing locally, such as Ruff or the default branch, is reported as
-skipped; `--strict` fails it instead, as CI does. To run a single check, use
+skipped; `--strict` fails it instead, as CI does. CI also passes `--ci`, which
+adds a last check, `clean-working-tree`: it fails when a file is changed,
+deleted, or added and not ignored, so that the results describe the commit
+itself. To run a single check, use
 its own command, for example `python -m unittest discover -s tests` or
 `python tools/format_vba.py --check`.
 

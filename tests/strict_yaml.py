@@ -6,16 +6,20 @@ use. The workflow control tests and Repository integrity read the workflows,
 Dependabot's configuration and the issue forms through this loader.
 """
 
+from typing import Any
+
 import yaml
 
 
-class StrictLoader(yaml.SafeLoader):
+# PyYAML has no type information, so mypy sees its loader as Any.
+class StrictLoader(yaml.SafeLoader):  # type: ignore[misc]
     """A safe loader whose mappings fail on a repeated key."""
 
 
-def construct_unique_mapping(loader, node, deep=False):
+def construct_unique_mapping(loader: StrictLoader, node: Any,
+                             deep: bool = False) -> Any:
     loader.flatten_mapping(node)
-    seen = set()
+    seen: set[Any] = set()
     for key_node, _ in node.value:
         key = loader.construct_object(key_node, deep=deep)
         if key in seen:
@@ -30,6 +34,6 @@ StrictLoader.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG,
                              construct_unique_mapping)
 
 
-def load(text):
+def load(text: str) -> Any:
     """Parse one YAML document; a duplicate key raises yaml.YAMLError."""
     return yaml.load(text, Loader=StrictLoader)
