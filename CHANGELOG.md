@@ -63,6 +63,17 @@ milestones and their pull requests.
 
 ### Added
 
+- A machine-readable data contract, `docs/methodology/data-contract.json`,
+  holds each dataset's file or sheet, encoding and delimited-text format, and
+  each field's type, unit or currency field, required flag and allowed values
+  or range. The *Datasets* table and the field tables of `DATA_CONTRACT.md`
+  are rendered from it, and **Repository integrity** fails while they differ.
+  `tools/check_data_contract.py`, which it runs, checks the contract and, with
+  `--dataset`, validates input files against it, reporting each finding with a
+  stable code such as `DC-TYPE` or `DC-MISSING-COLUMN`.
+  `tools/check_test_cases.py` now runs that validator on every variant file of
+  a file-based case outside an `invalid` case. The illustrative dataset `DS-01`
+  lists the three columns its example file already holds (#238).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs
