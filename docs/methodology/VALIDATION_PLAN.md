@@ -67,7 +67,7 @@ and to the test cases that test it, with its validation status:
 
 | Status | Meaning | The row names |
 | --- | --- | --- |
-| Validated | A `published` or `independent` case passes for the rule on an Excel run of the release candidate ([completeness policy](TEST_CASES.md#completeness-policy)) | A procedure, and at least one `published` or `independent` case |
+| Validated | A `published` or `independent` case passes for the rule on an Excel run of the release candidate ([completeness policy](TEST_CASES.md#completeness-policy)) | A procedure, and a case with a `published` or `independent` output whose `rule` is the row's step |
 | Exercised | Cases run the rule, but none is a `published` or `independent` case that passed: they are `illustrative`, or the reference cases have not passed yet | A procedure and at least one case |
 | Not validated | Implemented, but no case tests it | A procedure and no case |
 | Not implemented | No procedure implements it yet; its cases may come first | No procedure |

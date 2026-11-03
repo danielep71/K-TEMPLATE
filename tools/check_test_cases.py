@@ -127,6 +127,8 @@ class Case:
     # A file-based case: its datasets and variants; its records are not listed.
     variants: set[str] | None = None
     classes: set[str] = field(default_factory=set)
+    # The reference classes of the outputs of each calculation step, by rule.
+    step_classes: dict[str, set[str]] = field(default_factory=dict)
     expected_files: int = 0
 
 
@@ -665,6 +667,9 @@ def check_output(output: object, case_id: str, case: Case, method: Methodology,
     problems.extend(reference_problems(reference, method.sources, root))
     if isinstance(kind, str):
         case.classes.add(kind)
+        rule = output["rule"]
+        if isinstance(rule, str) and RULE.match(rule):
+            case.step_classes.setdefault(rule, set()).add(kind)
     return problems
 
 
@@ -841,7 +846,7 @@ def case_problems(listed: list[str] | None, calculation: str | None,
     return problems
 
 
-def status_problem(status: str, names: list[str], listed: list[str],
+def status_problem(status: str, step: str | None, names: list[str], listed: list[str],
                    cases: Mapping[str, Case]) -> str | None:
     """Why a row's status contradicts the procedures and cases it names, if it does."""
     if status not in STATUSES:
@@ -852,10 +857,13 @@ def status_problem(status: str, names: list[str], listed: list[str],
         return "a rule with test cases is not 'Not validated'"
     if status in ("Exercised", "Validated") and not listed:
         return f"status {status!r} needs a test case"
+    # Validated needs reference evidence for this step: an output whose rule is
+    # the row's step, with a published or independent value.
     if status == "Validated" and not any(
-            case_id in cases and cases[case_id].classes & {"published", "independent"}
-            for case_id in listed):
-        return "status 'Validated' needs a published or independent test case"
+            case_id in cases and cases[case_id].step_classes.get(step or "", set())
+            & {"published", "independent"} for case_id in listed):
+        return (f"status 'Validated' needs a test case with a published or independent "
+                f"output for {step}")
     return None
 
 
@@ -863,6 +871,8 @@ def trace_problems(row: TraceRow, cases: Mapping[str, Case], method: Methodology
                    procedures: Mapping[str, set[str]]) -> list[str]:
     """What is wrong with one row of the Traceability table."""
     problems, calculation = guide_problems(row, method)
+    steps = CODE_SPAN.findall(row.cells["Calculation step"])
+    step = steps[0] if calculation and len(steps) == 1 else None
     names = named(row.cells["VBA procedure"])
     listed = named(row.cells["Test cases"])
     problems += procedure_problems(names, procedures)
@@ -870,7 +880,7 @@ def trace_problems(row: TraceRow, cases: Mapping[str, Case], method: Methodology
     # A status is compared with the row only once both cells could be read.
     status = row.cells["Status"]
     if names is not None and listed is not None:
-        problem = status_problem(status, names, listed, cases)
+        problem = status_problem(status, step, names, listed, cases)
         problems += [problem] if problem else []
     elif status not in STATUSES:
         problems.append(f"status {status!r} is not one of {', '.join(sorted(STATUSES))}")

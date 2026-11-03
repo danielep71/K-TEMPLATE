@@ -397,7 +397,21 @@ class TraceabilityTest(FindingTest):
         self.assertEqual(run(extra=plan(no_case.replace("Validated", "Not validated"))), [])
         self.assertFinding(run(illustrative, name="illustrative-one", extra=plan(
             traced("Test cases", "`illustrative-one`"))),
-            "'Validated' needs a published or independent test case")
+            "'Validated' needs a test case with a published or independent output for "
+            "CALC-02.1")
+
+    def test_validated_needs_reference_evidence_for_its_own_step(self) -> None:
+        def two_steps(f: dict[str, Any], e: dict[str, Any]) -> None:
+            second = copy.deepcopy(OUTPUT)
+            second.update(quantity="average_notional_amount", rule="CALC-02.2")
+            second["reference"].update({"class": "illustrative", "source": None,
+                                        "locator": None, "derivation": "Example"})
+            e["outputs"].append(second)
+        # case-one holds a published output for CALC-02.1 only.
+        self.assertFinding(run(two_steps, extra=plan(traced("Calculation step", "`CALC-02.2`"))),
+                           "'Validated' needs a test case with a published or independent "
+                           "output for CALC-02.2")
+        self.assertEqual(run(two_steps, extra=plan(TRACED)), [])
 
     def test_an_invalid_case_is_compared_when_its_calculation_is_checked(self) -> None:
         row = ("| *Illustrative:* `SRC-01` | Article 1(1) | `CALC-01.1` "
