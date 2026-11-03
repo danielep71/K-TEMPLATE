@@ -49,7 +49,14 @@ from check_vba_identifiers import (
     scan,
     top_level_split,
 )
-from vba_lexer import Finding, read_component, report, strip_code, tracked_components
+from vba_lexer import (
+    Finding,
+    date_delimiter,
+    read_component,
+    report,
+    strip_code,
+    tracked_components,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 HEAD = re.compile(rf"^\s*(?:(?P<call>Call)\s+)?(?:(?P<qualifier>{NAME})\.)?(?P<name>{NAME})"
@@ -232,16 +239,35 @@ def argument_problems(parameters: list[Parameter], arguments: str) -> list[str]:
     return problems
 
 
+def dates_as_values(code: str) -> str:
+    """``code`` with each date literal, such as #January 1, 2020#, replaced by
+    zeros, so that its comma separates no arguments. A # type suffix, as in
+    Amount# or 2#, opens no literal; strings must already be replaced."""
+    result = list(code)
+    in_date = False
+    for index, char in enumerate(code):
+        if char == "#" and date_delimiter(code, index, in_date):
+            in_date = not in_date
+            result[index] = "0"
+        elif in_date:
+            result[index] = "0"
+    return "".join(result)
+
+
 def literals_as_values(source: str) -> str:
-    """``source`` with each string literal of its code replaced by zeros.
+    """``source`` with each string and date literal of its code replaced by zeros.
 
     The identifier scan blanks string literals, so that ``Proc "a", , "c"``
     would read as three omitted arguments; a literal of the same length that
-    is not a string keeps each argument visible and every column in place."""
+    is not a string keeps each argument visible and every column in place.
+    A conditional-compilation line, such as #If VBA7 Then, is left as it is."""
     lines = []
     for raw in source.split("\n"):
         code = strip_code(raw)
-        lines.append(STRING.sub(lambda match: "0" * len(match.group()), code) + raw[len(code):])
+        values = STRING.sub(lambda match: "0" * len(match.group()), code)
+        if not values.lstrip().startswith("#"):
+            values = dates_as_values(values)
+        lines.append(values + raw[len(code):])
     return "\n".join(lines)
 
 

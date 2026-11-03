@@ -1597,6 +1597,18 @@ class CallTest(unittest.TestCase):
                 self.assertIn(text, findings[0])
                 self.assertTrue(findings[0].startswith("tests/modules/TEST_Fixture.bas:6: "))
 
+    def test_date_literals_and_type_suffixes(self) -> None:
+        # A comma inside a date literal separates no arguments; a # type
+        # suffix opens no date literal, so the arguments after it still count.
+        valid = ("\nPublic Sub Run()\n        Dim Amount As Double\n"
+                 "        Pair #January 1, 2020#, 2\n        Pair Amount#, 2#\n"
+                 "        Debug.Print Scaled(#1/2/2020#, 1#)\nEnd Sub\n")
+        self.assertEqual(run_check(check_vba_calls.check, self.files(valid)), [])
+        invalid = valid.replace("Pair Amount#, 2#", "Pair Amount#, 2#, #3/4/2020#")
+        findings = run_check(check_vba_calls.check, self.files(invalid))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("3 argument(s) passed, at most 2 accepted", findings[0])
+
     def test_with_block_members_are_not_calls(self) -> None:
         body = ("\nPublic Sub Run()\n        With New Collection\n            .Pair = 1\n"
                 "            .Pair 1, 2, 3\n            .Hidden\n"
