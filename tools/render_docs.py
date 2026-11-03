@@ -13,7 +13,13 @@ Each NAME has a renderer here that computes the block from the repository:
   end with, read from the suite that .github/excel-evidence-policy.json names
   by the same code that checks Excel-run evidence (tools/check_excel_run.py);
 - integrity-checks, in CONTRIBUTING.md: the checks that
-  tools/check_repository.py runs, in order, with what each runs.
+  tools/check_repository.py runs, in order, with what each runs and whether
+  it is advisory;
+- data-contract-datasets and data-contract-fields, in
+  docs/methodology/DATA_CONTRACT.md: the Datasets table and one field table
+  per dataset, read from docs/methodology/data-contract.json by the code that
+  validates input files against it (tools/check_data_contract.py);
+- data-contract-codes, in the same guide: the finding codes of that validator.
 
 --check fails when a block differs from a fresh render, when its markers are
 missing, unbalanced or repeated, or when a marker names no renderer. --write
@@ -31,6 +37,7 @@ from pathlib import Path, PureWindowsPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import check_data_contract  # noqa: E402
 import check_excel_run  # noqa: E402
 import check_repository  # noqa: E402
 
@@ -112,13 +119,75 @@ def integrity_checks(root: Path) -> str:
                                  "docstring to describe it")
             summary = lines[0]
             runs = f"Built in: {summary}"
+        if check.advisory:
+            runs += " (advisory: findings warn, never fail the run)"
         rows.append(f"| `{check.name}` | {runs} |")
     return "\n".join(["| Check | Runs |", "| --- | --- |", *rows])
 
 
+def contract_datasets(root: Path) -> list[check_data_contract.Dataset]:
+    datasets, problems = check_data_contract.load(root)
+    if problems:
+        raise ValueError(f"{problems[0]}; python tools/check_data_contract.py lists every "
+                         "problem")
+    return datasets
+
+
+def illustrative(dataset: check_data_contract.Dataset) -> str:
+    return "*Illustrative:* " if dataset.illustrative else ""
+
+
+def data_contract_datasets(root: Path) -> str:
+    """The Datasets table of the data contract."""
+    rows = [f"| {illustrative(d)}`{d.id}` | {d.description} | {d.provider} | {d.frequency} | "
+            f"{d.granularity} | `{d.source}` | {f'`{d.encoding}`' if d.encoding else ''} |"
+            for d in contract_datasets(root)]
+    return "\n".join(["| ID | Description | Provider | Frequency | Granularity | File or sheet "
+                      "| Encoding |", "| --- | --- | --- | --- | --- | --- | --- |", *rows])
+
+
+def read_from(dataset: check_data_contract.Dataset) -> str:
+    """Where a dataset is read from, and how, in one sentence."""
+    if dataset.delimiter is not None:
+        between = "a tab" if dataset.delimiter == "\t" else f"`{dataset.delimiter}`"
+        encoding = dataset.encoding or check_data_contract.DEFAULT_ENCODING
+        return (f"Read from `{dataset.source}`, delimited text in `{encoding}`, with {between} "
+                f"between cells and `{dataset.decimal_separator}` as the decimal separator.")
+    if dataset.is_file:
+        return (f"Read from `{dataset.source}`, which is not delimited text: the reference "
+                "validator does not read it.")
+    return f"Read from the sheet `{dataset.source}`."
+
+
+def data_contract_fields(root: Path) -> str:
+    """One field table per dataset, under a heading naming the dataset."""
+    parts = []
+    for dataset in contract_datasets(root):
+        rows = [f"| {illustrative(dataset)}`{field.name}` | "
+                f"{check_data_contract.TYPE_NAMES[field.type]} | "
+                f"{check_data_contract.unit_text(field)} | {'Yes' if field.required else 'No'} | "
+                f"{check_data_contract.allowed_text(field)} | {field.notes} |"
+                for field in dataset.fields]
+        parts += [f"### {illustrative(dataset)}`{dataset.id}` {dataset.description}", "",
+                  read_from(dataset), "",
+                  "| Field | Type | Unit or currency | Required | Allowed values or range | Notes |",
+                  "| --- | --- | --- | --- | --- | --- |", *rows, ""]
+    return "\n".join(parts[:-1])
+
+
+def data_contract_codes(root: Path) -> str:
+    """The finding codes of the reference validator."""
+    rows = [f"| `{code}` | {meaning} |" for code, meaning in check_data_contract.CODES.items()]
+    return "\n".join(["| Code | Finding |", "| --- | --- |", *rows])
+
+
+CONTRACT_GUIDE = "docs/methodology/DATA_CONTRACT.md"
 BLOCKS: dict[str, Block] = {
     "example-suite-results": Block("INSTALLATION.md", example_suite_results),
     "integrity-checks": Block("CONTRIBUTING.md", integrity_checks),
+    "data-contract-datasets": Block(CONTRACT_GUIDE, data_contract_datasets),
+    "data-contract-fields": Block(CONTRACT_GUIDE, data_contract_fields),
+    "data-contract-codes": Block(CONTRACT_GUIDE, data_contract_codes),
 }
 
 
@@ -172,7 +241,11 @@ def run(root: Path, write: bool) -> list[str]:
         updated = text
         for name in sorted((n for n in expected if n in spans), key=lambda n: -spans[n][0]):
             begin, end = spans[name]
-            fresh = "\n" + BLOCKS[name].render(root) + "\n"
+            try:
+                fresh = "\n" + BLOCKS[name].render(root) + "\n"
+            except ValueError as error:
+                problems.append(f"{path}: block {name} cannot be rendered: {error}")
+                continue
             if updated[begin:end] != fresh:
                 if write:
                     updated = updated[:begin] + fresh + updated[end:]

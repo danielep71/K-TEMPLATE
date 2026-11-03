@@ -47,7 +47,7 @@ A release has two parts, each decided separately:
 | Part | Steps | Effect |
 | --- | --- | --- |
 | **Preparation** | 1 to 5 | Changes only the repository: the dated changelog section, `VERSION`, the integration into the default branch and the evidence. It can stop at any point and publishes nothing. |
-| **Publication** | 6 and 7 | Creates the tag and the GitHub Release. A tag that may have been fetched is never moved or deleted. |
+| **Publication** | 6 to 8 | Creates the tag and the GitHub Release, and checks what a user downloads. A tag that may have been fetched is never moved or deleted. |
 
 <a id="release-invariants"></a>
 
@@ -217,14 +217,84 @@ attestation and no release.
 
 Review the draft release that the **Release** workflow created. Title it
 `vX.Y.Z - <milestone title>`, and add the evidence summary to its notes.
-Attach any other artifact the certification record lists, such as a built
-workbook, with its SHA-256. Then publish it. When the bundle is attested,
+Attach any other artifact the certification record lists, such as the
+production workbook built from the candidate or the
+[user manual](#user-manual) PDF, with its SHA-256. Then publish it. When the bundle is attested,
 check that `gh attestation verify <bundle> --repo OWNER/REPOSITORY` succeeds
 for it. Then check that:
 
 - a fresh clone of the tag passes the commands of step 3;
 - the release page names the tag and the candidate SHA;
 - each attached artifact's SHA-256 matches the record.
+
+### 8. Verify the published workbook
+
+When the release attaches a workbook, check it as a user gets it, and record
+the results in the *Published workbook* section of the
+[release certification](docs/release/RELEASE_CERTIFICATION.md):
+
+- **Binding.** The attached workbook is the production build of the
+  candidate, as the development workbook is bound in step 4. Its build stamp
+  names the candidate's full SHA and `production`, without
+  *NOT evidence-grade*. From a clean checkout of the tag, rebuild it:
+
+  ```sh
+  python tools/devbuild/build_workbook.py --configuration production
+  ```
+
+  The SHA-256 of `test-results/build/Workbook-production.xlsm` must equal the
+  attached workbook's. If they differ, unzip both packages and compare their
+  parts: another platform's zlib can compress the same parts into other
+  bytes, but any difference in a part fails the check.
+  `tools/check_excel_run.py --require-binding` proves this binding only for
+  the development workbook of an Excel run.
+- **Download.** Download the workbook from the release page, as a user
+  would. Before unblocking it, check that its SHA-256 matches the record.
+  Unblock it as your organization's policy allows, without changing a macro
+  setting, and open it on the [supported host](INSTALLATION.md#%EF%B8%8F-host-policy):
+  - **Edit Links** (or **Workbook Links**) on the **Data** tab lists no link
+    to another workbook;
+  - **Formulas → Name Manager** shows the names of the
+    [workbook contract](docs/methodology/WORKBOOK_CONTRACT.md#defined-names),
+    and none that refers to `#REF!`;
+  - on a copy, each operation the workbook contract lists runs on synthetic
+    data; the copy is saved, closed and reopened, and opens with no error,
+    still without broken links or `#REF!` names.
+- **Manual.** If a [user manual](#user-manual) PDF is attached, download it
+  too: its SHA-256 matches the record, and it opens and names version
+  `X.Y.Z`.
+
+If a check fails, do not replace the asset: follow *After publication* under
+[Recovery](#-recovery).
+
+<a id="user-manual"></a>
+
+## 📘 User manual
+
+A recipient who gets only the workbook, not the repository, needs a manual
+for the version they hold. It is optional; by convention it lives under
+`docs/user-manual/`, one folder per released version,
+`docs/user-manual/X.Y.Z/MANUAL.md`, with any image beside it. Create the
+folder with the manual itself, never as an empty placeholder. Start a
+version's folder from a copy of the previous one, and describe only the
+workbook of that version: what it calculates and its limits, the supported
+host, how to open it under a macro policy, its inputs, operations, outputs
+and failure messages, how to read its build stamp, and how to report a
+problem. Use synthetic data in examples and screenshots; an image needs an
+entry in `.github/binary-allowlist.json`.
+
+The PDF is built with the certification (step 4), attached to the release
+in step 7, and never committed. The template installs no PDF tool: choose one and record it, with its version, in
+the certification record. With [Pandoc](https://pandoc.org/) and a PDF engine
+it uses, such as a LaTeX distribution, from a clean checkout of the
+candidate:
+
+```sh
+pandoc docs/user-manual/X.Y.Z/MANUAL.md --resource-path docs/user-manual/X.Y.Z \
+  -o test-results/<repository>-X.Y.Z-user-manual.pdf
+```
+
+Before attaching it, check that it opens and names version `X.Y.Z`.
 
 ## 🗂️ Evidence record
 
@@ -235,6 +305,7 @@ Keep with the release, in its certification issue and the release notes:
 - the Excel run, with the host it names;
 - the distribution review;
 - the tag name and its target;
+- the checks of the published workbook and the user manual, if attached;
 - every deviation.
 
 Logs and artifacts expire, so copy the decisive lines.
@@ -267,3 +338,4 @@ Logs and artifacts expire, so copy the decisive lines.
 | 8 | I decided to publish | ☐ |
 | 9 | Annotated tag on the candidate | ☐ |
 | 10 | GitHub Release published from the tag and verified | ☐ |
+| 11 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |

@@ -72,8 +72,9 @@ REDIM = re.compile(r"^\s*ReDim\s+(?:Preserve\s+)?(?P<list>.*)$", re.I)
 # What may follow a declared name: bounds, a type and a value, nothing else.
 DECLARED_REST = r"\s*(?:\(.*\))?\s*(?:As\s+\S.*?)?\s*(?:=.*)?"
 DECLARED_ITEM = re.compile(rf"\s*(?:WithEvents\s+)?(?P<name>{NAME}){SUFFIX}{DECLARED_REST}", re.I)
-PARAMETER = re.compile(rf"\s*(?:Optional\s+)?(?:(?:ByVal|ByRef)\s+)?(?:ParamArray\s+)?"
-                       rf"(?P<name>{NAME}){SUFFIX}{DECLARED_REST}", re.I)
+PARAMETER = re.compile(rf"\s*(?P<optional>Optional\s+)?(?:(?:ByVal|ByRef)\s+)?"
+                       rf"(?P<paramarray>ParamArray\s+)?(?P<name>{NAME}){SUFFIX}{DECLARED_REST}",
+                       re.I)
 ENUM_MEMBER = re.compile(rf"^\s*(?:\[(?P<bracketed>[^\]]+)\]|(?P<name>{NAME}))\s*(?:=.*)?$")
 # The controls of a form, declared in its header: Begin <ProgID> <Name>.
 FORM_CONTROL = re.compile(rf"^\s*Begin\s+\S+\s+(?P<name>{NAME})\s*$", re.I)
@@ -147,14 +148,26 @@ KEYWORDS = frozenset("""
 """.split())
 
 
+@dataclass(frozen=True)
+class Parameter:
+    name: str
+    optional: bool
+    paramarray: bool
+
+
 @dataclass
 class Procedure:
     name: str
     kind: str
     line: int
+    public: bool = True
+    # None when the parameter list cannot be read.
+    parameters: list[Parameter] | None = field(default_factory=list)
     names: set[str] = field(default_factory=set)
     assignments: list[tuple[int, str]] = field(default_factory=list)
     calls: list[tuple[int, str]] = field(default_factory=list)
+    # Every statement of the body, for checks that read more than names.
+    body: list[tuple[int, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -251,6 +264,7 @@ def parameters(module: Module, line: int, procedure: Procedure, rest: str) -> No
     end = closing_parenthesis(rest, 0)
     inner = rest[1:end] if end is not None else None
     if inner is None:
+        procedure.parameters = None
         module.findings.append(Finding(module.path, line, f"cannot read the parameters of "
                                                           f"{procedure.name}"))
         return
@@ -259,11 +273,16 @@ def parameters(module: Module, line: int, procedure: Procedure, rest: str) -> No
     for item in top_level_split(inner):
         match = PARAMETER.fullmatch(item)
         if not match:
+            procedure.parameters = None
             module.findings.append(Finding(module.path, line, f"cannot read the parameter "
                                                               f"{item.strip()!r} of "
                                                               f"{procedure.name}"))
             continue
         procedure.names.add(match.group("name").casefold())
+        if procedure.parameters is not None:
+            procedure.parameters.append(Parameter(match.group("name"),
+                                                  bool(match.group("optional")),
+                                                  bool(match.group("paramarray"))))
         module.declared.append((line, match.group("name"), "parameter"))
 
 
@@ -426,9 +445,9 @@ def scan(path: str, source: str) -> Module:
         opener = PROC.match(statement) if not block else None
         if opener:
             kind = re.sub(r"\s+", " ", opener.group("kind")).casefold()
-            current = Procedure(opener.group("name"), kind, line)
-            module.procedures.append(current)
             public = (opener.group("vis") or "Public").casefold() in {"public", "global"}
+            current = Procedure(opener.group("name"), kind, line, public)
+            module.procedures.append(current)
             module.declared.append((line, current.name, "procedure"))
             module.callables.add(current.name.casefold())
             if public:
@@ -440,6 +459,7 @@ def scan(path: str, source: str) -> Module:
         if END_PROC.match(statement):
             current = None
         elif current is not None:
+            current.body.append((line, statement))
             procedure_statement(module, current, line, statement)
         else:
             module_level(module, line, statement, block)
