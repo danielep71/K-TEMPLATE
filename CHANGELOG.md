@@ -243,6 +243,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/check_excel_run.py` compares the modules exported by hand with the
+  commit without the letter case of code outside strings and comments, as the
+  VBE re-cases a name (`HB-01`, still `assumed`), and reports each re-cased
+  identifier on a `Note:` line. In a document module it no longer compares the
+  attributes Excel writes itself, such as `VB_Base`; `VB_Name`, string
+  literals, comments and any other difference still fail (#245).
 - `SECURITY.md` describes the runtime risk surface: what the test harness,
   the example suite and `tools/devbuild/excel_run.py` read, write and delete,
   the Excel settings they need (enabled macros, no Trust access, no change to

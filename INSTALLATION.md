@@ -348,7 +348,7 @@ fails, or when you need a full compile.
 
 | It fails when | Because |
 | --- | --- |
-| An exported module differs from the commit's file line for line, a form's `.frx` differs byte for byte, or one is missing or extra | The workbook was not built from that commit |
+| An exported module differs from the commit's file line for line, a form's `.frx` differs byte for byte, or one is missing or extra. Code outside strings and comments is compared without letter case, because the VBE re-cases a name ([HB-01](docs/methodology/VALIDATION_PLAN.md#host-behaviour)): each re-cased identifier is reported on a `Note:` line instead. In a document module of `src/workbook/`, the attributes Excel writes itself (`VB_Base`, `VB_GlobalNameSpace`, `VB_Creatable`, `VB_PredeclaredId`, `VB_Exposed`, `VB_TemplateDerived`, `VB_Customizable`) are not compared; `VB_Name` is | The workbook was not built from that commit |
 | A log is missing or empty, does not end with `RESULT`, holds more than one run, or a line is not a `KEY=value` record | The log is incomplete |
 | A record is missing, extra or out of the order in which the commit's suite writes it, or an unexpected error (`ERROR`) is logged | The run did not execute the suite as written |
 | The normal run is `INCOMPLETE` | A mandatory case or assertion did not run |
