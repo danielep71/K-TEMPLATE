@@ -32,6 +32,9 @@ validate a rule.
 | --- | --- | --- | --- |
 | *Illustrative:* `CALC-01` | Hand-computed totals for a synthetic portfolio; empty input; invalid input rejected | Evidence record per release candidate | Not started |
 
+The [traceability table](#traceability) gives the status of each rule of a
+calculation.
+
 Cover, for each calculation, with the case categories of the
 [test-case format](TEST_CASES.md#categories):
 
@@ -40,6 +43,42 @@ Cover, for each calculation, with the case categories of the
   rejects;
 - failure: earlier outputs are withdrawn;
 - repeatability: the same input gives the same output.
+
+## Traceability
+
+Each rule is traced from the paragraph of its source to the step of the
+calculation contract that states it, to the VBA procedure that implements it
+and to the test cases that test it, with its validation status:
+
+| Source | Paragraph | Calculation step | VBA procedure | Test cases | Status |
+| --- | --- | --- | --- | --- | --- |
+| *Illustrative:* `SRC-01` | Article 1(1) | `CALC-01.1` | — | `illustrative-format-example`, `illustrative-file-import-example` | Not implemented |
+
+- **Source and paragraph:** a `SRC-` ID of the [source register](SOURCES.md)
+  and the exact paragraph, as in the step's *Source* column.
+- **Calculation step:** `CALC-NN.<step>`, a step of the *Rules* table of
+  that [calculation contract](CALCULATION_CONTRACTS.md). A rule implemented
+  in several steps has one row per step.
+- **VBA procedure:** `Module.Procedure` of a component under `src/`, or `—`
+  while none implements the rule. Name every procedure that applies the rule.
+- **Test cases:** the IDs of the [test cases](TEST_CASES.md) that test the
+  step, or `—`. Each case tests the row's calculation.
+- **Status:** one of the four below.
+
+| Status | Meaning | The row names |
+| --- | --- | --- |
+| Validated | A `published` or `independent` case passes for the rule on an Excel run of the release candidate ([completeness policy](TEST_CASES.md#completeness-policy)) | A procedure, and a case with a `published` or `independent` output whose `rule` is the row's step |
+| Exercised | Cases run the rule, but none is a `published` or `independent` case that passed: they are `illustrative`, or the reference cases have not passed yet | A procedure and at least one case |
+| Not validated | Implemented, but no case tests it | A procedure and no case |
+| Not implemented | No procedure implements it yet; its cases may come first | No procedure |
+
+`python tools/check_test_cases.py`, which **Repository integrity** runs,
+fails a row whose source is not in the register, whose step belongs to no
+declared calculation, whose procedure is not in a component under `src/`,
+whose case does not exist or tests another calculation, or whose status
+contradicts what the row names. It cannot see an Excel run: whether a
+`Validated` rule's case passed on the release candidate is the
+[evidence record](#evidence-record)'s to show.
 
 ## Evidence record
 
@@ -82,7 +121,7 @@ whether it was measured:
 
 | ID | Behaviour | Status | Probe | Host | Date | Result | Issue |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| *Illustrative:* `HB-01` | The VBE re-cases every use of a name to its latest spelling | `assumed` | — | — | — | — | Link |
+| `HB-01` | The VBE re-cases every use of a name to its latest spelling, so an exported module can differ from its source only in the letter case of code outside strings and comments | `assumed` | The next Excel run by hand: the `Note:` lines of `tools/check_excel_run.py` | — | — | Not measured: no Excel run has recorded a re-cased export yet. `tools/check_excel_run.py` tolerates it: it compares that code without letter case and reports each re-cased identifier as a note | #245 |
 | `HB-02` | Excel started through COM can follow the user's macro setting (`AutomationSecurity` is `msoAutomationSecurityByUI`, set by policy). A workbook it opens then has its macros disabled, and `Application.Run` fails with *Excel 4.0 (XLM) macros have been disabled*, because the VBA procedure is not found | `measured` | By hand: in PowerShell, open the built workbook through COM and `Run` `'<workbook>'!TEST_Harness.LastResult` | Microsoft 365 Excel 16.0 build 20430, 64-bit; Windows 11 Enterprise 25H2, build 26200.9711 | 2026-11-03 | `AutomationSecurity` was `ByUI`, and `Run` failed with that message. `tools/devbuild/excel_run.py` changes no macro setting: it waits for **Enable Content** | #204 |
 | `HB-03` | `Application.Run` reaches a public procedure of an `Option Private Module` module when the name is qualified with the workbook (`'Book.xlsm'!Module.Procedure`) | `measured` | As `HB-02`, in a session whose macros were enabled | As `HB-02` | 2026-11-03 | `'Workbook-development.xlsm'!TEST_Harness.LastResult` ran | #204 |
 | `HB-04` | In a workbook opened through COM with its macros disabled, **Enable Content** enables them without reopening, and `Application.Run` then reaches its procedures | `measured` | `python tools/devbuild/excel_run.py` on a host with `HB-02`: click **Enable Content** in the yellow bar | As `HB-02` | 2026-11-03 | Excel showed the yellow bar; after the click, the certification ran to `excel-run: PASS` at 50c0658 without reopening the workbook | #204 |

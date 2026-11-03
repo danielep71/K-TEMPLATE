@@ -314,6 +314,140 @@ class ExpectedTest(FindingTest):
         self.assertFinding(run(all_illustrative), "illustrative- prefix must be used exactly")
 
 
+PLAN_HEADER = ("# Plan\n\n## Traceability\n\n"
+               "| Source | Paragraph | Calculation step | VBA procedure | Test cases | Status |\n"
+               "| --- | --- | --- | --- | --- | --- |\n")
+TRACED = "| `SRC-02` | Article 1(1) | `CALC-02.1` | `CORE_Totals.TotalNotional` | `case-one` | Validated |"
+CORE = ('Attribute VB_Name = "CORE_Totals"\nOption Explicit\nOption Private Module\n\n'
+        "Public Function TotalNotional(ByVal Amount As Double) As Double\n"
+        "    TotalNotional = Amount\nEnd Function\n")
+
+
+def plan(*rows: str) -> dict[str, str]:
+    """A validation plan whose Traceability table holds rows, and the core module it names."""
+    table = PLAN_HEADER + "".join(f"{row}\n" for row in rows)
+    return {"docs/methodology/VALIDATION_PLAN.md": table + "\nText after the table.\n\n"
+            "| Status | Meaning |\n| --- | --- |\n| Validated | Not a row |\n",
+            "src/core/CORE_Totals.bas": CORE}
+
+
+def traced(column: str, value: str) -> str:
+    """TRACED with one column replaced."""
+    columns = ["Source", "Paragraph", "Calculation step", "VBA procedure", "Test cases", "Status"]
+    values = [cell.strip() for cell in TRACED.strip("|").split("|")]
+    values[columns.index(column)] = value
+    return "| " + " | ".join(values) + " |"
+
+
+class TraceabilityTest(FindingTest):
+    def test_a_traced_rule_passes(self) -> None:
+        self.assertEqual(run(extra=plan(TRACED)), [])
+        # Names ignore case, as in VBA; a rule not implemented yet names no procedure.
+        self.assertEqual(run(extra=plan(traced("VBA procedure", "`core_totals.totalnotional`"),
+                                        traced("Status", "Exercised"),
+                                        "| *Illustrative:* `SRC-01` | Article 2 | `CALC-01.1` "
+                                        "| \u2014 | \u2014 | Not implemented |")), [])
+
+    def test_a_named_procedure_or_case_must_exist(self) -> None:
+        for column, value, text in (
+                ("VBA procedure", "`CORE_Totals.Missing`",
+                 "VBA procedure 'CORE_Totals.Missing' is not in a component under src/"),
+                ("VBA procedure", "`CORE_Other.TotalNotional`", "is not in a component"),
+                ("VBA procedure", "`TotalNotional`", "is not Module.Procedure"),
+                ("VBA procedure", "TotalNotional", "must name Module.Procedure"),
+                ("Test cases", "`case-one`, `case-two`", "test case 'case-two' does not exist"),
+                ("Test cases", "case-one", "must be case IDs")):
+            with self.subTest(column=column, value=value):
+                findings = run(extra=plan(traced(column, value)))
+                self.assertFinding(findings, text)
+                self.assertEqual(len(findings), 1, findings)
+                self.assertTrue(findings[0].startswith("docs/methodology/VALIDATION_PLAN.md:7: "))
+
+    def test_a_procedure_outside_src_does_not_count(self) -> None:
+        files = plan(TRACED)
+        files["tests/modules/CORE_Totals.bas"] = files.pop("src/core/CORE_Totals.bas")
+        self.assertFinding(run(extra=files), "is not in a component under src/")
+
+    def test_the_row_matches_the_guides(self) -> None:
+        for column, value, text in (
+                ("Source", "`SRC-09`", "is not one SRC- ID of the register"),
+                ("Source", "`IMPL-01`", "is not one SRC- ID of the register"),
+                ("Paragraph", "", "names no paragraph"),
+                ("Calculation step", "`CALC-09.1`", "is not a step of a declared calculation"),
+                ("Calculation step", "`CALC-02`", "is not a step of a declared calculation"),
+                ("Calculation step", "`CALC-01.1`", "test case 'case-one' tests CALC-02, not "
+                                                    "CALC-01")):
+            with self.subTest(column=column, value=value):
+                self.assertFinding(run(extra=plan(traced(column, value))), text)
+
+    def test_the_status_agrees_with_the_row(self) -> None:
+        def illustrative(f: dict[str, Any], e: dict[str, Any]) -> None:
+            output(e)["reference"].update({"class": "illustrative", "derivation": "Example"})
+            f.update(id="illustrative-one")
+            e.update(fixture="illustrative-one")
+        no_case = traced("Test cases", "\u2014")
+        for row, text in (
+                (traced("Status", "Done"), "status 'Done' is not one of"),
+                (traced("Status", "Not implemented"), "'Not implemented' needs no VBA procedure"),
+                (traced("VBA procedure", "\u2014"), "'Validated' needs a VBA procedure"),
+                (traced("Status", "Not validated"), "a rule with test cases is not"),
+                (no_case.replace("Validated", "Exercised"), "'Exercised' needs a test case")):
+            with self.subTest(row=row):
+                self.assertFinding(run(extra=plan(row)), text)
+        self.assertEqual(run(extra=plan(no_case.replace("Validated", "Not validated"))), [])
+        self.assertFinding(run(illustrative, name="illustrative-one", extra=plan(
+            traced("Test cases", "`illustrative-one`"))),
+            "'Validated' needs a test case with a published or independent output for "
+            "CALC-02.1")
+
+    def test_validated_needs_reference_evidence_for_its_own_step(self) -> None:
+        def two_steps(f: dict[str, Any], e: dict[str, Any]) -> None:
+            second = copy.deepcopy(OUTPUT)
+            second.update(quantity="average_notional_amount", rule="CALC-02.2")
+            second["reference"].update({"class": "illustrative", "source": None,
+                                        "locator": None, "derivation": "Example"})
+            e["outputs"].append(second)
+        # case-one holds a published output for CALC-02.1 only.
+        self.assertFinding(run(two_steps, extra=plan(traced("Calculation step", "`CALC-02.2`"))),
+                           "'Validated' needs a test case with a published or independent "
+                           "output for CALC-02.2")
+        self.assertEqual(run(two_steps, extra=plan(TRACED)), [])
+
+    def test_an_invalid_case_is_compared_when_its_calculation_is_checked(self) -> None:
+        row = ("| *Illustrative:* `SRC-01` | Article 1(1) | `CALC-01.1` "
+               "| `CORE_Totals.TotalNotional` | `{}` | Exercised |")
+
+        def invalid(manifest: dict[str, Any], expected: dict[str, Any]) -> None:
+            manifest["category"] = "invalid"
+        # A file-based case's manifest is checked in every category, so its
+        # calculation is trusted and must be the row's.
+        self.assertFinding(file_case(invalid, extra=plan(row.format("file-one"))),
+                           "test case 'file-one' tests CALC-02, not CALC-01")
+        # An invalid JSON fixture may break its calculation, so it is not compared.
+        findings = run(lambda f, e: f.update(category="invalid"),
+                       extra=plan(row.format("case-one")))
+        self.assertFalse([item for item in findings if "VALIDATION_PLAN.md" in item], findings)
+
+    def test_the_table_needs_its_columns(self) -> None:
+        files = {"docs/methodology/VALIDATION_PLAN.md":
+                 "## Traceability\n\n| Source | Status |\n| --- | --- |\n"}
+        self.assertFinding(run(extra=files), "VALIDATION_PLAN.md:3: the Traceability table has no "
+                                             "Paragraph, Calculation step, VBA procedure, Test "
+                                             "cases column")
+
+    def test_rows_are_checked_without_any_case(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path, text in {**plan(TRACED),
+                               "docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
+                               "docs/methodology/DATA_CONTRACT.md": DATA,
+                               "docs/methodology/SOURCES.md": SOURCES}.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text, encoding="utf-8")
+            self.assertFinding(check_test_cases.check(root)[0],
+                               "test case 'case-one' does not exist")
+
+
 DATA_FILES = ("# Data\n\n## Datasets\n\n| ID | Description | File or sheet | Encoding |\n"
               "| --- | --- | --- | --- |\n"
               "| `DS-02` | Real positions | `positions.csv`, `limits.csv` | |\n"

@@ -64,7 +64,23 @@ What was checked by hand, by whom, against which independent values. Write
 | File | SHA-256 | Built from |
 | --- | --- | --- |
 | `<repository>-X.Y.Z-source.tar.gz` and `SHA256SUMS`, from the **Release** workflow, with their provenance attestation, or a deviation that names its absence | | The tag |
-| None, or each other file attached to the GitHub Release | | Candidate commit |
+| `<repository>-X.Y.Z-user-manual.pdf`, or None when the repository keeps no [user manual](../../RELEASING.md#user-manual) | | `docs/user-manual/X.Y.Z/` at the candidate, with the PDF tool and its version |
+| None, or each other file attached to the GitHub Release, such as the production workbook | | Candidate commit |
+
+### Published workbook
+
+The checks of RELEASING.md step 8, after publication. Write
+`NOT APPLICABLE` when the release attaches no workbook.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Build stamp of the attached workbook | The candidate's full SHA and `production`, without *NOT evidence-grade* | The `build_commit` and `build_configuration` values |
+| Rebuild of the tag (`build_workbook.py --configuration production`) | SHA-256 equal to the attached workbook's, or every part identical | Both SHA-256 values, or the parts compared |
+| Downloaded copy: SHA-256 before unblocking | Matches *Artifacts* | The value |
+| **Data → Edit Links** | No link to another workbook, or each link listed | Screenshot or list |
+| **Formulas → Name Manager** | The workbook contract's names, none referring to `#REF!` | Screenshot or list |
+| Run, save and reopen a copy | Each operation run on synthetic data; reopens with no error, links and names unchanged | Operations run, and any message |
+| User manual PDF, downloaded | Opens and names version X.Y.Z, or `NOT APPLICABLE` | Its SHA-256 against *Artifacts* |
 
 ### Deviations
 
@@ -73,8 +89,10 @@ What was checked by hand, by whom, against which independent values. Write
 ### Limits
 
 What this certification does not cover, such as hosts not tested,
-calculations without independent reference values, sources not yet
-verified, or host behaviour still `assumed` in the validation plan's
+calculations without independent reference values, rules that the validation
+plan's [traceability table](../methodology/VALIDATION_PLAN.md#traceability)
+does not mark `Validated`, sources not yet verified, or host behaviour still
+`assumed` in its
 [host behaviour register](../methodology/VALIDATION_PLAN.md#host-behaviour).
 
 ### Sign-off

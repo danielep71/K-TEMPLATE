@@ -126,7 +126,9 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `data-contract` | `python tools/check_data_contract.py` |
 | `test-cases` | `python tools/check_test_cases.py` |
 | `derivations` | `python tools/check_derivations.py` |
+| `independent-implementations` | `python tools/check_independent.py` |
 | `accuracy` | `python tools/check_accuracy.py` |
+| `workbook-protection` | `python tools/check_workbook_protection.py` |
 | `changelog` | `python tools/check_changelog.py` |
 | `generated-docs` | `python tools/render_docs.py --check` |
 | `markdown-links` | `python tools/check_links.py` |

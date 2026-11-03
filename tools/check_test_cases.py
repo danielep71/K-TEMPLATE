@@ -7,6 +7,12 @@ methodology guides: the calculation contracts (CALC- IDs), the data contract
 (DS- IDs, file names and encodings) and the source register (SRC- and IMPL-
 IDs). It never computes or compares a value.
 
+It also checks the Traceability table of docs/methodology/VALIDATION_PLAN.md:
+each row's source is in the register, its rule is a step of a declared
+calculation, every VBA procedure it names exists in a component under src/,
+every test case it names exists and tests that calculation, and its status is
+one of the four the plan defines and consistent with what the row names.
+
 A fixture is a JSON file, <case-id>.json, or a file-based case, a directory
 <case-id>/ with a case.json manifest and one subdirectory per variant holding
 input files named as in the data contract. Outside an invalid case, each
@@ -58,6 +64,21 @@ ROW = re.compile(r"^\|\s*(\*Illustrative:\*\s*)?`([A-Z]+-\d+)`\s*\|")
 HEADING = re.compile(r"^###\s+(\*Illustrative:\*\s*)?`(CALC-\d+)`")
 CODE_SPAN = re.compile(r"`([^`]+)`")
 CATEGORIES = frozenset({"nominal", "boundary", "invalid"})
+# The Traceability table of the validation plan: its columns and statuses.
+PLAN = "VALIDATION_PLAN.md"
+TRACEABILITY = "Traceability"
+TRACE_COLUMNS = ("Source", "Paragraph", "Calculation step", "VBA procedure", "Test cases",
+                 "Status")
+STATUSES = frozenset({"Validated", "Exercised", "Not validated", "Not implemented"})
+NOTHING = "\u2014"  # an em dash: the row names no procedure or no case
+ILLUSTRATIVE = re.compile(r"^\*Illustrative:\*\s*")
+SEPARATOR = re.compile(r"^:?-+:?$")
+SOURCE_ID = re.compile(r"^SRC-\d+$")
+PROCEDURE_NAME = re.compile(r"^([A-Za-z]\w*)\.([A-Za-z]\w*)$")
+VBA_HOME = "src"
+VBA_DECLARATION = re.compile(r"^[ \t]*(?:(?:Public|Private|Friend)[ \t]+)?(?:Static[ \t]+)?"
+                             r"(?:Sub|Function|Property[ \t]+(?:Get|Let|Set))[ \t]+(\w+)",
+                             re.M | re.I)
 CLASSES = frozenset({"published", "independent", "illustrative"})
 UNITS = frozenset({"1", "years"})
 SUFFIXES = ("_amount", "_weight", "_factor", "_years", "_count", "_rate", "_date", "_flag",
@@ -106,7 +127,17 @@ class Case:
     # A file-based case: its datasets and variants; its records are not listed.
     variants: set[str] | None = None
     classes: set[str] = field(default_factory=set)
+    # The reference classes of the outputs of each calculation step, by rule.
+    step_classes: dict[str, set[str]] = field(default_factory=dict)
     expected_files: int = 0
+
+
+@dataclass
+class TraceRow:
+    """One row of the Traceability table, by column, and its line in the plan."""
+
+    line: int
+    cells: dict[str, str]
 
 
 @dataclass
@@ -636,6 +667,9 @@ def check_output(output: object, case_id: str, case: Case, method: Methodology,
     problems.extend(reference_problems(reference, method.sources, root))
     if isinstance(kind, str):
         case.classes.add(kind)
+        rule = output["rule"]
+        if isinstance(rule, str) and RULE.match(rule):
+            case.step_classes.setdefault(rule, set()).add(kind)
     return problems
 
 
@@ -712,6 +746,155 @@ def check_cases(cases: Mapping[str, Case], report: Report) -> None:
                               "expected value is illustrative")
 
 
+def traceability_rows(root: Path, report: Report) -> list[TraceRow]:
+    """The rows of the plan's Traceability table; none without the plan or the section."""
+    path = root / METHODOLOGY / PLAN
+    if not path.is_file():
+        return []
+    rows: list[TraceRow] = []
+    inside = False
+    header: list[str] = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if line.startswith("## "):
+            inside = line[3:].strip() == TRACEABILITY
+            header = []
+        elif inside and header and not line.startswith("|"):
+            break  # the section's first table is the Traceability table
+        elif inside and line.startswith("|"):
+            row = cells(line)
+            if not header:
+                header = row
+                missing = [name for name in TRACE_COLUMNS if name not in header]
+                if missing:
+                    report.add(f"{(METHODOLOGY / PLAN).as_posix()}:{number}",
+                               f"the Traceability table has no {', '.join(missing)} column")
+                    return []
+            elif not all(SEPARATOR.match(cell) for cell in row):
+                rows.append(TraceRow(number, dict(zip(header, row + [""] * len(header)))))
+    return rows
+
+
+def vba_procedures(root: Path) -> dict[str, set[str]]:
+    """The procedures of each standard and class module under src/, by module name.
+    VBA names ignore case, so both are folded."""
+    procedures: dict[str, set[str]] = {}
+    home = root / VBA_HOME
+    for path in sorted(home.rglob("*")) if home.is_dir() else []:
+        if path.suffix.lower() in (".bas", ".cls") and path.is_file():
+            text = path.read_bytes().decode("ascii", errors="replace")
+            procedures.setdefault(path.stem.casefold(), set()).update(
+                name.casefold() for name in VBA_DECLARATION.findall(text))
+    return procedures
+
+
+def named(cell: str) -> list[str] | None:
+    """The code spans of a cell, [] for an em dash, None for anything else."""
+    if cell == NOTHING:
+        return []
+    spans = CODE_SPAN.findall(cell)
+    return spans if spans and CODE_SPAN.sub("", cell).strip(" ,") == "" else None
+
+
+def guide_problems(row: TraceRow, method: Methodology) -> tuple[list[str], str | None]:
+    """What is wrong with a row's source, paragraph and step, and its calculation."""
+    problems = []
+    source = CODE_SPAN.findall(ILLUSTRATIVE.sub("", row.cells["Source"]))
+    if len(source) != 1 or not SOURCE_ID.match(source[0]) or source[0] not in method.sources:
+        problems.append(f"source {row.cells['Source']!r} is not one SRC- ID of the register")
+    if not row.cells["Paragraph"]:
+        problems.append("names no paragraph of its source")
+    step = CODE_SPAN.findall(row.cells["Calculation step"])
+    rule = RULE.match(step[0]) if len(step) == 1 else None
+    calculation = rule.group(1) if rule else None
+    if calculation is None or calculation not in method.calculations:
+        problems.append(f"calculation step {row.cells['Calculation step']!r} is not a step "
+                        "of a declared calculation, such as `CALC-01.1`")
+    return problems, calculation
+
+
+def procedure_problems(names: list[str] | None,
+                       procedures: Mapping[str, set[str]]) -> list[str]:
+    """What is wrong with the VBA procedures a row names."""
+    if names is None:
+        return [f"VBA procedure must name Module.Procedure in code spans, or be {NOTHING}"]
+    problems = []
+    for name in names:
+        match = PROCEDURE_NAME.match(name)
+        if not match:
+            problems.append(f"VBA procedure {name!r} is not Module.Procedure")
+        elif match.group(2).casefold() not in procedures.get(match.group(1).casefold(), set()):
+            problems.append(f"VBA procedure {name!r} is not in a component under {VBA_HOME}/")
+    return problems
+
+
+def case_problems(listed: list[str] | None, calculation: str | None,
+                  cases: Mapping[str, Case]) -> list[str]:
+    """What is wrong with the test cases a row names."""
+    if listed is None:
+        return [f"test cases must be case IDs in code spans, or {NOTHING}"]
+    problems = []
+    for case_id in listed:
+        case = cases.get(case_id)
+        # Only an invalid JSON fixture keeps no calculation: its calculation is
+        # one of the inputs it may break. A file-based case's manifest is
+        # checked in full, so its calculation counts in every category.
+        trusted = case is not None and (case.calculation is not None or case.category != "invalid")
+        if case is None:
+            problems.append(f"test case {case_id!r} does not exist")
+        elif trusted and calculation and case.calculation != calculation:
+            problems.append(f"test case {case_id!r} tests {case.calculation}, not {calculation}")
+    return problems
+
+
+def status_problem(status: str, step: str | None, names: list[str], listed: list[str],
+                   cases: Mapping[str, Case]) -> str | None:
+    """Why a row's status contradicts the procedures and cases it names, if it does."""
+    if status not in STATUSES:
+        return f"status {status!r} is not one of {', '.join(sorted(STATUSES))}"
+    if (status == "Not implemented") != (not names):
+        return f"status {status!r} needs {'no' if names else 'a'} VBA procedure"
+    if status == "Not validated" and listed:
+        return "a rule with test cases is not 'Not validated'"
+    if status in ("Exercised", "Validated") and not listed:
+        return f"status {status!r} needs a test case"
+    # Validated needs reference evidence for this step: an output whose rule is
+    # the row's step, with a published or independent value.
+    if status == "Validated" and not any(
+            case_id in cases and cases[case_id].step_classes.get(step or "", set())
+            & {"published", "independent"} for case_id in listed):
+        return (f"status 'Validated' needs a test case with a published or independent "
+                f"output for {step}")
+    return None
+
+
+def trace_problems(row: TraceRow, cases: Mapping[str, Case], method: Methodology,
+                   procedures: Mapping[str, set[str]]) -> list[str]:
+    """What is wrong with one row of the Traceability table."""
+    problems, calculation = guide_problems(row, method)
+    steps = CODE_SPAN.findall(row.cells["Calculation step"])
+    step = steps[0] if calculation and len(steps) == 1 else None
+    names = named(row.cells["VBA procedure"])
+    listed = named(row.cells["Test cases"])
+    problems += procedure_problems(names, procedures)
+    problems += case_problems(listed, calculation, cases)
+    # A status is compared with the row only once both cells could be read.
+    status = row.cells["Status"]
+    if names is not None and listed is not None:
+        problem = status_problem(status, step, names, listed, cases)
+        problems += [problem] if problem else []
+    elif status not in STATUSES:
+        problems.append(f"status {status!r} is not one of {', '.join(sorted(STATUSES))}")
+    return problems
+
+
+def check_traceability(rows: Sequence[TraceRow], root: Path, cases: Mapping[str, Case],
+                       method: Methodology, report: Report) -> None:
+    procedures = vba_procedures(root)
+    for row in rows:
+        for problem in trace_problems(row, cases, method, procedures):
+            report.add(f"{(METHODOLOGY / PLAN).as_posix()}:{row.line}", problem)
+
+
 def check(root: Path) -> tuple[list[str], int, int]:
     """Return the findings and the numbers of fixtures and expected files checked."""
     report = Report()
@@ -719,7 +902,8 @@ def check(root: Path) -> tuple[list[str], int, int]:
     fixtures = sorted(directory.glob("*.json"))
     file_cases = sorted(path for path in directory.glob("*") if path.is_dir())
     expected = sorted((root / EXPECTED).glob("*.json"))
-    if not fixtures and not file_cases and not expected:
+    rows = traceability_rows(root, report)
+    if not fixtures and not file_cases and not expected and not rows and not report.findings:
         return [], 0, 0
     method = read_methodology(root, report, file_based=bool(file_cases))
     cases: dict[str, Case] = {}
@@ -735,6 +919,7 @@ def check(root: Path) -> tuple[list[str], int, int]:
     for path in expected:
         check_expected(path, root, cases, method, report)
     check_cases(cases, report)
+    check_traceability(rows, root, cases, method, report)
     return report.findings, len(fixtures) + len(file_cases), len(expected)
 
 
