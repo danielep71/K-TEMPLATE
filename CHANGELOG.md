@@ -121,14 +121,18 @@ milestones and their pull requests.
   [harness guide](docs/methodology/TEST_HARNESS.md) and
   [recording an Excel run](INSTALLATION.md#recording-an-excel-run) describe
   them, and the check is a release gate (#79).
-- Five static checks of exported VBA source, which **Repository integrity**
+- Six static checks of exported VBA source, which **Repository integrity**
   runs:
   - placement, names, encoding, options, layout and storage;
   - `#If` structure and `PtrSafe` in each compilation environment;
   - procedure-local jump targets;
   - visibility and the public API inventory, including a public name in two
     modules;
-  - the dependency direction.
+  - the dependency direction;
+  - identifiers, in each compilation environment: a name a procedure assigns
+    that nothing declares, a statement that calls a procedure no module
+    provides, or a declaration named like a VBA keyword, such as
+    `Dim Empty()`. A statement it cannot read is a finding (#173).
 
   The [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what they
   cannot prove (#70).
@@ -176,12 +180,6 @@ milestones and their pull requests.
   open or closed, still carries: with `prune: true`, it checks every label it
   would delete and stops before any change. A name with a comma is refused,
   because its use cannot be queried (#188).
-- A sixth static check of exported VBA source, `tools/check_vba_identifiers.py`,
-  runs in **Repository integrity**. In each compilation environment, it fails
-  when a procedure assigns a name that nothing declares, when a statement
-  calls a procedure that no module provides, or when a declaration is named
-  like a VBA keyword, such as `Dim Empty()`. A statement it cannot read is a
-  finding (#173).
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may
