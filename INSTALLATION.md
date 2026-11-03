@@ -221,12 +221,19 @@ It builds the development workbook, and stops if the build is not
 evidence-grade. Then it:
 
 1. empties `test-results\excel-run\`;
-2. opens the workbook read-only in Excel and runs the certification of step 5
-   below, with that folder and `tests\fixtures`;
-3. closes the workbook without saving, and quits Excel;
-4. writes `host.txt` (Windows from the registry, the four references the
+2. opens the workbook read-only in Excel. If Excel shows the yellow bar
+   *SECURITY WARNING Macros have been disabled*, click **Enable Content**
+   (or **File → Info → Enable Content**). This happens where a policy makes
+   programs follow your macro setting
+   ([HB-02](docs/methodology/VALIDATION_PLAN.md#host-behaviour)). The command
+   changes no macro setting, and waits up to `--enable-timeout` seconds (300
+   by default) for that click;
+3. runs the certification of step 5 below, with that folder and
+   `tests\fixtures`;
+4. closes the workbook without saving, and quits Excel;
+5. writes `host.txt` (Windows from the registry, the four references the
    build gives the project, and `compile=ON_DEMAND`);
-5. runs the check of step 9 with `--workbook` and `--require-binding`.
+6. runs the check of step 9 with `--workbook` and `--require-binding`.
 
 It prints the report and saves it as `test-results\excel-run-report.txt`.
 It must end with `Binding: VERIFIED` and `excel-run: PASS`; record it as
@@ -242,9 +249,11 @@ Without Trust access nothing can run **Debug → Compile VBAProject**. VBA then
 compiles on demand only the modules the run calls, and `compile=ON_DEMAND`
 says so; a module the run never calls is not compiled.
 
-Excel opens visibly while the run lasts. Leave it alone: a dialog it shows
-stops the run until you close it, and the command gives up after
-`--timeout` seconds (600 by default).
+Excel opens visibly while the run lasts. Apart from **Enable Content**, leave
+it alone: a dialog it shows stops the run until you close it, and the command
+gives up after `--timeout` seconds (600 by default). If the macros are not
+enabled in time, nothing runs and nothing is recorded; run the command
+again.
 
 Use the steps below instead when the project has forms, when the build
 fails, or when you need a full compile.

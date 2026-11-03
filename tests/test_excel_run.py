@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import io
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -87,7 +88,8 @@ class EvidenceFolderTest(unittest.TestCase):
 class PowerShellTest(unittest.TestCase):
     script = excel_run.powershell_script(Path(r"C:\Dev\it's\Workbook-development.xlsm"),
                                          Path(r"C:\Dev\run"), Path(r"C:\Dev\tests\fixtures"),
-                                         "TEST_Examples", POLICY.entry_point)
+                                         "TEST_Examples", POLICY.entry_point,
+                                         "TEST_Harness.LastResult", 300)
 
     def test_the_workbook_is_opened_read_only_and_never_saved(self) -> None:
         self.assertIn("$excel.Workbooks.Open($workbookPath, 0, $true)", self.script)
@@ -96,11 +98,27 @@ class PowerShellTest(unittest.TestCase):
         self.assertNotIn(".Save", self.script)
         # Nothing reaches the VBA project, so no Trust access is needed.
         self.assertNotIn("VBProject", self.script)
+
+    def test_no_macro_setting_changes_and_a_person_enables_the_macros(self) -> None:
+        # A policy may open the workbook with macros disabled (HB-02); the script never
+        # overrides it, and waits for Enable Content instead.
         self.assertNotIn("AutomationSecurity", self.script)
+        probe = self.script.index("[void]$excel.Run($prefix + 'TEST_Harness.LastResult')")
+        opened = self.script.index("$excel.Workbooks.Open(")
+        run = self.script.index(f'$excel.Run($prefix + "TEST_Examples.{POLICY.entry_point}"')
+        self.assertLess(opened, probe)
+        self.assertLess(probe, run)
+        self.assertIn("$deadline = (Get-Date).AddSeconds(300)", self.script)
+        self.assertIn("Start-Sleep -Seconds 2", self.script)
+        self.assertIn('$failure = "NOT-ENABLED"', self.script)
+        self.assertIn("exit 4", self.script)
+
+    def test_progress_records_do_not_reach_the_output(self) -> None:
+        self.assertIn("$ProgressPreference = 'SilentlyContinue'", self.script)
 
     def test_the_entry_point_runs_with_both_folders(self) -> None:
-        self.assertIn(f"'!TEST_Examples.{POLICY.entry_point}\"", self.script)
-        self.assertIn("$excel.Run($macro, $evidence, $fixtures)", self.script)
+        self.assertIn(f'$excel.Run($prefix + "TEST_Examples.{POLICY.entry_point}", $evidence, '
+                      "$fixtures)", self.script)
         self.assertIn(r"$evidence = 'C:\Dev\run'", self.script)
         self.assertIn(r"$fixtures = 'C:\Dev\tests\fixtures'", self.script)
         # A quote in a path is doubled, so a path cannot end the literal.
@@ -119,6 +137,29 @@ class PowerShellTest(unittest.TestCase):
 
 
 class CommandTest(unittest.TestCase):
+    def test_macros_never_enabled_stop_without_a_record(self) -> None:
+        built = mock.Mock(commit="a" * 40, clean=True)
+        folder = ROOT / "test-results" / "excel-run-unit-test"
+        try:
+            with mock.patch.object(excel_run.build_workbook, "build", return_value=built), \
+                    mock.patch.object(excel_run, "run_excel",
+                                      return_value=(excel_run.NOT_ENABLED,
+                                                    "EXCEL-RUN=NOT-ENABLED")), \
+                    mock.patch.object(excel_run, "windows_version") as windows, \
+                    redirect_stdout(io.StringIO()) as output:
+                with self.assertRaisesRegex(excel_run.RunError, "not enabled within 300 s"):
+                    excel_run.record(ROOT, folder, 600, 300)
+            windows.assert_not_called()
+            self.assertFalse((folder / POLICY.host).exists())
+            self.assertIn("click Enable Content", output.getvalue())
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+
+    def test_the_wait_for_enable_content_is_shorter_than_the_run(self) -> None:
+        with redirect_stdout(io.StringIO()), mock.patch("sys.stderr", io.StringIO()), \
+                self.assertRaises(SystemExit):
+            excel_run.main(["--timeout", "300", "--enable-timeout", "300"])
+
     @unittest.skipIf(sys.platform == "win32", "checks the refusal off Windows")
     def test_off_windows_it_records_nothing(self) -> None:
         output = io.StringIO()
