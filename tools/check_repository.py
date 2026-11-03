@@ -13,8 +13,11 @@ test-results/integrity/:
 
 A check whose tool or GitHub context is missing is skipped and reported as
 such; --strict, which CI passes, makes it fail instead. An advisory check
-reports its findings as a warning and does not fail the run. The run covers the
-repository only: it compiles no VBA, runs no Excel and certifies no figure.
+reports its findings as a warning and does not fail the run. --ci, which CI
+also passes, adds a last check that fails when the working tree differs from
+the commit, so that the result describes the commit and nothing a step
+changed. The run covers the repository only: it compiles no VBA, runs no Excel
+and certifies no figure.
 """
 
 from __future__ import annotations
@@ -57,6 +60,8 @@ class Context:
     repository: str | None = None
     default_branch: str | None = None
     is_template: bool | None = None
+    # Whether to fail a working tree that differs from the commit (--ci).
+    ci: bool = False
 
 
 @dataclass
@@ -166,6 +171,14 @@ def required_documents(context: Context) -> list[Finding]:
             if not (context.root / name).is_file() or not (context.root / name).stat().st_size]
 
 
+def clean_working_tree(context: Context) -> list[Finding]:
+    """No file differs from the commit, after every other check has run."""
+    changes = git(context.root, "status", "--porcelain", "--untracked-files=all")
+    return [(line[3:], f"differs from the commit (git status {line[:2].strip()}); the checks "
+                       "must describe the commit as it is")
+            for line in changes.splitlines() if line]
+
+
 def whitespace_commands(root: Path) -> list[tuple[str, list[str]]]:
     """Check every committed file, then local changes, without needing history."""
     empty_tree = subprocess.run(["git", "hash-object", "-t", "tree", "--stdin"], cwd=root,
@@ -238,6 +251,9 @@ def checks(context: Context) -> list[Check]:
         Check("required-documents", function=required_documents),
     ]
     listed += [Check(name, command) for name, command in whitespace_commands(context.root)]
+    if context.ci:
+        # Last, so that it also sees what the other checks changed.
+        listed.append(Check("clean-working-tree", function=clean_working_tree))
     return listed
 
 
@@ -389,11 +405,14 @@ def main(argv: Sequence[str] | None = None,
                         help="whether this repository is the template (default: unknown)")
     parser.add_argument("--strict", action="store_true",
                         help="fail a check whose tool or context is missing, as CI does")
+    parser.add_argument("--ci", action="store_true",
+                        help="fail when the working tree differs from the commit, as CI does")
     parser.add_argument("--summary", type=Path, help="also append the summary to this file")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     context = Context(root, args.repository or detect_repository(root),
-                      args.default_branch or detect_default_branch(root), args.template)
+                      args.default_branch or detect_default_branch(root), args.template,
+                      args.ci)
     return run(context, listed(context), root / REPORT_DIR, args.strict, args.summary)
 
 

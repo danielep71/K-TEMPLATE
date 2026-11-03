@@ -262,6 +262,14 @@ milestones and their pull requests.
 
 ### Changed
 
+- **Repository integrity** cancels the run of a pull request commit that a
+  newer commit replaces; a push run is never cancelled. CI runs
+  `tools/check_repository.py` with `--ci`, which fails when, after the
+  checks, the working tree differs from the commit. mypy checks `tests/` as
+  well as `tools/`; four unannotated test files need no annotations, but their
+  code is checked. The bug form has an optional field for evidence, a
+  workaround and recovery, and the enhancement form one for alternatives
+  considered (#251).
 - `tools/check_excel_run.py` compares the modules exported by hand with the
   commit without the letter case of code outside strings and comments, as the
   VBE re-cases a name (`HB-01`, still `assumed`), and reports each re-cased

@@ -77,6 +77,14 @@ body:
       required: true
 
   - type: textarea
+    id: evidence
+    attributes:
+      label: "🩹 Evidence, workaround and recovery"
+      description: Optional. Further evidence of the defect, such as logs or screenshots with synthetic data; a workaround while it is open; and how to recover affected results or files, for example which outputs to recompute.
+    validations:
+      required: false
+
+  - type: textarea
     id: environment
     attributes:
       label: "🖥️ Environment"

@@ -397,7 +397,7 @@ class Workbook(unittest.TestCase):
         build = build_workbook.Build("a" * 40, "2026-11-02T10:00:00+01:00", True,
                                      "development", ())
         here = build_workbook.package(self.layout, build, b"project")
-        with unittest.mock.patch.object(zipfile.sys, "platform", "win32"):
+        with unittest.mock.patch("zipfile.sys.platform", "win32"):
             windows = build_workbook.package(self.layout, build, b"project")
         self.assertEqual(here, windows)
 

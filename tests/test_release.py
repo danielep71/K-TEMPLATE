@@ -164,7 +164,7 @@ class IntegrityTest(unittest.TestCase):
     def runs(self, payload: object, returncode: int = 0) -> list[str]:
         completed = subprocess.CompletedProcess([], returncode, stdout=json.dumps(payload),
                                                 stderr="denied")
-        with mock.patch.object(release.subprocess, "run", return_value=completed):
+        with mock.patch("release.subprocess.run", return_value=completed):
             return release.integrity("owner/project", "a" * 40)
 
     def test_a_successful_run_passes(self) -> None:

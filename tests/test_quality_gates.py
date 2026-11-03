@@ -7,6 +7,9 @@ REQUIRE_QUALITY_TOOLS=1, so these tests fail there if a tool is missing;
 elsewhere they are skipped without the tools.
 """
 
+# mypy checks the bodies of these tests but does not require them to be annotated.
+# mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
+
 import os
 import shutil
 import subprocess

@@ -126,8 +126,8 @@ class ExternalTests(unittest.TestCase):
         for code, returncode, status in (("200", 0, "PASS"), ("404", 0, "ERROR"),
                                          ("429", 0, "WARN"), ("503", 0, "WARN"),
                                          ("", 6, "WARN")):
-            with self.subTest(code=code), unittest.mock.patch.object(
-                    check_links.subprocess, "run", return_value=curl(code, returncode)):
+            with self.subTest(code=code), unittest.mock.patch(
+                    "check_links.subprocess.run", return_value=curl(code, returncode)):
                 self.assertEqual(check_links.check_external("https://x.example/")[0], status)
 
 

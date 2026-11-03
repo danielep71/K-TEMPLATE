@@ -288,14 +288,14 @@ class CommandTest(unittest.TestCase):
         built = mock.Mock(commit="a" * 40, clean=True)
         folder = ROOT / "test-results" / "excel-run-unit-test"
         try:
-            with mock.patch.object(excel_run.build_workbook, "build", return_value=built), \
+            with mock.patch("excel_run.build_workbook.build", return_value=built), \
                     mock.patch.object(subprocess, "run", run), \
                     mock.patch.object(excel_run, "windows_version",
                                       return_value="Windows 11 Pro, version 24H2"), \
                     mock.patch.object(excel_run, "executable_bitness", return_value="64-bit"), \
                     mock.patch.object(excel_run, "vba_project_access",
                                       return_value="NOT_TRUSTED"), \
-                    mock.patch.object(excel_run.check_excel_run, "check") as check, \
+                    mock.patch("excel_run.check_excel_run.check") as check, \
                     redirect_stdout(io.StringIO()) as output:
                 with self.assertRaisesRegex(excel_run.RunError, error):
                     excel_run.record(ROOT, folder, 600, 300, "Operator Name")
@@ -356,7 +356,7 @@ class CommandTest(unittest.TestCase):
 
     def test_a_build_that_is_not_evidence_grade_stops_before_excel(self) -> None:
         built = mock.Mock(commit="a" * 40, clean=False)
-        with mock.patch.object(excel_run.build_workbook, "build", return_value=built), \
+        with mock.patch("excel_run.build_workbook.build", return_value=built), \
                 mock.patch.object(excel_run, "run_excel") as run, \
                 redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(excel_run.RunError, "local changes"):
