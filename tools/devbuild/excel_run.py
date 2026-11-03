@@ -2,7 +2,7 @@
 """Record an Excel run of the harness certification with one command, on Windows.
 
 Usage: python tools/devbuild/excel_run.py [--evidence FOLDER] [--timeout SECONDS]
-                                         [--enable-timeout SECONDS]
+                                         [--enable-timeout SECONDS] [--operator NAME]
 
 Run it in a clean checkout of the candidate commit, on Windows with Excel
 installed. It replaces the manual steps of INSTALLATION.md, Recording an
@@ -21,10 +21,16 @@ Excel run, and never needs Trust access to the VBA project object model:
    certification entry point of the example suite and of each project suite
    the policy lists, in order, with the evidence folder and tests/fixtures,
    closes the workbook without saving and quits Excel;
-4. writes host.txt: Windows from the registry, the references the build
-   gives the project, and compile=ON_DEMAND, because nothing can compile the
-   whole project without Trust access, so VBA compiled the modules the run
-   called;
+4. writes host.txt, the host record of docs/methodology/TEST_HARNESS.md:
+   the operator (--operator, by default the Windows user), when the run
+   started and finished, Windows from the registry, the Excel build, its
+   bitness (from the EXCEL.EXE header), AutomationSecurity as Excel reports
+   it (read, never set), the Trust access to the VBA project as the registry
+   holds it, the references the build gives the project, compile=ON_DEMAND,
+   because nothing can compile the whole project without Trust access, so VBA
+   compiled the modules the run called, and the outcome. It writes the record
+   also when the run stops early: Excel unavailable, macros not enabled in
+   time, a timeout, or a run that stopped before its end;
 5. runs tools/check_excel_run.py with --workbook and --require-binding: with
    no exported folder it proves identity by rebuilding the commit and
    comparing the workbook's parts. It prints the report, and saves it
@@ -32,17 +38,20 @@ Excel run, and never needs Trust access to the VBA project object model:
 
 It exits 0 when the check passes, 1 when it fails or the run could not
 complete, and 2 when it is not run on Windows. Standard library only.
+It reads the macro setting and the Trust access only; it changes neither.
 """
 
 from __future__ import annotations
 
 import argparse
 import base64
+import getpass
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -65,6 +74,15 @@ WINDOWS_11_BUILD = 22000
 
 class RunError(Exception):
     """The run could not be recorded."""
+
+
+class ExcelStopped(RunError):
+    """The run stopped before PowerShell returned: its outcome and what it printed."""
+
+    def __init__(self, message: str, outcome: str, output: str = "") -> None:
+        super().__init__(message)
+        self.outcome = outcome
+        self.output = output
 
 
 def built_references() -> list[str]:
@@ -99,10 +117,91 @@ def windows_version() -> str:
     return describe_windows(values)
 
 
-def host_record(windows: str, references: Sequence[str]) -> str:
-    return (f"windows={windows}\n"
-            f"references={'; '.join(references)}\n"
-            f"compile={check_excel_run.COMPILE_ON_DEMAND}\n")
+def host_record(fields: Mapping[str, str]) -> str:
+    """The host record: one key=value line per field of check_excel_run.HOST_FIELDS,
+    UNKNOWN for a value the run could not read."""
+    return "".join(f"{key}={fields.get(key) or check_excel_run.UNKNOWN}\n"
+                   for key in check_excel_run.HOST_FIELDS)
+
+
+def now() -> str:
+    """The local time with its UTC offset, to the second."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+# The Machine field of a PE header, for the bitness of EXCEL.EXE.
+PE_MACHINES = {0x8664: "64-bit", 0x014C: "32-bit"}
+
+
+def executable_bitness(path: Path) -> str:
+    """The bitness of a Windows executable, from its PE header; UNKNOWN when it
+    cannot be read."""
+    try:
+        with path.open("rb") as file:
+            header = file.read(64)
+            file.seek(int.from_bytes(header[0x3C:0x40], "little"))
+            signature = file.read(6)
+    except (OSError, ValueError):
+        return check_excel_run.UNKNOWN
+    if header[:2] != b"MZ" or signature[:4] != b"PE\0\0":
+        return check_excel_run.UNKNOWN
+    return PE_MACHINES.get(int.from_bytes(signature[4:6], "little"), check_excel_run.UNKNOWN)
+
+
+def registry_value(hive: str, key: str, name: str) -> object | None:
+    """A registry value, read only; None when it is absent."""
+    import winreg  # Windows only
+
+    try:
+        with winreg.OpenKey(getattr(winreg, hive), key) as handle:  # type: ignore[attr-defined]
+            value: object = winreg.QueryValueEx(handle, name)[0]  # type: ignore[attr-defined]
+    except OSError:
+        return None
+    return value
+
+
+def vba_project_access(version: str,
+                       read: Callable[[str, str, str], object | None] = registry_value) -> str:
+    """Trust access to the VBA project object model, as the AccessVBOM value
+    holds it: a policy value before the user's own setting, off when none is set."""
+    security = rf"Microsoft\Office\{version}\Excel\Security"
+    for hive, key in (("HKEY_CURRENT_USER", rf"Software\Policies\{security}"),
+                      ("HKEY_LOCAL_MACHINE", rf"SOFTWARE\Policies\{security}"),
+                      ("HKEY_CURRENT_USER", rf"Software\{security}")):
+        value = read(hive, key, "AccessVBOM")
+        if value is not None:
+            return "TRUSTED" if value == 1 else "NOT_TRUSTED"
+    return "NOT_TRUSTED"
+
+
+def excel_host(output: str) -> dict[str, str]:
+    """The Excel fields of the host record, from the EXCEL-<NAME>= lines the
+    script prints once Excel has started."""
+    found = {}
+    for line in output.splitlines():
+        name, separator, value = line.strip().partition("=")
+        if separator and name.startswith("EXCEL-"):
+            found[name.removeprefix("EXCEL-")] = value.strip()
+    version, build, path = (found.get(name, "") for name in ("VERSION", "BUILD", "PATH"))
+    security = found.get("AUTOMATION-SECURITY", "")
+    names = check_excel_run.AUTOMATION_SECURITY
+    fields = {"excel": f"{version} build {build}" if version and build else "",
+              "bitness": executable_bitness(Path(path) / "EXCEL.EXE") if path else "",
+              "automation_security": names[int(security) - 1]
+              if security.isdigit() and 1 <= int(security) <= len(names) else ""}
+    if version:
+        try:
+            fields["vba_project_access"] = vba_project_access(version)
+        except ImportError:
+            pass
+    return fields
+
+
+def windows_found() -> str:
+    try:
+        return windows_version()
+    except (OSError, ImportError):
+        return check_excel_run.UNKNOWN
 
 
 def prepare(folder: Path, root: Path) -> None:
@@ -128,7 +227,10 @@ def powershell_script(workbook: Path, folder: Path, fixtures: Path,
     entry point (``Module.Procedure``) in order, close without saving, quit. Every
     entry point runs even when an earlier one fails, so each suite leaves its logs; the
     first failure is reported. It never changes a macro setting: when the workbook opens
-    with macros disabled, a person enables them with Enable Content (HB-02)."""
+    with macros disabled, a person enables them with Enable Content (HB-02). Once Excel
+    has started it prints its version, build, folder and AutomationSecurity, which it
+    only reads, for the host record. Its exit code says how the run ended
+    (OUTCOME_BY_EXIT)."""
     calls = "\n".join(
         f"""        try {{
             [void]$excel.Run($prefix + {quoted(entry)}, $evidence, $fixtures)
@@ -144,8 +246,14 @@ $fixtures = {quoted(str(fixtures))}
 $excel = $null
 $book = $null
 $failure = $null
+$stopped = $null
 try {{
     $excel = New-Object -ComObject Excel.Application
+    # Read only, for the host record: the macro policy is recorded, never set.
+    Write-Output ("EXCEL-VERSION=" + $excel.Version)
+    Write-Output ("EXCEL-BUILD=" + $excel.Build)
+    Write-Output ("EXCEL-PATH=" + $excel.Path)
+    Write-Output ("EXCEL-AUTOMATION-SECURITY=" + [int]$excel.AutomationSecurity)
     $excel.Visible = $true
     $excel.DisplayAlerts = $false
     # UpdateLinks 0, ReadOnly: the workbook on disk stays the build.
@@ -171,6 +279,8 @@ try {{
 {calls}
     }}
 }} catch {{
+    # Excel did not start, or the run stopped before the certification ended.
+    $stopped = if ($null -eq $excel) {{ "UNAVAILABLE" }} else {{ "INCOMPLETE" }}
     $failure = $_.Exception.Message
 }} finally {{
     if ($null -ne $book) {{ $book.Close($false) }}
@@ -184,6 +294,14 @@ try {{
 if ($failure -eq "NOT-ENABLED") {{
     Write-Output "EXCEL-RUN=NOT-ENABLED"
     exit 4
+}}
+if ($stopped -eq "UNAVAILABLE") {{
+    Write-Output "EXCEL-RUN=UNAVAILABLE; $failure"
+    exit 5
+}}
+if ($stopped) {{
+    Write-Output "EXCEL-RUN=INCOMPLETE; $failure"
+    exit 6
 }}
 if ($failure) {{
     Write-Output "EXCEL-RUN=ERROR; $failure"
@@ -212,21 +330,33 @@ def run_excel(script: str, timeout: int) -> tuple[int, str]:
         completed = subprocess.run(command, capture_output=True, text=True, timeout=timeout,
                                    check=False)
     except subprocess.TimeoutExpired as error:
-        raise RunError(f"Excel did not finish within {timeout} s; close it, check for a "
-                       "dialog, then run TEST_Harness.ResetTests if it reports recovery") \
+        printed = error.stdout or ""
+        raise ExcelStopped(f"Excel did not finish within {timeout} s; close it, check for a "
+                           "dialog, then run TEST_Harness.ResetTests if it reports recovery",
+                           "EXECUTION_TIMEOUT",
+                           printed.decode(errors="replace") if isinstance(printed, bytes)
+                           else printed) from error
+    except OSError as error:
+        raise ExcelStopped(f"PowerShell could not be started: {error}", "UNAVAILABLE") \
             from error
     return completed.returncode, (completed.stdout + completed.stderr).strip()
 
 
 # The exit code of the PowerShell script when the macros were never enabled.
 NOT_ENABLED = 4
+# The outcome of the host record for each exit code of the PowerShell script:
+# every entry point returned, one raised, the macros were never enabled, Excel
+# did not start, or the run stopped before its end. Any other code is INCOMPLETE.
+OUTCOME_BY_EXIT = {0: "PASS", 3: "FAIL", NOT_ENABLED: "NOT_ENABLED", 5: "UNAVAILABLE",
+                   6: "INCOMPLETE"}
 ENABLE_HINT = ("Excel opens the workbook now. If it shows a yellow bar SECURITY WARNING, "
                "Macros have been disabled, click Enable Content (or File > Info > Enable "
                "Content > Enable All Content). Change nothing else, and leave Excel alone "
                "until it closes.")
 
 
-def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300) -> int:
+def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300,
+           operator: str | None = None) -> int:
     policy = check_excel_run.working_policy(root)
     workbook = root / WORKBOOK
     built = build_workbook.build(root, check_excel_run.REBUILT_CONFIGURATION, workbook)
@@ -240,16 +370,30 @@ def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300) ->
                                entry_points(policy), probe, enable_timeout)
     print(f"running {', '.join(entry_points(policy))} in Excel ...")
     print(ENABLE_HINT)
-    code, output = run_excel(script, timeout)
+    host = {"operator": operator or getpass.getuser(), "started": now(),
+            "references": "; ".join(built_references()),
+            "compile": check_excel_run.COMPILE_ON_DEMAND}
+    stopped: ExcelStopped | None = None
+    try:
+        code, output = run_excel(script, timeout)
+    except ExcelStopped as error:
+        code, output, stopped = -1, error.output, error
+    host["finished"] = now()
     if output:
         print(output)
+    host["outcome"] = stopped.outcome if stopped else OUTCOME_BY_EXIT.get(code, "INCOMPLETE")
+    host.update(excel_host(output), windows=windows_found())
+    # Written however the run ended, so that a run that stopped early is recorded.
+    (folder / policy.host).write_text(host_record(host), encoding="utf-8")
+    print(f"{policy.host}: outcome={host['outcome']}")
+    if stopped:
+        raise stopped
     if code == NOT_ENABLED:
         raise RunError(f"the workbook's macros were not enabled within {enable_timeout} s, so "
                        "nothing ran: run the command again and click Enable Content in Excel")
     if code not in (0, 3):
-        raise RunError(f"PowerShell or Excel failed (exit {code}); see the output above")
-    (folder / policy.host).write_text(host_record(windows_version(), built_references()),
-                                      encoding="utf-8")
+        raise RunError(f"PowerShell or Excel failed (exit {code}, outcome "
+                       f"{host['outcome']}); see the output above")
     evidence = check_excel_run.check(root, built.commit, folder, workbook, require_binding=True)
     report = check_excel_run.report(built.commit, evidence)
     print(report)
@@ -267,6 +411,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="seconds to wait for Excel in all (default: 600)")
     parser.add_argument("--enable-timeout", type=int, default=300,
                         help="seconds to wait for Enable Content (default: 300)")
+    parser.add_argument("--operator", default=None,
+                        help="who runs it, for the host record (default: the Windows user)")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
     if args.enable_timeout >= args.timeout:
@@ -277,7 +423,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.resolve()
     folder = args.evidence if args.evidence is not None else root / DEFAULT_EVIDENCE
     try:
-        return record(root, folder, args.timeout, args.enable_timeout)
+        return record(root, folder, args.timeout, args.enable_timeout, args.operator)
     except (RunError, build_workbook.BuildError, check_excel_run.PolicyError, OSError) as error:
         print(f"FAIL: {error}")
         return 1

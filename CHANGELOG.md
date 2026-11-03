@@ -63,6 +63,16 @@ milestones and their pull requests.
 
 ### Added
 
+- The host record of an Excel run, `host.txt`, names the operator, the start
+  and finish times with their UTC offset, the Excel build and bitness, the
+  `AutomationSecurity` and the Trust access to the VBA project as found, and
+  an outcome (`PASS`, `FAIL`, `IMPORT_FAILED`, `COMPILE_FAILED`,
+  `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE`), beside
+  Windows, the references and the compile mode. `excel_run.py` writes it also
+  when the run stops early, and reads the macro settings without changing
+  them. `check_excel_run.py` rejects a record that lacks a field, and accepts
+  an outcome other than `PASS` only as evidence of that outcome; a record
+  written by hand in the earlier three-line form now fails (#244).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs

@@ -93,10 +93,18 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
 ROOT, COMMIT = make_repository() if MODULES and shutil.which("git") else (SOURCE, "")
 ENVIRONMENT = ("ENVIRONMENT=host=Microsoft Excel; version=16.0; build=17928; "
                "os=Windows (64-bit) NT 10.00; office=64-bit; runtime=VBA7")
-HOST = ("windows=Windows 11 Pro 24H2, OS build 26100.4061\n"
+HOST = ("operator=Fixture Operator\n"
+        "started=2026-10-24T16:59:30+02:00\n"
+        "finished=2026-10-24T17:03:10+02:00\n"
+        "windows=Windows 11 Pro 24H2, OS build 26100.4061\n"
+        "excel=16.0 build 17928\n"
+        "bitness=64-bit\n"
+        "automation_security=ByUI\n"
+        "vba_project_access=NOT_TRUSTED\n"
         "references=Visual Basic For Applications; Microsoft Excel 16.0 Object Library; "
         "OLE Automation; Microsoft Office 16.0 Object Library\n"
-        "compile=PASS\n")
+        "compile=PASS\n"
+        "outcome=PASS\n")
 UNCHANGED = "CLEANUP=PASS; detail=Excel state unchanged (Calculation, DisplayAlerts, " \
             "EnableEvents, ScreenUpdating, Workbooks, ActiveWindow)"
 FAILED = check_excel_run.test_failed_number(components(ROOT, COMMIT)[Path(POLICY.harness).name]) \
@@ -626,6 +634,58 @@ class EvidenceTest(unittest.TestCase):
                            "references must be exactly")
         self.assertFinding(edit("host.txt", "windows=Windows 11 Pro 24H2, OS build 26100.4061\n",
                                 ""), "no windows=")
+
+    def test_the_host_record_names_the_operator_the_times_and_the_macro_policy(self) -> None:
+        for key in check_excel_run.HOST_FIELDS:
+            with self.subTest(key=key):
+                line = re.search(rf"^{key}=.*\n", HOST, re.M)
+                assert line, key
+                self.assertFinding(edit("host.txt", line.group(), ""), f"host.txt: no {key}=")
+        wrong = {"started=2026-10-24T16:59:30+02:00": ("started=2026-10-24 16:59:30",
+                                                       "not an ISO 8601 time with its UTC offset"),
+                 "finished=2026-10-24T17:03:10+02:00": ("finished=2026-10-24T16:00:00+02:00",
+                                                        "finished before it started"),
+                 "excel=16.0 build 17928": ("excel=Microsoft 365", "expected <version> build"),
+                 "automation_security=ByUI": ("automation_security=2", "expected one of Low"),
+                 "vba_project_access=NOT_TRUSTED": ("vba_project_access=no",
+                                                    "expected one of TRUSTED"),
+                 "bitness=64-bit": ("bitness=32-bit", "bitness is not 64-bit"),
+                 "outcome=PASS": ("outcome=DONE", "outcome=DONE, expected one of PASS")}
+        for old, (new, text) in wrong.items():
+            with self.subTest(new=new):
+                self.assertFinding(edit("host.txt", old, new), text)
+
+    def test_the_host_record_agrees_with_the_logs(self) -> None:
+        self.assertFinding(edit("host.txt", "excel=16.0 build 17928", "excel=16.0 build 18000"),
+                           "but the logs' ENVIRONMENT is 16.0 build 17928")
+        self.assertFinding(edit("host.txt", "windows=Windows 11 Pro 24H2, OS build 26100.4061",
+                                "windows=UNKNOWN"), "windows=UNKNOWN, but only a run")
+        self.assertFinding(edit("host.txt", "automation_security=ByUI",
+                                "automation_security=UNKNOWN"), "may leave a value unread")
+
+    def test_an_outcome_other_than_pass_is_evidence_of_itself_only(self) -> None:
+        for outcome in check_excel_run.OUTCOMES[1:]:
+            with self.subTest(outcome=outcome):
+                self.assertFinding(edit("host.txt", "outcome=PASS", f"outcome={outcome}"),
+                                   f"evidence of a run that ended {outcome}, never of a pass")
+        # A run that stopped before Excel started cannot read its host values.
+        stopped = re.sub(r"^(excel|bitness|automation_security|vba_project_access)=.*$",
+                         r"\1=UNKNOWN", HOST, flags=re.M).replace("outcome=PASS",
+                                                                  "outcome=UNAVAILABLE")
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / POLICY.host).write_text(stopped, encoding="utf-8")
+            result = check_excel_run.Evidence()
+            check_excel_run.check_host(Path(temporary), result, POLICY)
+        self.assertEqual(result.findings, ["host.txt: outcome=UNAVAILABLE: the record is "
+                                           "evidence of a run that ended UNAVAILABLE, never "
+                                           "of a pass"])
+        with evidence() as folder, contextlib.redirect_stdout(io.StringIO()) as output:
+            (folder / POLICY.host).write_text(stopped, encoding="utf-8")
+            self.assertEqual(check_excel_run.main([str(folder), "--commit", COMMIT,
+                                                   "--root", str(ROOT)]), 1)
+        self.assertIn("Outcome: UNAVAILABLE", output.getvalue())
+        self.assertIn("Operator: Fixture Operator", output.getvalue())
+        self.assertIn("excel-run: FAIL", output.getvalue())
 
 
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
