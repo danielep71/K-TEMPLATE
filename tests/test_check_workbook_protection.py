@@ -9,6 +9,7 @@ import json
 import shutil
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,22 @@ class ProtectionCheckTest(unittest.TestCase):
         self.assertEqual(run(changed("shInputs", input=["C5", "D1:E9"]), template)[0], [])
         self.assertFinding(run(changed("shInputs", output=["A1:B5", "C1:C4", "D9"]),
                                template)[0], "output range D9 are unlocked")
+
+    def test_a_full_height_range_is_checked_without_visiting_each_cell(self) -> None:
+        sheets = workbook_template.default_sheets()
+        sheets[1].columns = ((4, 5, workbook_template.UNLOCKED),)
+        template = workbook_template.template(sheets)
+        matrix = changed("shInputs", input=[], output=["A1:T1048576"])
+        matrix["sheets"]["shReadme"] = {"protection": {}, "input": ["A1:T1048576"]}
+        started = time.perf_counter()
+        findings = run(matrix, template)[0]
+        self.assertLess(time.perf_counter() - started, 5)
+        # Every Readme cell is locked; on Inputs, C5 and the columns D:E are unlocked.
+        self.assertFinding(findings, "sheet shReadme: 20971520 cell(s) of input range "
+                                     "A1:T1048576 are locked, first A1")
+        self.assertFinding(findings, f"sheet shInputs: {2 * 1048576 + 1} cell(s) of output "
+                                     "range A1:T1048576 are unlocked, first D1")
+        self.assertEqual(len(findings), 2, findings)
 
     def test_a_differing_protection_option_fails(self) -> None:
         cases = {

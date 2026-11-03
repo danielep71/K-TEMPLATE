@@ -35,7 +35,7 @@ import json
 import re
 import sys
 import zipfile
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -71,11 +71,6 @@ class Area:
     bottom: int
     right: int
 
-    def cells(self) -> Iterator[tuple[int, int]]:
-        for row in range(self.top, self.bottom + 1):
-            for column in range(self.left, self.right + 1):
-                yield row, column
-
 
 @dataclass(frozen=True)
 class Entry:
@@ -89,16 +84,79 @@ class SheetState:
     """What the template sets for one sheet: protection options and cell styles."""
 
     protection: dict[str, bool]
-    cells: dict[tuple[int, int], int]
+    # The style of each cell element, by row, then column.
+    cells: dict[int, dict[int, int]]
+    # The style of each row with a custom format.
     rows: dict[int, int]
     columns: tuple[tuple[int, int, int], ...]
 
-    def style(self, row: int, column: int) -> int:
-        if (row, column) in self.cells:
-            return self.cells[(row, column)]
-        if row in self.rows:
-            return self.rows[row]
-        return next((style for low, high, style in self.columns if low <= column <= high), 0)
+    def column_runs(self, left: int, right: int) -> list[tuple[int, int, int]]:
+        """(first, last, style) runs covering columns left to right of a row that has no
+        style of its own: each column takes its first <col>, or else the default style."""
+        edges = {left, right + 1}
+        for low, high, _ in self.columns:
+            edges |= {edge for edge in (low, high + 1) if left < edge <= right}
+        bounds = sorted(edges)
+        return [(first, after - 1, next((style for low, high, style in self.columns
+                                         if low <= first <= high), 0))
+                for first, after in zip(bounds, bounds[1:])]
+
+
+def is_locked(flags: list[bool], style: int) -> bool:
+    return flags[style] if style < len(flags) else True
+
+
+def row_mismatches(state: SheetState, flags: list[bool], area: Area, row: int | None,
+                   runs: list[tuple[int, int, int]]) -> tuple[int, int | None]:
+    """How many cells of one row of the area have the wrong lock flag, and the first such
+    column. ``row`` None is a row with neither cell elements nor a style of its own."""
+    locked = KINDS[area.kind]
+    explicit = {column: style for column, style in state.cells.get(row or 0, {}).items()
+                if area.left <= column <= area.right}
+    if row in state.rows:
+        runs = [(area.left, area.right, state.rows[row])]
+    wrong = [column for column, style in explicit.items() if is_locked(flags, style) != locked]
+    count, first = len(wrong), min(wrong, default=None)
+    for low, high, style in runs:
+        if is_locked(flags, style) == locked:
+            continue
+        inside = sorted(column for column in explicit if low <= column <= high)
+        count += high - low + 1 - len(inside)
+        column = low
+        for taken in inside:
+            if taken != column:
+                break
+            column += 1
+        if column <= high:
+            first = column if first is None else min(first, column)
+    return count, first
+
+
+def area_mismatches(state: SheetState, flags: list[bool], area: Area
+                    ) -> tuple[int, tuple[int, int] | None]:
+    """How many cells of the area have the wrong lock flag, and the first such cell, in
+    reading order. Rows without cell elements or a style of their own are all alike, so
+    they are counted once; the cost follows the rows the sheet sets, not the area's size."""
+    runs = state.column_runs(area.left, area.right)
+    special = sorted(row for row in {*state.cells, *state.rows}
+                     if area.top <= row <= area.bottom)
+    plain_count, plain_first = row_mismatches(state, flags, area, None, runs)
+    count = plain_count * (area.bottom - area.top + 1 - len(special))
+    first: tuple[int, int] | None = None
+    if plain_count and plain_first is not None:
+        row = area.top
+        for taken in special:
+            if taken != row:
+                break
+            row += 1
+        if row <= area.bottom:
+            first = (row, plain_first)
+    for row in special:
+        found, column = row_mismatches(state, flags, area, row, runs)
+        count += found
+        if column is not None and (first is None or (row, column) < first):
+            first = (row, column)
+    return count, first
 
 
 def flag(text: str | None, default: bool) -> bool:
@@ -200,7 +258,7 @@ def sheet_state(part: ElementTree.Element) -> SheetState:
     element = part.find(f"{MAIN}sheetProtection")
     protection = {name: flag(None if element is None else element.get(name), default)
                   for name, default in OPTIONS.items()}
-    cells: dict[tuple[int, int], int] = {}
+    cells: dict[int, dict[int, int]] = {}
     rows: dict[int, int] = {}
     for row in part.iterfind(f"{MAIN}sheetData/{MAIN}row"):
         number = int(row.get("r", "0"))
@@ -211,7 +269,7 @@ def sheet_state(part: ElementTree.Element) -> SheetState:
             if match is None:
                 raise ValueError(f"a cell of row {number} has no reference")
             column = build_workbook.column_number(match.group(1))
-            cells[(int(match.group(2)), column)] = int(cell.get("s", "0"))
+            cells.setdefault(int(match.group(2)), {})[column] = int(cell.get("s", "0"))
     columns = tuple((int(col.get("min", "0")), int(col.get("max", "0")), int(col.get("style", "0")))
                     for col in part.iterfind(f"{MAIN}cols/{MAIN}col"))
     return SheetState(protection, cells, rows, columns)
@@ -237,13 +295,11 @@ def compare(entry: Entry, state: SheetState, flags: list[bool]) -> list[str]:
                      f"{str(value).lower()}"
                      for name, value in entry.protection.items() if state.protection[name] != value]
     for area in entry.areas:
-        wrong = [(row, column) for row, column in area.cells()
-                 if (flags[style] if (style := state.style(row, column)) < len(flags) else True)
-                 != KINDS[area.kind]]
-        if wrong:
-            row, column = wrong[0]
+        count, first = area_mismatches(state, flags, area)
+        if first is not None:
+            row, column = first
             state_name = "unlocked" if KINDS[area.kind] else "locked"
-            problems.append(f"{where}: {len(wrong)} cell(s) of {area.kind} range {area.text} "
+            problems.append(f"{where}: {count} cell(s) of {area.kind} range {area.text} "
                             f"are {state_name}, first {build_workbook.column_letters(column)}"
                             f"{row}; the matrix wants every {area.kind} cell "
                             f"{'locked' if KINDS[area.kind] else 'unlocked'}")
