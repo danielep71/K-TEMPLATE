@@ -155,6 +155,8 @@ milestones and their pull requests.
 
 ### Changed
 
+- mypy also reports unreachable code (`warn_unreachable`), such as a branch
+  that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
   open or closed, still carries: with `prune: true`, it checks every label it
   would delete and stops before any change. A name with a comma is refused,
