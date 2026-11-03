@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_vba_calls.py` checks VBA calls that resolve to a procedure of
+  the project, in statements and in expressions, qualified or not: too many
+  or too few arguments, counting `Optional`, `ParamArray` and named
+  arguments, a named argument the procedure does not declare, and a
+  qualified call to a `Private` procedure of another module. It reports
+  nothing for a `With`-block member, an object member, an array element, a
+  `Property` procedure or a built-in. **Repository integrity** runs it as
+  advisory: a finding is a warning, not a failure, until the house style's
+  rule makes it blocking (#249).
 - The host record of an Excel run, `host.txt`, names the operator, the start
   and finish times with their UTC offset, the Excel build and bitness, the
   `AutomationSecurity` and the Trust access to the VBA project as found, and

@@ -169,10 +169,11 @@ compiles nor checks the other rules of this guide.
 
 ## Static checks
 
-**Repository integrity** runs six static checks on every tracked `.bas`,
+**Repository integrity** runs seven static checks on every tracked `.bas`,
 `.cls` and `.frm` file. Each also runs on its own, for example
 `python tools/check_vba_source.py`; with no VBA source, each passes and says
-it examined no component.
+it examined no component. The call check is advisory: **Repository
+integrity** reports its findings as a warning, not a failure.
 
 | Check | Enforces |
 | --- | --- |
@@ -182,11 +183,12 @@ it examined no component.
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
 | `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
+| `tools/check_vba_calls.py` (advisory) | In each environment, for every call that resolves to a procedure of the project, a statement call (`Name args`, `Call Name(args)`, `Module.Name args`) or a call with parentheses in an expression (`x = Helper(1)`): no more arguments than the procedure accepts and every required one passed, counting `Optional` parameters, a `ParamArray` and named arguments (`Name:=Value`); no named argument the procedure does not declare; no qualified call to a `Private` procedure of another module |
 
 What they cannot prove:
 
-- they neither compile nor run VBA, and resolve no call: a name-based rule
-  can miss a call made through a variable or an object;
+- they neither compile nor run VBA, and only the call check resolves calls,
+  by name: a call made through a variable or an object is missed;
 - they check the three compilation environments statically, not on a 32-bit
   or 64-bit host;
 - a private procedure name may repeat across modules, as VBA allows; only a
@@ -203,8 +205,26 @@ What they cannot prove:
   document module. Extend the list when code calls or assigns a built-in it
   does not know. A procedure of another VBA project that this one references
   is not seen either; call it qualified by its module;
+- the call check resolves only a name that no parameter, variable,
+  constant or control shadows, to a procedure of the calling module, the one
+  public procedure of that name in a standard module, or, qualified, a
+  procedure of the standard module named. It says nothing about a member
+  call (`obj.Method`, `.Add x` in a `With` block), an array element
+  (`Values(1)`), a `Property` procedure, a `Declare`, a built-in, a name that
+  two standard modules make public, or a call through `Application.Run` or
+  `CallByName`. Parentheses after a function without parameters may index its
+  result, so their arguments are not counted, and it checks neither argument
+  types nor `ByRef` passing;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
+
+While the call check is advisory, read its findings in the **Repository
+integrity** output and fix each confirmed one, or record it as an issue. My
+rule for making it blocking: once it has run on a project's VBA with no
+false positive and every finding it reported there is fixed, I remove
+`advisory=True` from its entry in `tools/check_repository.py`. If a false
+positive appears later, I make it advisory again and record the case as an
+issue.
 
 Changed VBA is imported, compiled and run on the supported host before its
 behaviour is accepted. Repository checks are not compilation. Record the full

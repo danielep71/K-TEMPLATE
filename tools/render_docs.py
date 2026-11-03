@@ -13,7 +13,8 @@ Each NAME has a renderer here that computes the block from the repository:
   end with, read from the suite that .github/excel-evidence-policy.json names
   by the same code that checks Excel-run evidence (tools/check_excel_run.py);
 - integrity-checks, in CONTRIBUTING.md: the checks that
-  tools/check_repository.py runs, in order, with what each runs;
+  tools/check_repository.py runs, in order, with what each runs and whether
+  it is advisory;
 - data-contract-datasets and data-contract-fields, in
   docs/methodology/DATA_CONTRACT.md: the Datasets table and one field table
   per dataset, read from docs/methodology/data-contract.json by the code that
@@ -118,6 +119,8 @@ def integrity_checks(root: Path) -> str:
                                  "docstring to describe it")
             summary = lines[0]
             runs = f"Built in: {summary}"
+        if check.advisory:
+            runs += " (advisory: findings warn, never fail the run)"
         rows.append(f"| `{check.name}` | {runs} |")
     return "\n".join(["| Check | Runs |", "| --- | --- |", *rows])
 

@@ -205,6 +205,19 @@ class RunTest(RepositoryTest):
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "fail")
 
+    def test_an_advisory_check_warns_without_failing_the_run(self) -> None:
+        self.commit()
+        listed = [Check("advice", [sys.executable, "-c", "import sys; sys.exit('a finding')"],
+                        advisory=True)]
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 0)
+        self.assertIn("advice: WARN (advisory, not a failure: exit code 1)", printed)
+        self.assertIn("a finding", printed)
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["checks"][0]["status"], "warn")  # type: ignore[index]
+        summary = (self.root / "test-results/integrity/summary.md").read_text(encoding="utf-8")
+        self.assertIn("| `advice` | ⚠️ warn | advisory, not a failure: exit code 1 |", summary)
+
     def test_github_annotations(self) -> None:
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
             self.assertEqual(check_repository.annotate(("a.md", "bad")), "::error file=a.md::bad")
@@ -235,7 +248,7 @@ class RunTest(RepositoryTest):
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "vba-format",
-                         "data-contract", "test-cases", "derivations",
+                         "vba-calls", "data-contract", "test-cases", "derivations",
                          "independent-implementations", "workbook-protection",
                          "changelog", "generated-docs", "markdown-links",
                          "codeql-default-branch", "whitespace-committed"):
