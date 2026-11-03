@@ -118,6 +118,10 @@ tests/fixtures/illustrative-file-import-example/
 - **Encoding.** Each file decodes in the encoding the *Datasets* table gives
   its dataset, UTF-8 by default. An `invalid` case may hold a file that does
   not, because that is what it tests.
+- **Content.** Outside an `invalid` case, each delimited text file passes the
+  [reference validator](DATA_CONTRACT.md#reference-validator) of the
+  machine-readable data contract: its header names the dataset's fields, and
+  each value has its field's type and lies within its allowed values or range.
 - **Bytes.** Git stores variant files byte for byte and reports no
   white-space error in them, and editors leave them as they are
   (`.gitattributes`, `.editorconfig`). A file keeps its line endings, final
@@ -446,12 +450,26 @@ Each fixture declares one `category`:
 - Inputs that JSON cannot express, such as non-finite numbers or wrong VBA
   types, are tested in a VBA test module instead of a fixture.
 
+<a id="other-tests"></a>
+
+## Relation, end-to-end and volume tests
+
+Three kinds of VBA test complement the cases. Each is described in the
+[harness guide](TEST_HARNESS.md), and none adds a category:
+
+| Test | Uses | Shows |
+| --- | --- | --- |
+| [Relation test](TEST_HARNESS.md#relation-tests) | No fixture or expected file: inputs written in the test module | A property of the calculation, such as additivity, symmetry, monotonicity or a zero input giving zero, with a corruption check that a deliberately corrupted output fails it |
+| [End-to-end case runner](TEST_HARNESS.md#end-to-end-case-runner) | A case's fixture and expected file, written to the input sheets | That the workbook, run through its public entry point, gives the case's expected values within its tolerance |
+| [Volume benchmark](TEST_HARNESS.md#volume-benchmarks) | A large synthetic input built in memory, never committed | How long the calculation takes on one host; never a reference value and never certification evidence |
+
 <a id="completeness-policy"></a>
 
 ## Completeness policy
 
 - A rule is **validated** only when at least one `published` or
-  `independent` case passes for it. `illustrative` cases never count.
+  `independent` case passes for it. `illustrative` cases, relation tests and
+  volume benchmarks never count.
 - Each implemented rule also needs at least one `boundary` case, and each
   input domain at least one `invalid` case, as a fixture or a VBA test.
 - A run that does not execute every expected case and assertion is
@@ -468,7 +486,8 @@ Each fixture declares one `category`:
 ## Checking
 
 `tools/check_test_cases.py` checks the files under `tests/fixtures/` and
-`tests/expected/`. With no case present it passes and says so.
+`tests/expected/`, and the traceability table that names them. With no case
+and no traceability row present it passes and says so.
 
 It checks:
 
@@ -479,7 +498,10 @@ It checks:
   - the whole manifest;
   - the variant names, and that each variant holds only files the data
     contract names for the manifest's datasets;
-  - outside an `invalid` case, that each file decodes in its encoding;
+  - outside an `invalid` case, that each file decodes in its encoding, and
+    that a delimited text file passes the
+    [reference validator](DATA_CONTRACT.md#reference-validator), whose
+    findings it reports with their codes;
   - that the expected file's variants and the variant directories agree;
 - outside an `invalid` case, the calculation inputs:
   - the calculation and the datasets, against the methodology guides;
@@ -493,13 +515,18 @@ It checks:
   - their rule, against the case's calculation;
 - the reference class, its source against the register, and its script;
 - the `illustrative` naming rules, and a `_status` text output in every
-  `invalid` case.
+  `invalid` case;
+- the [traceability table](VALIDATION_PLAN.md#traceability) of the validation
+  plan: each row's source, calculation step, VBA procedures and cases exist,
+  each case tests the row's calculation, and the status agrees with what the
+  row names.
 
 It does not check:
 
 - whether an input key or a quantity name belongs to the contracts;
-- the content of a variant file beyond its name and encoding: its layout is
-  what the import under test checks;
+- the content of a variant file in an `invalid` case beyond its name, or of a
+  file that is not delimited text beyond its name and encoding;
+- what the values of a variant file mean: the import under test checks them;
 - that an `invalid` case has no numeric output for what it rejects;
 - any value: nothing is computed or compared. `tools/check_derivations.py`
   compares the values that a [derivation script](#derivation-scripts) computes,
