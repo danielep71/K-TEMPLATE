@@ -277,14 +277,40 @@ class RebuildTest(unittest.TestCase):
         self.assertEqual(set(result.hashes), set(components(self.root, self.commit)))
         self.assertIn("Binding: VERIFIED", check_excel_run.report(self.commit, result))
 
-    def test_any_byte_difference_fails(self) -> None:
-        changed = Path(self.temporary.name) / "changed.xlsm"
-        data = bytearray(self.workbook.read_bytes())
-        data[-1] ^= 1
-        changed.write_bytes(bytes(data))
-        result = self.checked(changed)
+    def repacked(self, name: str, change: Callable[[str, bytes], bytes] = lambda _, data: data,
+                 **options: Any) -> Path:
+        """The workbook's parts written again into a new package with ``options``."""
+        target = Path(self.temporary.name) / name
+        with zipfile.ZipFile(self.workbook) as source, \
+                zipfile.ZipFile(target, "w", **options) as package:
+            for info in source.infolist():
+                package.writestr(info.filename, change(info.filename, source.read(info)))
+        return target
+
+    def test_the_parts_not_the_compression_decide(self) -> None:
+        # Another platform or zlib packs the same parts into other bytes.
+        other = self.repacked("other-compression.xlsm", compression=zipfile.ZIP_DEFLATED,
+                              compresslevel=1)
+        self.assertNotEqual(other.read_bytes(), self.workbook.read_bytes())
+        result = self.checked(other)
+        self.assertEqual((result.findings, result.binding), ([], "VERIFIED"))
+
+    def test_a_changed_part_fails_and_is_named(self) -> None:
+        def project(name: str, data: bytes) -> bytes:
+            return data + b"\0" if name == "xl/vbaProject.bin" else data
+        result = self.checked(self.repacked("changed-project.xlsm", project,
+                                            compression=zipfile.ZIP_DEFLATED))
         self.assertEqual(result.binding, "FAIL")
-        self.assertTrue(any("but the development build of" in item for item in result.findings),
+        self.assertTrue(any("xl/vbaProject.bin (SHA-256" in item and
+                            "differs from the development build of" in item
+                            for item in result.findings), result.findings)
+
+    def test_a_package_that_is_not_a_zip_fails(self) -> None:
+        broken = Path(self.temporary.name) / "broken.xlsm"
+        broken.write_bytes(b"not a workbook")
+        result = self.checked(broken)
+        self.assertEqual(result.binding, "FAIL")
+        self.assertTrue(any("not a readable package" in item for item in result.findings),
                         result.findings)
 
     def test_a_missing_workbook_fails(self) -> None:

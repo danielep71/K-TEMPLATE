@@ -68,7 +68,7 @@ milestones and their pull requests.
   COM, closes without saving and writes `host.txt`, then checks the
   evidence. It needs no Trust access: with `--workbook` and no export,
   `tools/check_excel_run.py` proves identity by rebuilding the commit and
-  comparing the workbook byte for byte, and accepts `compile=ON_DEMAND`,
+  comparing the workbook's parts byte for byte, and accepts `compile=ON_DEMAND`,
   because only the modules the run calls are compiled (#204).
 - Accuracy contracts (`tests/accuracy/contracts.json`, checked by
   `tools/check_accuracy.py` in **Repository integrity**). A contract states

@@ -20,6 +20,7 @@ import struct
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from pathlib import Path
 from typing import Any
@@ -386,6 +387,15 @@ class Workbook(unittest.TestCase):
         second, _ = self.build()
         self.assertEqual(first, second)
         self.assertEqual(result.commit, build_workbook.git(ROOT, "rev-parse", "HEAD"))
+
+    def test_the_package_is_the_same_on_windows(self) -> None:
+        # ZipInfo records the creating system from sys.platform: 0 on Windows, 3 elsewhere.
+        build = build_workbook.Build("a" * 40, "2026-11-02T10:00:00+01:00", True,
+                                     "development", ())
+        here = build_workbook.package(self.layout, build, b"project")
+        with unittest.mock.patch.object(zipfile.sys, "platform", "win32"):
+            windows = build_workbook.package(self.layout, build, b"project")
+        self.assertEqual(here, windows)
 
     def test_the_package_holds_the_contract_layout_and_the_stamp(self) -> None:
         data, result = self.build()

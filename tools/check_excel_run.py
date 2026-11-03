@@ -40,7 +40,10 @@ docs/methodology/TEST_HARNESS.md describes them:
 Without an exported folder, --workbook proves source identity instead by
 rebuild: the commit is checked out in a temporary worktree and built with
 tools/devbuild/build_workbook.py, and the workbook Excel ran, closed without
-saving, must equal that build byte for byte (binding VERIFIED, or FAIL).
+saving, must hold the same parts as that build, in the same order and byte for
+byte once decompressed (binding VERIFIED, or FAIL). The parts, not the
+compressed package, are compared, because another platform's zlib may pack
+the same parts into other bytes.
 Excel compiles the project from source on open, so the code that ran is the
 commit's. Such a run, as tools/devbuild/excel_run.py records it without Trust
 access to the VBA project, may record compile=ON_DEMAND: only the modules the
@@ -55,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import posixpath
 import re
@@ -701,16 +705,39 @@ def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -
                 git(root, "worktree", "remove", "--force", str(tree))
             except RuntimeError:
                 pass
-    actual = workbook.read_bytes()
-    if actual != rebuilt:
+    try:
+        actual = package_parts(workbook.read_bytes())
+    except (zipfile.BadZipFile, OSError, ValueError) as error:
+        evidence.findings.append(f"workbook {workbook.name}: not a readable package: {error}")
+        return
+    difference = parts_difference(actual, package_parts(rebuilt))
+    if difference:
         evidence.findings.append(
-            f"workbook {workbook.name}: SHA-256 {sha256(actual)[:16]}..., but the "
-            f"{REBUILT_CONFIGURATION} build of {commit[:12]} is {sha256(rebuilt)[:16]}...: "
-            "it was saved after the build, or not built from that commit")
+            f"workbook {workbook.name}: {difference} the {REBUILT_CONFIGURATION} build of "
+            f"{commit[:12]}: it was saved after the build, or not built from that commit")
         return
     evidence.binding = "VERIFIED"
-    evidence.binding_notes.append(f"workbook byte-identical to the {REBUILT_CONFIGURATION} "
-                                  f"build of {commit[:12]}; no export needed")
+    evidence.binding_notes.append(f"workbook parts byte-identical to the "
+                                  f"{REBUILT_CONFIGURATION} build of {commit[:12]}; no export "
+                                  "needed")
+
+
+def package_parts(data: bytes) -> list[tuple[str, bytes]]:
+    """The files of a ZIP package, in order, decompressed."""
+    with zipfile.ZipFile(io.BytesIO(data)) as package:
+        return [(info.filename, package.read(info)) for info in package.infolist()]
+
+
+def parts_difference(actual: list[tuple[str, bytes]], expected: list[tuple[str, bytes]]) -> str:
+    """How the parts differ, as the start of a sentence that ends by naming the build;
+    empty when they are the same."""
+    names = [name for name, _ in actual]
+    if names != [name for name, _ in expected]:
+        return f"its parts ({', '.join(names)}) differ from those of"
+    for (name, data), (_, other) in zip(actual, expected):
+        if data != other:
+            return f"{name} (SHA-256 {sha256(data)[:16]}...) differs from"
+    return ""
 
 
 def check_binding(root: Path, commit: str, folder: Path, workbook: Path | None,
@@ -898,7 +925,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--workbook", type=Path,
                         help="the workbook the export came from, checked against "
                              f"the export manifest named in {POLICY} and its build stamp; "
-                             "without an exported folder, compared byte for byte with a "
+                             "without an exported folder, compared part by part with a "
                              "rebuild of the commit")
     parser.add_argument("--require-binding", action="store_true",
                         help="fail unless the binding is VERIFIED (release evidence)")

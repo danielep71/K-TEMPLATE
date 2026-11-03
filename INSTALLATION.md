@@ -233,8 +233,10 @@ It must end with `Binding: VERIFIED` and `excel-run: PASS`; record it as
 step 10 says.
 
 There is no export: the check proves identity by rebuilding the commit in a
-temporary worktree and comparing the workbook Excel ran, byte for byte,
-because Excel compiles the project from source on open.
+temporary worktree. The workbook Excel ran must hold the same parts as that
+build, byte for byte once decompressed, the VBA project included. Excel
+compiles the project from source on open, so the code that ran is the
+commit's.
 
 Without Trust access nothing can run **Debug → Compile VBAProject**. VBA then
 compiles on demand only the modules the run calls, and `compile=ON_DEMAND`
@@ -340,7 +342,7 @@ fails, or when you need a full compile.
 | `certification.log` is missing, a mode did not end as it must, a failure run did not reach its caller as `ERR_TEST_FAILED`, or it does not end with `CERTIFICATION=PASS` and `COMPLETE` | The certification did not pass |
 | `ENVIRONMENT` lacks a field, differs between the logs, or Office is not 64-bit | The host is unknown or not the supported target |
 | `host.txt` lacks a field, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), or `compile` is not `PASS` (or `ON_DEMAND` for a run without export) | The host record is incomplete |
-| Without `exported\`, the workbook given with `--workbook` differs in a byte from a rebuild of the commit | It was saved after the build, or not built from that commit (`Binding: FAIL`) |
+| Without `exported\`, a part of the workbook given with `--workbook` differs from a rebuild of the commit, or a part is missing or extra | It was saved after the build, or not built from that commit (`Binding: FAIL`) |
 | `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |
 | With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
 | The commit holds `tests/accuracy/contracts.json`, and `results.json` is missing, names another commit or a build with local changes, lacks a result, holds a result outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
