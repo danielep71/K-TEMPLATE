@@ -2,6 +2,7 @@
 """Record an Excel run of the harness certification with one command, on Windows.
 
 Usage: python tools/devbuild/excel_run.py [--evidence FOLDER] [--timeout SECONDS]
+                                         [--enable-timeout SECONDS]
 
 Run it in a clean checkout of the candidate commit, on Windows with Excel
 installed. It replaces the manual steps of INSTALLATION.md, Recording an
@@ -12,9 +13,13 @@ Excel run, and never needs Trust access to the VBA project object model:
 2. empties the evidence folder (default test-results/excel-run, which Git
    ignores; another folder must be empty or absent);
 3. opens the workbook read-only in a visible Excel through COM, from
-   PowerShell started with -NoProfile and -EncodedCommand, runs the suite's
-   certification entry point with the evidence folder and tests/fixtures,
-   then closes the workbook without saving and quits Excel;
+   PowerShell started with -NoProfile and -EncodedCommand. It changes no
+   macro setting: where Excel opens it with macros disabled, as under a
+   policy that makes programs follow the user's macro setting
+   (VALIDATION_PLAN.md, HB-02), you click Enable Content once, and the
+   command waits for that, up to --enable-timeout seconds. Then it runs the
+   suite's certification entry point with the evidence folder and
+   tests/fixtures, closes the workbook without saving and quits Excel;
 4. writes host.txt: Windows from the registry, the references the build
    gives the project, and compile=ON_DEMAND, because nothing can compile the
    whole project without Trust access, so VBA compiled the modules the run
@@ -117,9 +122,13 @@ def quoted(text: str) -> str:
 
 
 def powershell_script(workbook: Path, folder: Path, fixtures: Path, module: str,
-                      entry_point: str) -> str:
-    """Open the workbook read-only, run the entry point, close without saving, quit."""
+                      entry_point: str, probe: str, enable_timeout: int) -> str:
+    """Open the workbook read-only, wait until its macros run, run the entry point, close
+    without saving, quit. It never changes a macro setting: when the workbook opens with
+    macros disabled, a person enables them with Enable Content (HB-02)."""
     return f"""$ErrorActionPreference = 'Stop'
+# Progress records would reach the caller as CLIXML on standard error.
+$ProgressPreference = 'SilentlyContinue'
 $workbookPath = {quoted(str(workbook))}
 $evidence = {quoted(str(folder))}
 $fixtures = {quoted(str(fixtures))}
@@ -132,11 +141,29 @@ try {{
     $excel.DisplayAlerts = $false
     # UpdateLinks 0, ReadOnly: the workbook on disk stays the build.
     $book = $excel.Workbooks.Open($workbookPath, 0, $true)
-    $macro = "'" + $book.Name.Replace("'", "''") + "'!{module}.{entry_point}"
-    try {{
-        [void]$excel.Run($macro, $evidence, $fixtures)
-    }} catch {{
-        $failure = $_.Exception.Message
+    [void]$book.Activate()
+    $prefix = "'" + $book.Name.Replace("'", "''") + "'!"
+    # Wait until the workbook's macros run: at once where Excel enables them, or
+    # after a person clicks Enable Content. The probe only reads harness state.
+    $deadline = (Get-Date).AddSeconds({enable_timeout})
+    $enabled = $false
+    while (-not $enabled) {{
+        try {{
+            [void]$excel.Run($prefix + {quoted(probe)})
+            $enabled = $true
+        }} catch {{
+            if ((Get-Date) -gt $deadline) {{ break }}
+            Start-Sleep -Seconds 2
+        }}
+    }}
+    if (-not $enabled) {{
+        $failure = "NOT-ENABLED"
+    }} else {{
+        try {{
+            [void]$excel.Run($prefix + "{module}.{entry_point}", $evidence, $fixtures)
+        }} catch {{
+            $failure = $_.Exception.Message
+        }}
     }}
 }} catch {{
     $failure = $_.Exception.Message
@@ -148,6 +175,10 @@ try {{
     }}
     [GC]::Collect()
     [GC]::WaitForPendingFinalizers()
+}}
+if ($failure -eq "NOT-ENABLED") {{
+    Write-Output "EXCEL-RUN=NOT-ENABLED"
+    exit 4
 }}
 if ($failure) {{
     Write-Output "EXCEL-RUN=ERROR; $failure"
@@ -175,7 +206,15 @@ def run_excel(script: str, timeout: int) -> tuple[int, str]:
     return completed.returncode, (completed.stdout + completed.stderr).strip()
 
 
-def record(root: Path, folder: Path, timeout: int) -> int:
+# The exit code of the PowerShell script when the macros were never enabled.
+NOT_ENABLED = 4
+ENABLE_HINT = ("Excel opens the workbook now. If it shows a yellow bar SECURITY WARNING, "
+               "Macros have been disabled, click Enable Content (or File > Info > Enable "
+               "Content > Enable All Content). Change nothing else, and leave Excel alone "
+               "until it closes.")
+
+
+def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300) -> int:
     policy = check_excel_run.working_policy(root)
     workbook = root / WORKBOOK
     built = build_workbook.build(root, check_excel_run.REBUILT_CONFIGURATION, workbook)
@@ -185,12 +224,17 @@ def record(root: Path, folder: Path, timeout: int) -> int:
                        "commit or remove them, or use a clean clone")
     prepare(folder, root)
     module = Path(policy.suite_source).stem
+    probe = f"{Path(policy.harness).stem}.LastResult"
     script = powershell_script(workbook, folder.resolve(), (root / FIXTURES).resolve(), module,
-                               policy.entry_point)
+                               policy.entry_point, probe, enable_timeout)
     print(f"running {module}.{policy.entry_point} in Excel ...")
+    print(ENABLE_HINT)
     code, output = run_excel(script, timeout)
     if output:
         print(output)
+    if code == NOT_ENABLED:
+        raise RunError(f"the workbook's macros were not enabled within {enable_timeout} s, so "
+                       "nothing ran: run the command again and click Enable Content in Excel")
     if code not in (0, 3):
         raise RunError(f"PowerShell or Excel failed (exit {code}); see the output above")
     (folder / policy.host).write_text(host_record(windows_version(), built_references()),
@@ -209,16 +253,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--evidence", type=Path, default=None,
                         help=f"the evidence folder (default: {DEFAULT_EVIDENCE.as_posix()})")
     parser.add_argument("--timeout", type=int, default=600,
-                        help="seconds to wait for Excel (default: 600)")
+                        help="seconds to wait for Excel in all (default: 600)")
+    parser.add_argument("--enable-timeout", type=int, default=300,
+                        help="seconds to wait for Enable Content (default: 300)")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
+    if args.enable_timeout >= args.timeout:
+        parser.error("--enable-timeout must be shorter than --timeout")
     if os.name != "nt":
         print("excel-run: SKIP (needs Windows with Excel; this records no evidence)")
         return 2
     root = args.root.resolve()
     folder = args.evidence if args.evidence is not None else root / DEFAULT_EVIDENCE
     try:
-        return record(root, folder, args.timeout)
+        return record(root, folder, args.timeout, args.enable_timeout)
     except (RunError, build_workbook.BuildError, check_excel_run.PolicyError, OSError) as error:
         print(f"FAIL: {error}")
         return 1

@@ -69,7 +69,9 @@ milestones and their pull requests.
   evidence. It needs no Trust access: with `--workbook` and no export,
   `tools/check_excel_run.py` proves identity by rebuilding the commit and
   comparing the workbook's parts byte for byte, and accepts `compile=ON_DEMAND`,
-  because only the modules the run calls are compiled (#204).
+  because only the modules the run calls are compiled. It changes no macro
+  setting: where Excel opens the workbook with macros disabled, it waits for
+  **Enable Content** (#204).
 - Accuracy contracts (`tests/accuracy/contracts.json`, checked by
   `tools/check_accuracy.py` in **Repository integrity**). A contract states
   the worst error a calculation guarantees for one regime, over separate
