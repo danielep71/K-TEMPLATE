@@ -22,6 +22,7 @@ two forms:
 | `tests/fixtures/<case-id>/` | A [file-based case](#file-based-cases): a `case.json` manifest and one directory per variant, holding input files |
 | `tests/expected/<case-id>.json` | Expected results, each with its provenance |
 | `tests/derivations/<name>.py` | Optional: a script that computes expected values from the documented method, separately from the code under test |
+| `tests/accuracy/contracts.json` | Optional: the [accuracy contracts](#accuracy-contracts), each stating the worst error a calculation guarantees over a set of cases |
 
 - Use a **JSON fixture** to test a calculation: its inputs are values, already
   read. Use a **file-based case** to test the import of the files the
@@ -264,6 +265,82 @@ decided them. A common starting point:
   negative fails if it is negative, however small.
 - Results are compared unrounded, unless the contract rounds them.
 
+<a id="accuracy-contracts"></a>
+
+## Accuracy contracts
+
+A case's tolerance decides whether that case passes. An accuracy contract
+states the guarantee a calculation gives for one regime: the worst error
+allowed over the outputs of its quantities in a set of cases. It is what a
+release may publish as the calculation's accuracy.
+`tests/accuracy/contracts.json` holds the contracts:
+
+```json
+{
+  "schema_version": 1,
+  "kind": "accuracy-contracts",
+  "min_holdout_cases": 3,
+  "contracts": [
+    {
+      "id": "ACC-01",
+      "calculation": "CALC-01",
+      "regime": "illustrative",
+      "quantities": ["illustrative_total_notional_amount"],
+      "metric": "absolute",
+      "threshold": 0.000001,
+      "provenance": "Why the threshold is what it is",
+      "status": "draft",
+      "decision": null,
+      "calibration_cases": ["illustrative-format-example"],
+      "holdout_cases": ["illustrative-file-import-example"]
+    }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `id` | `ACC-` and a number, unique |
+| `calculation` | A `CALC-` ID declared by the calculation contracts; every case of the contract tests it |
+| `regime` | A free text label, such as the regulation or its version |
+| `quantities` | The outputs the contract covers; every case has an expected number for each |
+| `metric`, `threshold` | `absolute`: the absolute difference between the result and the expected value; `relative`: that difference divided by the expected value's magnitude, which is 0 at an expected 0 only when the result is 0 too. The threshold is a finite number of at least 0 |
+| `provenance` | Why the threshold is what it is |
+| `status`, `decision` | `draft`, with `decision` `null`, or `frozen`, with the issue or record that froze it |
+| `calibration_cases` | The cases that may be used to set the threshold |
+| `holdout_cases` | The cases that never are; no case is in both lists |
+
+- **Frozen.** A contract may be frozen only with at least `min_holdout_cases`
+  holdout cases, and only when every expected value of its quantities in
+  them is `published` or `independent`. A contract on an illustrative
+  calculation stays `draft`, as the template's `ACC-01` does.
+- **Frozen is kept.** Once a release tag holds a frozen contract, it is never
+  removed or returned to `draft`, and its threshold grows only with a new
+  `decision`. The check compares with the newest `vX.Y.Z` tag of the branch.
+- **Measured on the workbook.** The contracts measure the workbook's results,
+  which exist only after an Excel run. `python tools/check_accuracy.py`, which
+  **Repository integrity** runs, checks the registry against the cases. With
+  `--results <file>`, the results file of an Excel run, it also fails on:
+  - an output without a result;
+  - a result outside its own tolerance;
+  - a worst error above the threshold, which it computes separately for the
+    calibration and the holdout cases.
+
+```json
+{
+  "schema_version": 1,
+  "kind": "test-results",
+  "commit": "<full commit SHA of the workbook's source>",
+  "results": [
+    {"case": "illustrative-format-example", "variant": null,
+     "quantity": "illustrative_total_notional_amount", "scope": null, "value": 1000000}
+  ]
+}
+```
+
+A result names its case, its variant (`null` for a JSON fixture), its
+quantity and its scope as in the expected file.
+
 <a id="categories"></a>
 
 ## Case categories
@@ -307,6 +384,9 @@ Each fixture declares one `category`:
   input domain at least one `invalid` case, as a fixture or a VBA test.
 - A run that does not execute every expected case and assertion is
   **incomplete, not a pass**.
+- A calculation's accuracy is guaranteed only by a **frozen** accuracy
+  contract whose results were measured on an Excel run of the release
+  candidate.
 - A release states which rules are validated, under which version of their
   sources, and lists every rule that is implemented but not validated
   ([release certification](../release/RELEASE_CERTIFICATION.md)).

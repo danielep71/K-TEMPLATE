@@ -67,6 +67,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `vba-identifiers` | `python tools/check_vba_identifiers.py` |
 | `test-cases` | `python tools/check_test_cases.py` |
 | `derivations` | `python tools/check_derivations.py` |
+| `accuracy` | `python tools/check_accuracy.py` |
 | `changelog` | `python tools/check_changelog.py` |
 | `generated-docs` | `python tools/render_docs.py --check` |
 | `markdown-links` | `python tools/check_links.py` |
