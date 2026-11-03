@@ -188,6 +188,15 @@ milestones and their pull requests.
 
 ### Changed
 
+- `SECURITY.md` describes the runtime risk surface: what the test harness,
+  the example suite and `tools/devbuild/excel_run.py` read, write and delete,
+  the Excel settings they need (enabled macros, no Trust access, no change to
+  a macro setting), which access the dependency rules forbid in core and
+  classes, and what a generated repository states for its own entry points.
+  It adds a data-and-secrets section (what a workbook can hide, and that a
+  leaked secret is revoked or rotated before it is reported) and a safe
+  harbor for good-faith research. The setup guide tells a generated
+  repository to adapt the runtime section (#242).
 - mypy also reports unreachable code (`warn_unreachable`), such as a branch
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
