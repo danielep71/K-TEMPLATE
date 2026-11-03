@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import check_accuracy  # noqa: E402
 
 QUANTITY = "total_exposure_amount"
+CANDIDATE = "a" * 40
 ILLUSTRATIVE = {
     "id": "ACC-01", "calculation": "CALC-01", "regime": "illustrative",
     "quantities": ["illustrative_total_notional_amount"], "metric": "absolute",
@@ -84,19 +85,19 @@ def repository(content: dict[str, Any] | None) -> Iterator[Path]:
         yield root
 
 
-def findings(content: dict[str, Any] | None, results: dict[str, Any] | None = None
-             ) -> list[str]:
+def findings(content: dict[str, Any] | None, results: dict[str, Any] | None = None,
+             commit: str | None = CANDIDATE) -> list[str]:
     with repository(content) as root:
         path = None
         if results is not None:
             path = root / "results.json"
             path.write_text(json.dumps(results), "utf-8")
-        return check_accuracy.check(root, path)[0]
+        return check_accuracy.check(root, path, commit)[0]
 
 
 def results(**values: float) -> dict[str, Any]:
     """A results file with ``values`` for the CALC-02 cases (underscores for hyphens)."""
-    return {"schema_version": 1, "kind": "test-results", "commit": "0" * 40, "results": [
+    return {"schema_version": 1, "kind": "test-results", "commit": CANDIDATE, "results": [
         {"case": case.replace("_", "-"), "variant": None, "quantity": QUANTITY, "scope": None,
          "value": value} for case, value in values.items()]}
 
@@ -137,6 +138,8 @@ class RegistryTest(unittest.TestCase):
                            "a draft contract has no decision")
         self.assertFinding(findings(registry(FROZEN, FROZEN)), "id appears twice")
         self.assertFinding(findings(registry({**FROZEN, "extra": 1})), "keys are not")
+        self.assertFinding(findings(registry({**FROZEN, "quantities": [QUANTITY, QUANTITY]})),
+                           "quantities lists a name twice")
         self.assertFinding(findings(registry(FROZEN, minimum=0)),
                            "min_holdout_cases is not a whole number of at least 1")
         self.assertFinding(findings({"schema_version": 2}), "envelope is not")
@@ -157,6 +160,13 @@ class RegistryTest(unittest.TestCase):
         for text, change in cases.items():
             with self.subTest(text=text):
                 self.assertFinding(findings(registry({**FROZEN, **change})), text)
+
+    def test_a_repeated_case_does_not_count_twice(self) -> None:
+        repeated = {**FROZEN, "holdout_cases": ["demo-holdout-1"] * 3}
+        found = findings(registry(repeated, minimum=3))
+        self.assertTrue(any("holdout_cases lists a case twice" in item for item in found), found)
+        self.assertTrue(any("calibration_cases lists a case twice" in item for item in findings(
+            registry({**FROZEN, "calibration_cases": ["demo-calibration"] * 2}))))
 
     def test_a_frozen_contract_needs_independent_holdout_cases(self) -> None:
         self.assertFinding(findings(registry(FROZEN, minimum=3)),
@@ -179,7 +189,7 @@ class ResultsTest(unittest.TestCase):
         with repository(registry(FROZEN)) as root:
             path = root / "results.json"
             path.write_text(json.dumps(good), "utf-8")
-            found, contracts, lines = check_accuracy.check(root, path)
+            found, contracts, lines = check_accuracy.check(root, path, CANDIDATE)
         self.assertEqual((found, contracts), ([], 1))
         self.assertEqual([line.split(" error ")[0] for line in lines],
                          ["ACC-02 calibration: worst relative", "ACC-02 holdout: worst relative"])
@@ -214,6 +224,20 @@ class ResultsTest(unittest.TestCase):
         self.assertTrue(any("no result for demo-holdout-1 total_exposure_amount" in item
                             for item in missing), missing)
 
+    def test_results_must_be_of_the_candidate(self) -> None:
+        stale = results(demo_calibration=100, demo_holdout_1=200, demo_holdout_2=0)
+        found = findings(registry(FROZEN), stale, commit="b" * 40)
+        self.assertTrue(any("results are of commit aaaaaaaaaaaa, not of the candidate "
+                            "bbbbbbbbbbbb" in item for item in found), found)
+        for commit in (None, "HEAD", "A" * 40):
+            with self.subTest(commit=commit):
+                bad = {**stale, "commit": commit}
+                self.assertTrue(any("commit is not a full lower-case commit SHA" in item
+                                    for item in findings(registry(FROZEN), bad)))
+        # Outside a Git checkout, with no --commit, the candidate is unknown.
+        self.assertTrue(any("the candidate commit is unknown" in item
+                            for item in findings(registry(FROZEN), stale, commit=None)))
+
     def test_a_malformed_results_file_fails(self) -> None:
         self.assertTrue(any("envelope is not schema_version 1, kind 'test-results'" in item
                             for item in findings(registry(FROZEN), {"kind": "other"})))
@@ -229,7 +253,7 @@ class ResultsTest(unittest.TestCase):
             path.write_text(json.dumps(results(demo_calibration=1, demo_holdout_1=200,
                                                demo_holdout_2=0)), "utf-8")
             self.assertEqual(check_accuracy.main(["--root", str(root), "--results",
-                                                  str(path)]), 1)
+                                                  str(path), "--commit", CANDIDATE]), 1)
         self.assertIn("accuracy: FAIL (1 contract(s); measured against the results)",
                       output.getvalue())
 
@@ -265,6 +289,20 @@ class WideningTest(unittest.TestCase):
                                 found)
         draft = {**FROZEN, "status": "draft", "decision": None}
         self.assertEqual(self.tagged(draft, None), [])
+
+    def test_deleting_the_registry_does_not_drop_a_released_frozen_contract(self) -> None:
+        for before, dropped in ((FROZEN, True), ({**FROZEN, "status": "draft",
+                                                  "decision": None}, False)):
+            with self.subTest(status=before["status"]), \
+                    repository(registry(before)) as root:
+                git(root, "init", "-q")
+                git(root, "add", "-A")
+                git(root, "commit", "-qm", "Release")
+                git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+                (root / "tests/accuracy/contracts.json").unlink()
+                found = check_accuracy.check(root)[0]
+                self.assertEqual(any("ACC-02 was frozen at v1.0.0" in item for item in found),
+                                 dropped, found)
 
 
 if __name__ == "__main__":

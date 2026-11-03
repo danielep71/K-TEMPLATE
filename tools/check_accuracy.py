@@ -19,6 +19,8 @@ Without a results file, the check reads the registry against the cases:
   frozen, and its threshold is no larger unless it names another decision.
 
 With --results, a results file of an Excel run, it also fails:
+- results of another revision: their commit is the full SHA of the candidate,
+  --commit when given, HEAD otherwise;
 - an output with no result;
 - a result outside its expected output's own tolerance;
 - a contract whose worst error, among its calibration or among its holdout
@@ -69,6 +71,7 @@ INDEPENDENT = frozenset({"published", "independent"})
 METRICS = frozenset({"absolute", "relative"})
 STATUSES = frozenset({"draft", "frozen"})
 TAG = re.compile(r"^v\d+\.\d+\.\d+$")
+SHA = re.compile(r"^[0-9a-f]{40}$")
 
 # A result's identity: case, variant (None for a JSON fixture), quantity and scope.
 Key = tuple[str, str | None, str, str | None]
@@ -159,6 +162,8 @@ def contract_problems(data: Mapping[str, Any]) -> list[str]:
     if not isinstance(quantities, list) or not quantities or \
             not all(isinstance(item, str) and SNAKE.match(item) for item in quantities):
         problems.append("quantities is not a non-empty list of lower snake case names")
+    elif len(set(quantities)) != len(quantities):
+        problems.append("quantities lists a name twice")
     if data.get("metric") not in METRICS:
         problems.append("metric is not absolute or relative")
     if not is_number(data.get("threshold")) or data["threshold"] < 0:
@@ -176,6 +181,9 @@ def contract_problems(data: Mapping[str, Any]) -> list[str]:
         cases = data.get(name)
         if not isinstance(cases, list) or not all(isinstance(item, str) for item in cases):
             problems.append(f"{name} is not a list of case IDs")
+        elif len(set(cases)) != len(cases):
+            # Each case counts once, so a repeated ID would inflate the holdout.
+            problems.append(f"{name} lists a case twice")
     return problems
 
 
@@ -324,7 +332,9 @@ def error(metric: str, actual: float, expected: float) -> float:
     return abs(actual - expected) / abs(expected)
 
 
-def read_results(path: Path, root: Path, report: Report) -> dict[Key, float] | None:
+def read_results(path: Path, root: Path, candidate: str | None,
+                 report: Report) -> dict[Key, float] | None:
+    """The results of the candidate's run; None when the file is unusable or of another commit."""
     where = str(path)
     data = load_json(path, root, report)
     if data is LOAD_FAILED:
@@ -334,6 +344,18 @@ def read_results(path: Path, root: Path, report: Report) -> dict[Key, float] | N
             not isinstance(data["results"], list):
         report.add(where, "envelope is not schema_version 1, kind 'test-results', commit "
                           "and a results list")
+        return None
+    commit = data["commit"]
+    if not isinstance(commit, str) or not SHA.match(commit):
+        report.add(where, "commit is not a full lower-case commit SHA")
+        return None
+    if candidate is None:
+        report.add(where, "the candidate commit is unknown: pass --commit, or run in a Git "
+                          "checkout")
+        return None
+    if commit != candidate:
+        report.add(where, f"results are of commit {commit[:12]}, not of the candidate "
+                          f"{candidate[:12]}")
         return None
     results: dict[Key, float] = {}
     for index, item in enumerate(data["results"]):
@@ -375,17 +397,27 @@ def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Map
     return lines
 
 
-def check(root: Path, results_path: Path | None = None) -> tuple[list[str], int, list[str]]:
-    """The findings, the number of contracts and the measurement lines."""
+def check(root: Path, results_path: Path | None = None,
+          commit: str | None = None) -> tuple[list[str], int, list[str]]:
+    """The findings, the number of contracts and the measurement lines.
+
+    ``commit`` is the candidate the results must be of; HEAD when None."""
     report = Report()
     where = REGISTRY.as_posix()
+    present = (root / REGISTRY).is_file()
     registry = read_registry(root, None, report, where)
     if registry is None:
-        if results_path is not None and not report.findings:
+        if not present:
+            # A deleted registry still may not drop a released frozen contract.
+            for problem in widening_problems(root, Registry(), report):
+                report.add(where, problem)
+        if results_path is not None and not present:
             report.add(where, "is missing, so there is nothing to measure")
         return report.findings, 0, []
     calculations = read_methodology(root, Report()).calculations
-    results = read_results(results_path, root, report) if results_path is not None else None
+    candidate = commit or (git(root, "rev-parse", "HEAD") or "").strip() or None
+    results = read_results(results_path, root, candidate, report) \
+        if results_path is not None else None
     lines: list[str] = []
     for contract in registry.contracts:
         at = f"{where}: {contract.id}"
@@ -405,8 +437,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="repository root (default: this checkout)")
     parser.add_argument("--results", type=Path,
                         help="results file of an Excel run, to measure the contracts")
+    parser.add_argument("--commit",
+                        help="full SHA of the candidate the results must be of (default: HEAD)")
     args = parser.parse_args(argv)
-    findings, contracts, lines = check(args.root.resolve(), args.results)
+    findings, contracts, lines = check(args.root.resolve(), args.results, args.commit)
     for line in lines:
         print(line)
     for finding in findings:

@@ -307,20 +307,23 @@ release may publish as the calculation's accuracy.
 | `metric`, `threshold` | `absolute`: the absolute difference between the result and the expected value; `relative`: that difference divided by the expected value's magnitude, which is 0 at an expected 0 only when the result is 0 too. The threshold is a finite number of at least 0 |
 | `provenance` | Why the threshold is what it is |
 | `status`, `decision` | `draft`, with `decision` `null`, or `frozen`, with the issue or record that froze it |
-| `calibration_cases` | The cases that may be used to set the threshold |
-| `holdout_cases` | The cases that never are; no case is in both lists |
+| `calibration_cases` | The cases that may be used to set the threshold, each listed once |
+| `holdout_cases` | The cases that never are, each listed once; no case is in both lists |
 
 - **Frozen.** A contract may be frozen only with at least `min_holdout_cases`
   holdout cases, and only when every expected value of its quantities in
   them is `published` or `independent`. A contract on an illustrative
   calculation stays `draft`, as the template's `ACC-01` does.
 - **Frozen is kept.** Once a release tag holds a frozen contract, it is never
-  removed or returned to `draft`, and its threshold grows only with a new
-  `decision`. The check compares with the newest `vX.Y.Z` tag of the branch.
+  removed or returned to `draft`, even by deleting the registry, and its
+  threshold grows only with a new `decision`. The check compares with the
+  newest `vX.Y.Z` tag of the branch.
 - **Measured on the workbook.** The contracts measure the workbook's results,
   which exist only after an Excel run. `python tools/check_accuracy.py`, which
   **Repository integrity** runs, checks the registry against the cases. With
   `--results <file>`, the results file of an Excel run, it also fails on:
+  - results of another revision: their `commit` must be the full SHA of the
+    candidate, given with `--commit`, or HEAD by default;
   - an output without a result;
   - a result outside its own tolerance;
   - a worst error above the threshold, which it computes separately for the
