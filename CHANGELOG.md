@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- `RELEASING.md` step 8 checks the published workbook, with a *Published
+  workbook* section in the release certification: the attached workbook's
+  build stamp names the candidate and `production`, a rebuild of the tag
+  gives the same SHA-256 or the same parts, and a downloaded, unblocked copy
+  shows no link to another workbook and no `#REF!` name, and survives run,
+  save and reopen. An optional user manual for workbook recipients, by
+  convention one folder per released version under `docs/user-manual/`, is
+  built to a PDF with a tool the release records (Pandoc as the example; the
+  template installs none) and listed among the certified artifacts (#250).
 - With `src/workbook/Template.xlsx`, `tools/devbuild/build_workbook.py` builds
   the workbook from a copy of the template, keeping its formats, print areas
   and protection: it sets the code names, writes the stamp and adds the VBA
