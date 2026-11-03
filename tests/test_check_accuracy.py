@@ -137,6 +137,9 @@ class RegistryTest(unittest.TestCase):
         self.assertFinding(findings(registry({**ILLUSTRATIVE, "decision": "#2"})),
                            "a draft contract has no decision")
         self.assertFinding(findings(registry(FROZEN, FROZEN)), "id appears twice")
+        # A list id cannot be compared for repeats: a finding, not a traceback.
+        self.assertFinding(findings(registry({**FROZEN, "id": ["ACC-01"]}, FROZEN)),
+                           "id is not ACC-<number>")
         self.assertFinding(findings(registry({**FROZEN, "extra": 1})), "keys are not")
         self.assertFinding(findings(registry({**FROZEN, "quantities": [QUANTITY, QUANTITY]})),
                            "quantities lists a name twice")
@@ -256,6 +259,13 @@ class ResultsTest(unittest.TestCase):
         bad["results"].append({"case": "demo-calibration"})
         self.assertTrue(any("results[1] is not case, variant, quantity, scope" in item
                             for item in findings(registry(FROZEN), bad)))
+        for field, value in (("variant", ["lf"]), ("case", {"id": 1}), ("quantity", 7)):
+            with self.subTest(field=field):
+                bad = results(demo_calibration=100)
+                bad["results"][0][field] = value
+                self.assertTrue(any("results[0] case and quantity are not text, or its "
+                                    "variant is not text or null" in item
+                                    for item in findings(registry(FROZEN), bad)))
 
     def test_main_reports_the_measurement(self) -> None:
         with repository(registry(FROZEN)) as root, \
