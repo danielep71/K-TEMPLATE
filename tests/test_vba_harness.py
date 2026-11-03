@@ -98,10 +98,11 @@ class ExampleSuiteTest(unittest.TestCase):
             if token == "vbNullString":
                 return None
             return token.strip('"') if token.startswith('"') else strings[token]
-        recorded = [(case, value(variant), value(quantity), value(scope))
-                    for case, variant, quantity, scope in re.findall(
+        recorded = [(case, value(variant), value(quantity), value(dataset), value(record))
+                    for case, variant, quantity, dataset, record in re.findall(
                         r'TEST_Harness\.RecordResult "([^"]+)", (vbNullString|"[^"]+"), _\s+'
-                        r'(\w+|"[^"]+"), (vbNullString|"[^"]*"), Total', body)]
+                        r'(\w+|"[^"]+"), (vbNullString|"[^"]*"), (vbNullString|"[^"]*"), Total',
+                        body)]
         registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
         expected = []
         for contract in registry["contracts"]:
@@ -110,9 +111,12 @@ class ExampleSuiteTest(unittest.TestCase):
                                   .read_text(encoding="utf-8"))
                 groups = [(None, data["outputs"])] if "outputs" in data \
                     else sorted(data["variants"].items())
-                expected += [(case, variant, output["quantity"], output["scope"])
+                expected += [(case, variant, output["quantity"],
+                              *((output["scope"]["dataset"], output["scope"]["record"])
+                                if output["scope"] else (None, None)))
                              for variant, outputs in groups for output in outputs
                              if output["quantity"] in contract["quantities"]]
+        self.assertEqual(len(recorded), 3, recorded)
         self.assertEqual(sorted(recorded, key=str), sorted(expected, key=str))
         self.assertEqual(len(recorded), len(set(recorded)))
 
@@ -138,6 +142,15 @@ class HarnessTest(unittest.TestCase):
         assert match is not None
         layout = json.loads(BUILD_CONFIG.read_text(encoding="utf-8"))
         self.assertEqual(match.group(1), layout["stamp"]["commit"])
+
+    def test_a_result_scope_is_the_object_of_the_expected_format(self) -> None:
+        # The accuracy check matches a scope only as {"dataset": ..., "record": ...}.
+        bodies = procedures(self.text)
+        self.assertIn('""scope"": " & ScopeJson(Dataset, Record)', bodies["RecordResult"])
+        scope = re.sub(r" _\n\s+", " ", bodies["ScopeJson"])  # join continued lines
+        self.assertIn('"{""dataset"": " & JsonText(Dataset) & ", ""record"": " & '
+                      'JsonText(Record) & "}"', scope)
+        self.assertIn('ScopeJson = "null"', scope)
 
     def test_results_are_cleared_with_the_log(self) -> None:
         bodies = procedures(self.text)

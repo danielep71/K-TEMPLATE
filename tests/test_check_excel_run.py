@@ -535,6 +535,15 @@ class ResultsTest(unittest.TestCase):
         found = self.changed(lambda document: document.update(commit="f" * 40))
         self.assertIn("results are of commit ffffffffffff", " ".join(found))
 
+    def test_a_malformed_results_file_is_a_finding(self) -> None:
+        def broken(folder: Path) -> None:
+            (folder / POLICY.results).write_text("{broken", encoding="utf-8")
+        with evidence(broken) as folder:
+            result = check_excel_run.check(ROOT, COMMIT, folder)
+        self.assertEqual(len(result.findings), 1, result.findings)
+        self.assertIn(f"{POLICY.results}: {folder / POLICY.results}: not valid UTF-8 JSON",
+                      result.findings[0])
+
     def test_a_marked_or_missing_stamp_fails(self) -> None:
         for commit in (COMMIT + "+local-changes", ""):
             with self.subTest(commit=commit):

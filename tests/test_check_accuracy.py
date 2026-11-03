@@ -184,6 +184,17 @@ class RegistryTest(unittest.TestCase):
 
 
 class ResultsTest(unittest.TestCase):
+    def test_a_malformed_results_file_outside_the_root_is_a_finding(self) -> None:
+        # An Excel run's results file lives in its evidence folder, not in the checkout.
+        with repository(registry(FROZEN)) as root, \
+                tempfile.TemporaryDirectory() as outside:
+            path = Path(outside) / "results.json"
+            path.write_text("{broken", "utf-8")
+            found, _, lines = check_accuracy.check(root, path, CANDIDATE)
+        self.assertEqual(lines, [])
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"{path}: not valid UTF-8 JSON", found[0])
+
     def test_results_within_every_bound_pass_and_are_reported(self) -> None:
         good = results(demo_calibration=100.005, demo_holdout_1=200.001, demo_holdout_2=0)
         with repository(registry(FROZEN)) as root:

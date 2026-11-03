@@ -557,19 +557,19 @@ Private Sub CaseIllustrativeResults()
         TEST_Harness.AssertTrue "format-example-amounts", Records > 0, _
             "illustrative-format-example.json holds no notional_amount"
         TEST_Harness.RecordResult "illustrative-format-example", vbNullString, _
-            ILLUSTRATIVE_QUANTITY, vbNullString, Total
+            ILLUSTRATIVE_QUANTITY, vbNullString, vbNullString, Total
         Total = SumCsvColumn(FixturePath( _
             "illustrative-file-import-example/crlf-line-endings/positions.csv"), "notional", Records)
         TEST_Harness.AssertTrue "crlf-variant-amounts", Records > 0, _
             "the crlf-line-endings positions.csv holds no notional amount"
         TEST_Harness.RecordResult "illustrative-file-import-example", "crlf-line-endings", _
-            ILLUSTRATIVE_QUANTITY, vbNullString, Total
+            ILLUSTRATIVE_QUANTITY, vbNullString, vbNullString, Total
         Total = SumCsvColumn(FixturePath( _
             "illustrative-file-import-example/lf-line-endings/positions.csv"), "notional", Records)
         TEST_Harness.AssertTrue "lf-variant-amounts", Records > 0, _
             "the lf-line-endings positions.csv holds no notional amount"
         TEST_Harness.RecordResult "illustrative-file-import-example", "lf-line-endings", _
-            ILLUSTRATIVE_QUANTITY, vbNullString, Total
+            ILLUSTRATIVE_QUANTITY, vbNullString, vbNullString, Total
         Exit Sub
 
 CaseFailed:

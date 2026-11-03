@@ -116,14 +116,16 @@ line by line, apart from `started` and `ENVIRONMENT`.
 ## Results
 
 `RecordResult` keeps one result of the running suite: its case, its variant
-(an empty string for a JSON fixture), its quantity, its scope (an empty
-string for none) and its value. It raises `ERR_TEST_USAGE` outside a run.
+(an empty string for a JSON fixture), its quantity, the dataset and record of
+its scope (two empty strings for a result of the whole calculation) and its
+value. It raises `ERR_TEST_USAGE` outside a run.
 The results belong to the run, like its log: `BeginRun` and `ResetTests`
 clear them.
 
 `SaveResults "<path>"` writes them as the results file of the
 [accuracy contracts](TEST_CASES.md#accuracy-contracts): ASCII JSON with LF
-line endings, an empty variant or scope written as `null`, and each value
+line endings, an empty variant or scope written as `null`, a record scope as
+`{"dataset": …, "record": …}`, and each value
 with the 15 significant digits of `Str$`, whatever the regional settings.
 Its `commit` is the value of the defined name `build_commit` in the
 workbook that holds the harness, the build stamp of

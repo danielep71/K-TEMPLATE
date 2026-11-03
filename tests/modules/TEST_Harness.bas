@@ -1008,7 +1008,8 @@ Public Sub RecordResult( _
     ByVal CaseId As String, _
     ByVal VariantName As String, _
     ByVal Quantity As String, _
-    ByVal Scope As String, _
+    ByVal Dataset As String, _
+    ByVal Record As String, _
     ByVal Value As Double)
 '
 '==============================================================================
@@ -1022,8 +1023,10 @@ Public Sub RecordResult( _
 ' INPUTS
 '   CaseId: the test case's id (tests/fixtures/). VariantName: the variant of
 '   a file-based case, or an empty string for a JSON fixture. Quantity: the
-'   output's quantity. Scope: its scope, or an empty string for none. Value:
-'   the result, written with the 15 significant digits of Str$.
+'   output's quantity. Dataset, Record: the dataset and record id of a
+'   record-scoped output, or two empty strings for a result of the whole
+'   calculation. Value: the result, written with the 15 significant digits
+'   of Str$.
 '
 ' ERROR POLICY
 '   Raises ERR_TEST_USAGE outside a run. A repeated result is kept; the
@@ -1037,7 +1040,7 @@ Public Sub RecordResult( _
         mResults.Add "{""case"": " & JsonText(CaseId) & _
             ", ""variant"": " & JsonTextOrNull(VariantName) & _
             ", ""quantity"": " & JsonText(Quantity) & _
-            ", ""scope"": " & JsonTextOrNull(Scope) & _
+            ", ""scope"": " & ScopeJson(Dataset, Record) & _
             ", ""value"": " & NumberText(Value) & "}"
 
 End Sub
@@ -1433,6 +1436,33 @@ Private Function JsonTextOrNull( _
             JsonTextOrNull = "null"
         Else
             JsonTextOrNull = JsonText(Value)
+        End If
+
+End Function
+
+
+Private Function ScopeJson( _
+    ByVal Dataset As String, _
+    ByVal Record As String) _
+    As String
+'
+'==============================================================================
+'                                  ScopeJson
+'------------------------------------------------------------------------------
+' PURPOSE
+'   The scope of a result as the expected-results format writes it: null for
+'   the whole calculation, otherwise {"dataset": ..., "record": ...}, the only
+'   shape tools/check_accuracy.py matches with a record-scoped output.
+'
+' UPDATED
+'   2026-11-03
+'==============================================================================
+'
+        If Len(Dataset) = 0 And Len(Record) = 0 Then
+            ScopeJson = "null"
+        Else
+            ScopeJson = "{""dataset"": " & JsonText(Dataset) & ", ""record"": " & _
+                JsonText(Record) & "}"
         End If
 
 End Function
