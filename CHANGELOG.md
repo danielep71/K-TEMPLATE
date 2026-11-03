@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- With `src/workbook/Template.xlsx`, `tools/devbuild/build_workbook.py` builds
+  the workbook from a copy of the template, keeping its formats, print areas
+  and protection: it sets the code names, writes the stamp and adds the VBA
+  project, and two builds stay byte-identical. Without a template it writes
+  blank sheets as before. The protection matrix,
+  `docs/methodology/workbook-protection.json`, states each sheet's protection
+  options and its input (unlocked) and output (locked) ranges;
+  `tools/check_workbook_protection.py` fails **Repository integrity** when the
+  template differs from it, and passes as inactive while neither exists (#243).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs

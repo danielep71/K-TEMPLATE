@@ -7,7 +7,7 @@ This contract defines what the workbook looks like:
 - which areas are inputs and which the code writes;
 - how each operation reads and writes them;
 - how a failed run marks earlier results as no longer current;
-- what the build creates.
+- what the build creates, and how each sheet is protected.
 
 The [data contract](DATA_CONTRACT.md) defines the inputs and the
 [calculation contracts](CALCULATION_CONTRACTS.md) the results; this contract
@@ -75,7 +75,8 @@ State the layout every sheet shares. A common default:
 - A table's first header cell carries the name `<Sheet>_<Table>`, and its data
   starts on the row below. Tables that grow downward sit side by side, so
   that none can overwrite another.
-- Input cells look different from cells that code writes.
+- Input cells look different from cells that code writes, and are the only
+  unlocked cells ([protection](#protection)).
 - A table that would exceed a worksheet's 1,048,576 rows fails the operation
   before anything is written; it is never truncated.
 
@@ -175,11 +176,74 @@ module or example; a development build adds them.
 names, stamp and VBA project. It reads them from
 `tools/devbuild/workbook.json`, whose sheets, roles and names must match the
 tables above. It leaves the `Test` sheets and their names out of every
-configuration but `development`. Formats, data validation and print areas
-are not built yet: add them to the builder when a decision here defines
-them. The
+configuration but `development`. It builds the sheets in one of two ways:
+
+- **Blank sheets**, while there is no `src/workbook/Template.xlsx`. Each
+  sheet holds only the stamp, a title on the reference sheet and the label
+  beside each defined name. Formats, data validation and print areas are not
+  built on this path.
+- **From the template**, once `src/workbook/Template.xlsx` exists. The build
+  starts from a copy of it, so the formats, data validation, print areas and
+  protection are the template's. The template holds the sheets of the table
+  other than `Test`, in order, and defines their names on the same cells; the
+  build stops otherwise. The build sets the code names, writes the stamp
+  values into the stamp cells, keeping their style, makes the workbook
+  macro-enabled and adds the VBA project. A development build appends each
+  `Test` sheet blank, with its names, so `Test` sheets come last in the
+  table. Every other part of the template is copied unchanged, and two builds
+  of the same commit and working tree stay byte-identical.
+
+Save the template in Excel as a macro-free `.xlsx` workbook without personal
+document metadata: **Repository integrity** fails on macros, or on an
+author, last editor, company or manager in it. The
 [installation guide](../../INSTALLATION.md#building-a-workbook-from-source)
-says how to run it.
+says how to run the build.
+
+## Protection
+
+The template carries the protection of each sheet and the lock flag of each
+cell. Record them in the protection matrix,
+`docs/methodology/workbook-protection.json`, added with the template. For
+the illustrative sheets above, it could read:
+
+```json
+{
+  "schema_version": 1,
+  "sheets": {
+    "shReadme": {"protection": {}, "output": ["A1:B5"]},
+    "shInputs": {
+      "protection": {"sheet": true, "objects": true, "scenarios": true},
+      "input": ["C5"],
+      "output": ["A1:B4"]
+    }
+  }
+}
+```
+
+- **Sheets:** one entry for each sheet of the template, by code name. `Test`
+  sheets are not in the template and have no entry.
+- **`protection`:** the options of the sheet's protection, named as the
+  attributes of the SpreadsheetML `sheetProtection` element. `sheet: true`
+  turns protection on; every other option set to `true` blocks its action, or
+  protects its part, while the sheet is protected. An option left out takes
+  the standard's default: `false` for `objects`, `scenarios`,
+  `selectLockedCells` and `selectUnlockedCells`, `true` for the others. `{}`
+  is an unprotected sheet. Never put a password in the matrix.
+- **`input`:** the cells and ranges, such as `C5` or `C5:D10`, that users
+  type in. They must be unlocked.
+- **`output`:** the cells and ranges that users must not change, such as
+  results and labels. They must be locked. An input range never overlaps an
+  output range; a cell in neither is not checked.
+
+`tools/check_workbook_protection.py`, which **Repository integrity** runs,
+compares the matrix with the template's sheets and styles. A cell takes the
+style of its own cell, or else of its row when the row is formatted, or else
+of its column, as Excel shows it; a style is locked unless it unlocks the
+cell. A lock flag or a protection option that differs from the matrix fails
+the check. Without the template the check reads the matrix alone, and
+without either it passes as inactive; a template without a matrix fails. It
+compares neither the password nor protection that VBA sets at run time with
+`Worksheet.Protect`.
 
 ## Decisions
 
