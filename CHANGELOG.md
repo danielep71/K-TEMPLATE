@@ -63,6 +63,10 @@ milestones and their pull requests.
 
 ### Added
 
+- **Repository integrity** fails a committed Office package, outside the
+  regulatory source copies, that carries macros (a `vbaProject` part, a
+  reference to one or a macro-enabled content type) or personal metadata (an
+  author, last editor, company or manager in `docProps/`) (#241).
 - Dependabot version updates wait 14 days after a release (`cooldown`), and a
   workflow control test requires it. The pull request guide describes how
   security updates, the manual actionlint update and the files GitHub reads

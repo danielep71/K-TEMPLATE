@@ -16,7 +16,17 @@ bytes, which are all that Git inspects. A binary file passes only if it is:
 - listed in .github/binary-allowlist.json with its current SHA-256.
 
 .gitignore keeps such files out by default; this check catches one added on
-purpose, for example with git add -f. It never changes a file.
+purpose, for example with git add -f.
+
+An Office Open XML package that passes (a .xlsx, .xltx, .docx or similar
+file, as a ZIP with [Content_Types].xml) also fails when it carries macros, a
+vbaProject.bin part or a reference to one, or personal document metadata: an
+author or last editor in docProps/core.xml, or a company or manager in
+docProps/app.xml. Each part is parsed as XML in its declared encoding, so a
+UTF-16 part or a character reference hides nothing, and a part that is not
+XML fails too. The byte-preserved regulatory sources under
+docs/methodology/sources/ are exempt: they stay as published. It never
+changes a file.
 """
 
 from __future__ import annotations
@@ -25,11 +35,14 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import re
 import subprocess
 import sys
+import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
+from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = Path(".github/binary-allowlist.json")
@@ -39,6 +52,14 @@ APPROVED_PATHS = ("docs/methodology/sources/*", "tests/fixtures/*/*/*",
 # Read in chunks: Git looks at the first 8000 bytes only, so a NUL byte later in
 # the file would otherwise stay unseen.
 CHUNK_BYTES = 1 << 16
+# Office packages are inspected for macros and personal metadata, except the
+# byte-preserved regulatory sources.
+SOURCE_COPIES = "docs/methodology/sources/"
+# A VBA part, its content type or relationship, or a macro-enabled main part.
+MACRO_PART = re.compile(r"vbaProject|macroEnabled", re.I)
+# docProps fields that name a person or an organization, by part.
+PERSONAL_FIELDS = {"docProps/core.xml": ("creator", "lastModifiedBy"),
+                   "docProps/app.xml": ("Company", "Manager")}
 
 
 def git(root: Path, *args: str, stdin: str | None = None) -> str:
@@ -97,6 +118,70 @@ def load_allowlist(root: Path, findings: list[str]) -> dict[str, str]:
     return allowed
 
 
+def local_name(tag: str) -> str:
+    """An element or attribute name without its namespace."""
+    return tag.rpartition("}")[2]
+
+
+def read_part(data: bytes) -> ElementTree.Element | None:
+    """The parsed part, read in its declared encoding, or None when it is not XML.
+
+    The parser honours a byte-order mark and the XML declaration, so a UTF-16
+    part is read like a UTF-8 one, and it resolves character references.
+    """
+    try:
+        return ElementTree.fromstring(data)
+    except ElementTree.ParseError:
+        return None
+
+
+def macro_reference(part: ElementTree.Element) -> bool:
+    """Whether a name, attribute value or text in the part refers to macros."""
+    return any(MACRO_PART.search(text)
+               for element in part.iter()
+               for text in (element.tag, element.text or "", *element.attrib.values()))
+
+
+def personal_fields(part: ElementTree.Element, fields: Sequence[str]) -> list[str]:
+    """The fields that have a non-blank value in the part, whatever their namespace."""
+    return [field for field in fields
+            if any(local_name(element.tag) == field and (element.text or "").strip()
+                   for element in part.iter())]
+
+
+def package_problems(path: Path) -> list[str]:
+    """Macros or personal metadata in an Office Open XML package; none for other files."""
+    try:
+        with zipfile.ZipFile(path) as package:
+            names = package.namelist()
+            if "[Content_Types].xml" not in names:
+                return []
+            data = {name: package.read(name) for name in names
+                    if name == "[Content_Types].xml" or name.endswith(".rels")
+                    or name in PERSONAL_FIELDS}
+    except (zipfile.BadZipFile, OSError):
+        return []
+    problems = []
+    parts = {name: read_part(content) for name, content in data.items()}
+    unreadable = sorted(name for name, part in parts.items() if part is None)
+    if unreadable:
+        problems.append(f"{', '.join(unreadable)} cannot be read as XML, so it cannot be "
+                        "checked for macros or personal metadata")
+    if any(MACRO_PART.search(name) for name in names) or \
+            any(part is not None and macro_reference(part)
+                for name, part in parts.items() if name not in PERSONAL_FIELDS):
+        problems.append("carries macros (a vbaProject part, a reference to one or a "
+                        "macro-enabled content type); commit "
+                        "the macro-free package and keep the code as exported source")
+    for name, fields in PERSONAL_FIELDS.items():
+        part = parts.get(name)
+        found = personal_fields(part, fields) if part is not None else []
+        if found:
+            problems.append(f"{name} names a person or organization ({', '.join(found)}); "
+                            "clear it, as DISTRIBUTION.md describes")
+    return problems
+
+
 def approved(name: str, tracked: set[str]) -> bool:
     if any(fnmatch.fnmatchcase(name, pattern) for pattern in APPROVED_PATHS):
         return True
@@ -115,6 +200,8 @@ def check(root: Path) -> tuple[list[str], int]:
         path = root / name
         if not path.is_file():
             continue
+        if not name.startswith(SOURCE_COPIES):
+            findings.extend(f"{name}: {problem}" for problem in package_problems(path))
         # An allowlisted file is checked against its recorded hash whatever its
         # content is now, so a replacement never passes by no longer looking binary.
         if name in allowed:
