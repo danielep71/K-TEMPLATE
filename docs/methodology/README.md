@@ -23,10 +23,14 @@ suites run in Excel and what evidence a run leaves.
 
 ## Filling in the guides
 
-Each table holds one row marked *Illustrative*. Replace it with the project's
-entries, keep the columns, and record each decision in the guide's
-*Decisions* table with the issue where it was taken. A guide with only its
-illustrative row states that nothing has been decided yet.
+Each table holds one row marked *Illustrative*, and the data contract one
+illustrative dataset with its fields. Replace them with the project's entries,
+keep the columns, and record each decision in the guide's *Decisions* table
+with the issue where it was taken. A guide with only its illustrative entries
+states that nothing has been decided yet. The data contract's datasets and
+fields are edited in its
+[machine-readable contract](DATA_CONTRACT.md#machine-readable-contract), which
+renders their tables.
 
 Byte-preserved copies of sources go under `docs/methodology/sources/`, whose
 Git and editor rules are already set; [Sources](SOURCES.md) describes the
