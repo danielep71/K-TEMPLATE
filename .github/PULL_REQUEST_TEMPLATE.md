@@ -5,7 +5,7 @@
   was not produced. Synthetic data only; no secrets or vulnerability details.
 -->
 
-Base: <!-- the default branch or `release/X.Y.Z`; squash, or a merge commit for an integration or sync PR -->
+Base: <!-- the default branch, merged with a merge commit; or `release/X.Y.Z`, squashed, or merged with a merge commit for a sync PR -->
 
 ## 🔗 Linked issues
 

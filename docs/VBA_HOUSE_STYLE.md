@@ -11,7 +11,7 @@ repository and Excel. The template holds only the
 ## Naming and visibility
 
 Replace `<REGIME>` with the project's short name, such as `SACCR` or `LCR`,
-once, in this table and in the structure guide. The
+once, in this table. The
 [static checks](#static-checks) read the facade prefix from this table; while
 it is `<REGIME>_`, they accept any project prefix that is not a reserved one
 (`CORE_`, `TEST_`, `EX_`, `M_`).

@@ -1,7 +1,9 @@
 # 🔎 Pull request review
 
-Every change reaches a protected branch through a pull request that passes
-**Repository integrity**, the required check. This guide covers the evidence I
+Every change reaches the default branch or a release branch through a pull
+request that passes **Repository integrity**, the required check. The
+data-only `traffic-history` branch is the exception: the optional Traffic
+history workflow pushes to it directly ([TRAFFIC.md](TRAFFIC.md)). This guide covers the evidence I
 record before merging: which commit was reviewed, by what, and what was not.
 The pull request template has a *Final-head review* section for it.
 

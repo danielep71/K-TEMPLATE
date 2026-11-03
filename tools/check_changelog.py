@@ -6,7 +6,8 @@ heading is ``## [X.Y.Z] - YYYY-MM-DD`` with a real date, newest first by
 version and date, with a link reference to its tag's release page. VERSION
 does not exist before the first dated release; from then on it holds one
 ``X.Y.Z`` line, the newest release. With --repository, every link reference
-must also point into that GitHub repository.
+to GitHub, not only those of the version headings, must also point into that
+repository.
 
 It also checks that the prose agrees with that state:
 
@@ -92,6 +93,21 @@ def link_problems(text: str, label: str, repository: str | None) -> list[str]:
     return problems
 
 
+LINK_REFERENCE = re.compile(r"^\[([^\]]+)\]:[ \t]*(\S+)", re.M)
+GITHUB = "https://github.com/"
+
+
+def foreign_references(text: str, repository: str, skip: set[str]) -> list[str]:
+    """Link references to GitHub outside ``repository``, such as a copied issue link.
+    The references in ``skip``, those of the version headings, are left to
+    link_problems."""
+    own = f"{GITHUB}{repository.lower()}/"
+    return [f"{CHANGELOG}: the link reference for [{label}] does not point to {repository}: {url}"
+            for label, url in LINK_REFERENCE.findall(text)
+            if label not in skip and url.lower().startswith(GITHUB)
+            and not url.lower().startswith(own)]
+
+
 def released_versions(text: str) -> list[str]:
     return [label for label, _ in VERSION_HEADING.findall(text) if label != "Unreleased"]
 
@@ -129,6 +145,8 @@ def check_changelog(text: str, repository: str | None = None) -> list[str]:
             break
     if "Unreleased" in seen:
         findings.extend(link_problems(text, "Unreleased", repository))
+    if repository:
+        findings.extend(foreign_references(text, repository, {label for label, _ in headings}))
     return findings
 
 
@@ -315,7 +333,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument("--repository", metavar="OWNER/REPOSITORY",
-                        help="require every link reference to point into this repository")
+                        help="require every link reference to GitHub to point into this repository")
     args = parser.parse_args(argv)
     findings, released, notes = check_with_notes(args.root.resolve(), args.repository)
     for note in notes:
