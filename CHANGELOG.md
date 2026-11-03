@@ -188,6 +188,15 @@ milestones and their pull requests.
 
 ### Changed
 
+- `SECURITY.md` describes the runtime risk surface: what the test harness,
+  the example suite and `tools/devbuild/excel_run.py` read, write and delete,
+  the Excel settings they need (enabled macros, no Trust access, no change to
+  a macro setting), which access the dependency rules forbid in core and
+  classes, and what a generated repository states for its own entry points.
+  It adds a data-and-secrets section (what a workbook can hide, and that a
+  leaked secret is revoked or rotated before it is reported) and a safe
+  harbor for good-faith research. The setup guide tells a generated
+  repository to adapt the runtime section (#242).
 - The pull request template asks for the calculation impact of a change: the
   source of each changed rule and the class of the expected values that test
   it, or "No calculation change". Its checklist asks for the `[Unreleased]`
