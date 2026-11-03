@@ -39,6 +39,7 @@ from check_vba_identifiers import (
     ELSE,
     MEMBER_MARK,
     NAME,
+    REDIM,
     SINGLE_LINE_IF,
     STATEMENT_WORDS,
     SUFFIX,
@@ -67,8 +68,9 @@ EXPRESSION_CALL = re.compile(rf"(?<![\w.!])(?:(?P<qualifier>{NAME})\.)?(?P<name>
                              r"\s*\(")
 STRING = re.compile(r'"(?:[^"]|"")*"?')
 NAMED_ARGUMENT = re.compile(rf"^\s*(?P<name>{NAME})\s*:=")
-# Statements whose operands are names or bounds, not expressions to read.
-DECLARING = frozenset("const declare dim enum erase event redim static type".split())
+# Statements whose operands are names or constant bounds, not expressions to
+# read. ReDim bounds are evaluated at run time, so ReDim is read apart.
+DECLARING = frozenset("const declare dim enum erase event static type".split())
 
 
 @dataclass(frozen=True)
@@ -146,6 +148,8 @@ class Resolver:
                 name.casefold() in STATEMENT_WORDS:
             if name.casefold() in DECLARING:
                 return []
+            if name.casefold() == "redim":
+                return self.redim_bounds(module, caller, line, statement)
             return self.expression(module, caller, line, statement[head.end():])
         rest = statement[head.end():]
         arguments = self.statement_arguments(rest.lstrip(), bool(head.group("call")))
@@ -158,6 +162,20 @@ class Resolver:
             return self.expression(module, caller, line, statement[start:])
         return self.checked(module, caller, line, target, arguments, statement=True) + \
             self.expression(module, caller, line, arguments)
+
+    def redim_bounds(self, module: Module, caller: Procedure, line: int, statement: str
+                     ) -> list[Finding]:
+        """The findings of the calls in the bounds of each array a ReDim
+        resizes, as in ReDim Preserve Values(1 To Count(2), 3); the array
+        itself is not a call."""
+        redim = REDIM.match(statement)
+        findings: list[Finding] = []
+        for item in top_level_split(redim.group("list")) if redim else []:
+            start = item.find("(")
+            end = closing_parenthesis(item, start) if start >= 0 else None
+            if end is not None:
+                findings += self.expression(module, caller, line, item[start + 1:end])
+        return findings
 
     @staticmethod
     def statement_arguments(rest: str, explicit: bool) -> str | None:

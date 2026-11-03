@@ -1609,6 +1609,26 @@ class CallTest(unittest.TestCase):
         self.assertEqual(len(findings), 1, findings)
         self.assertIn("3 argument(s) passed, at most 2 accepted", findings[0])
 
+    def test_redim_bounds_are_expressions(self) -> None:
+        # The bounds of a ReDim are evaluated at run time; its target is an
+        # array, even when it is named like a procedure or indexed past the
+        # parameters of one.
+        valid = ("\nPublic Sub Run()\n        Dim Values() As Double\n        Dim Pair() As Long\n"
+                 "        ReDim Values(1 To Scaled(2, 3))\n"
+                 "        ReDim Preserve Values(Scaled(1), 0 To TEST_Callee.Scaled(4)), "
+                 "Pair(1, 2, 3)\nEnd Sub\n")
+        self.assertEqual(run_check(check_vba_calls.check, self.files(valid)), [])
+        cases = {"ReDim Values(Scaled(1, 2, 3))": "3 argument(s) passed, at most 2 accepted",
+                 "ReDim Preserve Values(1 To 2, 0 To TEST_Callee.Hidden(1))":
+                     "Hidden is Private in TEST_Callee"}
+        for statement, text in cases.items():
+            with self.subTest(statement=statement):
+                body = ("\nPublic Sub Run()\n        Dim Values() As Double\n"
+                        f"        {statement}\nEnd Sub\n")
+                findings = run_check(check_vba_calls.check, self.files(body))
+                self.assertEqual(len(findings), 1, findings)
+                self.assertIn(text, findings[0])
+
     def test_with_block_members_are_not_calls(self) -> None:
         body = ("\nPublic Sub Run()\n        With New Collection\n            .Pair = 1\n"
                 "            .Pair 1, 2, 3\n            .Hidden\n"
