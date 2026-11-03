@@ -88,6 +88,29 @@ apply.
   any other pull request.
 - `.github/dependabot.yml` names the active release branch in `target-branch`.
   Update it when a new release branch opens, or remove it when none is active.
+- GitHub reads some files only from the default branch: the issue forms, this
+  pull request template, `.github/dependabot.yml`, and the workflows started by
+  issue, milestone, schedule and `pull_request_target` events. A change to one of them that is
+  merged only into the release branch takes effect after the next integration;
+  integrate early when it must apply sooner.
+
+## 🤖 Dependency updates
+
+Dependabot proposes the version updates that `.github/dependabot.yml`
+configures. Each waits 14 days after its release (`cooldown`), so a package
+withdrawn soon after publication is never proposed.
+
+- A **security update** does not wait, and it opens against the default
+  branch whatever `target-branch` says. While a release branch is active, make
+  the same change in a task pull request into the release branch, and close
+  the bot pull request with a link to it.
+- **actionlint** is outside Dependabot: its version and the SHA-256 of its
+  archive are set in `.github/workflows/repository-integrity.yml`. Update both
+  together in a task pull request.
+- Before merging an update, read the release notes between the two versions;
+  for an Action, check that the new SHA belongs to the tag in its comment, and
+  that the pin and its version comment change together. Record the review as
+  *Bot pull requests* below describes.
 
 ## ⚖️ Recorded exceptions
 
