@@ -399,6 +399,21 @@ class TraceabilityTest(FindingTest):
             traced("Test cases", "`illustrative-one`"))),
             "'Validated' needs a published or independent test case")
 
+    def test_an_invalid_case_is_compared_when_its_calculation_is_checked(self) -> None:
+        row = ("| *Illustrative:* `SRC-01` | Article 1(1) | `CALC-01.1` "
+               "| `CORE_Totals.TotalNotional` | `{}` | Exercised |")
+
+        def invalid(manifest: dict[str, Any], expected: dict[str, Any]) -> None:
+            manifest["category"] = "invalid"
+        # A file-based case's manifest is checked in every category, so its
+        # calculation is trusted and must be the row's.
+        self.assertFinding(file_case(invalid, extra=plan(row.format("file-one"))),
+                           "test case 'file-one' tests CALC-02, not CALC-01")
+        # An invalid JSON fixture may break its calculation, so it is not compared.
+        findings = run(lambda f, e: f.update(category="invalid"),
+                       extra=plan(row.format("case-one")))
+        self.assertFalse([item for item in findings if "VALIDATION_PLAN.md" in item], findings)
+
     def test_the_table_needs_its_columns(self) -> None:
         files = {"docs/methodology/VALIDATION_PLAN.md":
                  "## Traceability\n\n| Source | Status |\n| --- | --- |\n"}

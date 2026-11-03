@@ -785,9 +785,13 @@ def case_problems(listed: list[str] | None, calculation: str | None,
     problems = []
     for case_id in listed:
         case = cases.get(case_id)
+        # Only an invalid JSON fixture keeps no calculation: its calculation is
+        # one of the inputs it may break. A file-based case's manifest is
+        # checked in full, so its calculation counts in every category.
+        trusted = case is not None and (case.calculation is not None or case.category != "invalid")
         if case is None:
             problems.append(f"test case {case_id!r} does not exist")
-        elif case.category != "invalid" and calculation and case.calculation != calculation:
+        elif trusted and calculation and case.calculation != calculation:
             problems.append(f"test case {case_id!r} tests {case.calculation}, not {calculation}")
     return problems
 
