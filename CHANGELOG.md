@@ -206,6 +206,9 @@ milestones and their pull requests.
 
 ### Fixed
 
+- `tools/setup_repository.py` no longer reports paused Dependabot security
+  updates as on: they count as drift, the setup record shows `on (paused)`,
+  and an apply that leaves them paused fails its read-back (#190).
 - A backtick, pipe or line break in a label name, colour or API error no
   longer breaks the code span or table row of the label synchronization and
   drift summaries (#189).
