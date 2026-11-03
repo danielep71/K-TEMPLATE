@@ -248,9 +248,9 @@ class RunTest(RepositoryTest):
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "vba-format",
-                         "vba-calls",
-                         "test-cases", "derivations", "changelog", "generated-docs",
-                         "markdown-links",
+                         "vba-calls", "data-contract", "test-cases", "derivations",
+                         "independent-implementations", "workbook-protection",
+                         "changelog", "generated-docs", "markdown-links",
                          "codeql-default-branch", "whitespace-committed"):
             self.assertIn(expected, names)
         without = check_repository.checks(self.context(repository=None, is_template=None,

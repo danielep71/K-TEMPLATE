@@ -72,6 +72,71 @@ milestones and their pull requests.
   `Property` procedure or a built-in. **Repository integrity** runs it as
   advisory: a finding is a warning, not a failure, until the house style's
   rule makes it blocking (#249).
+- The host record of an Excel run, `host.txt`, names the operator, the start
+  and finish times with their UTC offset, the Excel build and bitness, the
+  `AutomationSecurity` and the Trust access to the VBA project as found, and
+  an outcome (`PASS`, `FAIL`, `IMPORT_FAILED`, `COMPILE_FAILED`,
+  `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE`), beside
+  Windows, the references and the compile mode. `excel_run.py` writes it also
+  when the run stops early, and reads the macro settings without changing
+  them. `check_excel_run.py` rejects a record that lacks a field, and accepts
+  an outcome other than `PASS` only as evidence of that outcome; a record
+  written by hand in the earlier three-line form now fails (#244).
+- `tools/check_independent.py`, which **Repository integrity** runs: it runs
+  each independent implementation that `tests/independent/adapters.json`
+  registers for an `IMPL-` source on the test cases, through an adapter that
+  translates each case into the implementation's input, and compares the
+  results with the expected values within their tolerance. It lists the cases
+  an implementation cannot represent, with the reason, and skips an adapter
+  whose implementation is not installed, with a note. The template registers
+  none, so the check passes and says that nothing was cross-checked (#248).
+- The VBA harness has patterns for three more kinds of test.
+  `tests/modules/TEST_Relations.bas` holds illustrative relation tests
+  (additivity, symmetry, monotonicity, zero input) on a stand-in total, each
+  with a check that a deliberately corrupted output fails it; it is not
+  certified, and `tests/test_vba_harness.py` keeps its counts and checks
+  consistent. The harness guide gives the skeleton of an end-to-end case
+  runner, which restores the input sheets it writes, and the conventions of a
+  volume benchmark, which `check_excel_run.py` refuses as an evidence suite.
+  Static checks only: the new module has not been run in Excel (#246).
+- The methodology guides trace each rule. The methodology overview has a
+  support matrix that marks each feature as supported, not supported or
+  entered by the user. The validation plan has a traceability table that
+  maps each `SRC-` paragraph to its `CALC-` step, its VBA procedure, its test
+  cases and a status: Validated, Exercised, Not validated or Not implemented.
+  Each table has one illustrative row. `check_test_cases.py` fails a row whose
+  source, step, procedure under `src/` or case does not exist, whose case
+  tests another calculation, or whose status contradicts what the row names
+  (#247).
+- `RELEASING.md` step 8 checks the published workbook, with a *Published
+  workbook* section in the release certification: the attached workbook's
+  build stamp names the candidate and `production`, a rebuild of the tag
+  gives the same SHA-256 or the same parts, and a downloaded, unblocked copy
+  shows no link to another workbook and no `#REF!` name, and survives run,
+  save and reopen. An optional user manual for workbook recipients, by
+  convention one folder per released version under `docs/user-manual/`, is
+  built to a PDF with a tool the release records (Pandoc as the example; the
+  template installs none) and listed among the certified artifacts (#250).
+- With `src/workbook/Template.xlsx`, `tools/devbuild/build_workbook.py` builds
+  the workbook from a copy of the template, keeping its formats, print areas
+  and protection: it sets the code names, writes the stamp and adds the VBA
+  project, and two builds stay byte-identical. Without a template it writes
+  blank sheets as before. The protection matrix,
+  `docs/methodology/workbook-protection.json`, states each sheet's protection
+  options and its input (unlocked) and output (locked) ranges;
+  `tools/check_workbook_protection.py` fails **Repository integrity** when the
+  template differs from it, and passes as inactive while neither exists (#243).
+- A machine-readable data contract, `docs/methodology/data-contract.json`,
+  holds each dataset's file or sheet, encoding and delimited-text format, and
+  each field's type, unit or currency field, required flag and allowed values
+  or range. The *Datasets* table and the field tables of `DATA_CONTRACT.md`
+  are rendered from it, and **Repository integrity** fails while they differ.
+  `tools/check_data_contract.py`, which it runs, checks the contract and, with
+  `--dataset`, validates input files against it, reporting each finding with a
+  stable code such as `DC-TYPE` or `DC-MISSING-COLUMN`.
+  `tools/check_test_cases.py` now runs that validator on every variant file of
+  a file-based case outside an `invalid` case. The illustrative dataset `DS-01`
+  lists the three columns its example file already holds (#238).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs
@@ -197,6 +262,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/check_excel_run.py` compares the modules exported by hand with the
+  commit without the letter case of code outside strings and comments, as the
+  VBE re-cases a name (`HB-01`, still `assumed`), and reports each re-cased
+  identifier on a `Note:` line. In a document module it no longer compares the
+  attributes Excel writes itself, such as `VB_Base`; `VB_Name`, string
+  literals, comments and any other difference still fail (#245).
 - `SECURITY.md` describes the runtime risk surface: what the test harness,
   the example suite and `tools/devbuild/excel_run.py` read, write and delete,
   the Excel settings they need (enabled macros, no Trust access, no change to

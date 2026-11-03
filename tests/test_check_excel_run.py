@@ -37,6 +37,7 @@ import build_workbook  # noqa: E402
 import check_accuracy  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
+import vba_project  # noqa: E402
 from check_excel_run import Suite, components, read_suite  # noqa: E402
 
 # The policy of the working tree; make_repository commits it with the modules.
@@ -93,10 +94,18 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
 ROOT, COMMIT = make_repository() if MODULES and shutil.which("git") else (SOURCE, "")
 ENVIRONMENT = ("ENVIRONMENT=host=Microsoft Excel; version=16.0; build=17928; "
                "os=Windows (64-bit) NT 10.00; office=64-bit; runtime=VBA7")
-HOST = ("windows=Windows 11 Pro 24H2, OS build 26100.4061\n"
+HOST = ("operator=Fixture Operator\n"
+        "started=2026-10-24T16:59:30+02:00\n"
+        "finished=2026-10-24T17:03:10+02:00\n"
+        "windows=Windows 11 Pro 24H2, OS build 26100.4061\n"
+        "excel=16.0 build 17928\n"
+        "bitness=64-bit\n"
+        "automation_security=ByUI\n"
+        "vba_project_access=NOT_TRUSTED\n"
         "references=Visual Basic For Applications; Microsoft Excel 16.0 Object Library; "
         "OLE Automation; Microsoft Office 16.0 Object Library\n"
-        "compile=PASS\n")
+        "compile=PASS\n"
+        "outcome=PASS\n")
 UNCHANGED = "CLEANUP=PASS; detail=Excel state unchanged (Calculation, DisplayAlerts, " \
             "EnableEvents, ScreenUpdating, Workbooks, ActiveWindow)"
 FAILED = check_excel_run.test_failed_number(components(ROOT, COMMIT)[Path(POLICY.harness).name]) \
@@ -627,6 +636,60 @@ class EvidenceTest(unittest.TestCase):
         self.assertFinding(edit("host.txt", "windows=Windows 11 Pro 24H2, OS build 26100.4061\n",
                                 ""), "no windows=")
 
+    def test_the_host_record_names_the_operator_the_times_and_the_macro_policy(self) -> None:
+        for key in check_excel_run.HOST_FIELDS:
+            with self.subTest(key=key):
+                line = re.search(rf"^{key}=.*\n", HOST, re.M)
+                assert line, key
+                self.assertFinding(edit("host.txt", line.group(), ""), f"host.txt: no {key}=")
+        wrong = {"started=2026-10-24T16:59:30+02:00": ("started=2026-10-24 16:59:30",
+                                                       "not an ISO 8601 time with its UTC offset"),
+                 "finished=2026-10-24T17:03:10+02:00": ("finished=2026-10-24T16:00:00+02:00",
+                                                        "finished before it started"),
+                 "excel=16.0 build 17928": ("excel=Microsoft 365", "expected <version> build"),
+                 "automation_security=ByUI": ("automation_security=2", "expected one of Low"),
+                 "vba_project_access=NOT_TRUSTED": ("vba_project_access=no",
+                                                    "expected one of TRUSTED"),
+                 "bitness=64-bit": ("bitness=32-bit", "bitness is not 64-bit"),
+                 "outcome=PASS": ("outcome=DONE", "outcome=DONE, expected one of PASS")}
+        for old, (new, text) in wrong.items():
+            with self.subTest(new=new):
+                self.assertFinding(edit("host.txt", old, new), text)
+
+    def test_the_host_record_agrees_with_the_logs(self) -> None:
+        self.assertFinding(edit("host.txt", "excel=16.0 build 17928", "excel=16.0 build 18000"),
+                           "but the logs' ENVIRONMENT is 16.0 build 17928")
+        self.assertFinding(edit("host.txt", "windows=Windows 11 Pro 24H2, OS build 26100.4061",
+                                "windows=UNKNOWN"), "windows=UNKNOWN, but only a run")
+        self.assertFinding(edit("host.txt", "automation_security=ByUI",
+                                "automation_security=UNKNOWN"), "may leave a value unread")
+        self.assertFinding(edit("host.txt", "vba_project_access=NOT_TRUSTED",
+                                "vba_project_access=UNKNOWN"), "vba_project_access=UNKNOWN, but")
+
+    def test_an_outcome_other_than_pass_is_evidence_of_itself_only(self) -> None:
+        for outcome in check_excel_run.OUTCOMES[1:]:
+            with self.subTest(outcome=outcome):
+                self.assertFinding(edit("host.txt", "outcome=PASS", f"outcome={outcome}"),
+                                   f"evidence of a run that ended {outcome}, never of a pass")
+        # A run that stopped before Excel started cannot read its host values.
+        stopped = re.sub(r"^(excel|bitness|automation_security|vba_project_access)=.*$",
+                         r"\1=UNKNOWN", HOST, flags=re.M).replace("outcome=PASS",
+                                                                  "outcome=UNAVAILABLE")
+        with tempfile.TemporaryDirectory() as temporary:
+            (Path(temporary) / POLICY.host).write_text(stopped, encoding="utf-8")
+            result = check_excel_run.Evidence()
+            check_excel_run.check_host(Path(temporary), result, POLICY)
+        self.assertEqual(result.findings, ["host.txt: outcome=UNAVAILABLE: the record is "
+                                           "evidence of a run that ended UNAVAILABLE, never "
+                                           "of a pass"])
+        with evidence() as folder, contextlib.redirect_stdout(io.StringIO()) as output:
+            (folder / POLICY.host).write_text(stopped, encoding="utf-8")
+            self.assertEqual(check_excel_run.main([str(folder), "--commit", COMMIT,
+                                                   "--root", str(ROOT)]), 1)
+        self.assertIn("Outcome: UNAVAILABLE", output.getvalue())
+        self.assertIn("Operator: Fixture Operator", output.getvalue())
+        self.assertIn("excel-run: FAIL", output.getvalue())
+
 
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
 class ResultsTest(unittest.TestCase):
@@ -841,6 +904,8 @@ class PolicyTest(unittest.TestCase):
             "distinct and named": mode(1, "log", "examples.log"),
             "plain names": section("evidence", "host_record", "../host.txt"),
             "inside the repository": section("suite", "source", "/tmp/TEST_Examples.bas"),
+            "never certified evidence": lambda data: data["suites"].append(
+                dict(PROJECT_ENTRY, source="tests/modules/TEST_BenchmarkTotals.bas")),
             "positive integer": section("suite", "expected_cases", 0),
             "listed once each": section("host", "references", []),
             "host office": section("host", "office", "ARM"),
@@ -977,6 +1042,118 @@ class ProjectSuiteTest(unittest.TestCase):
         self.assertTrue(any("EXPECTED_CASES is 3, but" in item for item in
                             check_excel_run.suite_findings(stated, wide, PROJECT_SOURCE, "x")))
         self.assertEqual(check_excel_run.suite_findings(stated, narrow, PROJECT_SOURCE, "x"), [])
+
+
+# A document module as Excel exports it, and a class with the same attributes.
+DOCUMENT_HEADER = "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n"
+DOCUMENT_ATTRIBUTE_LINES = "\n".join(
+    vba_project.document_module("ThisWorkbook", True).source.split("\r\n")[1:-2])
+DOCUMENT = (f'{DOCUMENT_HEADER}Attribute VB_Name = "ThisWorkbook"\n{DOCUMENT_ATTRIBUTE_LINES}\n'
+            "Option Explicit\n\nPrivate Sub Workbook_Open()\n"
+            '    Application.StatusBar = "Opened"   \'Shown once\nEnd Sub\n').encode()
+CLASS = DOCUMENT.replace(b'"ThisWorkbook"', b'"CFixture"')
+
+
+class SourceIdentityTest(unittest.TestCase):
+    """The export is compared with the commit without the letter case of code, as
+    the VBE re-cases a name (HB-01), and without the attributes Excel writes for a
+    document module; any other difference fails."""
+
+    root: ClassVar[Path]
+    commit: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not shutil.which("git"):
+            raise unittest.SkipTest("needs Git")
+        cls.root, cls.commit = make_repository(extra={"src/workbook/ThisWorkbook.cls": DOCUMENT,
+                                                      "src/classes/CFixture.cls": CLASS})
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def checked(self, *changes: Callable[[Path], None]) -> check_excel_run.Evidence:
+        def apply(folder: Path) -> None:
+            for change in changes:
+                change(folder)
+        with evidence(apply, self.root, self.commit) as folder:
+            return check_excel_run.check(self.root, self.commit, folder)
+
+    def test_a_recased_identifier_passes_with_a_counted_note(self) -> None:
+        result = self.checked(edit("exported/TEST_Examples.bas",
+                                   'If mMode = "INJECTED_FAILURE" Then',
+                                   'If MMODE = "INJECTED_FAILURE" Then'),
+                              edit("exported/TEST_Harness.bas", "ERR_TEST_FAILED        As Long",
+                                   "Err_Test_Failed        As Long"))
+        self.assertEqual(result.findings, [])
+        self.assertIn("exported/TEST_Examples.bas: 1 identifier(s) re-cased outside strings and "
+                      "comments, as the VBE re-cases a name (HB-01): mMode -> MMODE",
+                      result.notes)
+        self.assertTrue(any("TEST_Harness.bas: 1 identifier(s)" in note and
+                            "ERR_TEST_FAILED -> Err_Test_Failed" in note
+                            for note in result.notes), result.notes)
+        self.assertIn("Note: exported/TEST_Examples.bas: 1 identifier(s)",
+                      check_excel_run.report(self.commit, result))
+
+    def test_a_change_of_case_in_a_string_or_a_comment_fails(self) -> None:
+        for change in (edit("exported/TEST_Examples.bas", '"INJECTED_FAILURE" Then',
+                            '"injected_failure" Then'),
+                       edit("exported/TEST_Examples.bas", "'Expected sum;", "'expected sum;"),
+                       edit("exported/TEST_Harness.bas", "'vbObjectError + 4065",
+                            "'VbObjectError + 4065"),
+                       edit("exported/ThisWorkbook.cls", '"Opened"', '"opened"'),
+                       edit("exported/ThisWorkbook.cls", "'Shown once", "'shown once")):
+            with self.subTest(change=change):
+                found = self.checked(change).findings
+                self.assertTrue(any("differs from" in item and "first difference at line" in item
+                                    for item in found), found)
+
+    def test_any_other_difference_still_fails(self) -> None:
+        found = self.checked(edit("exported/TEST_Examples.bas", "If mMode =", "If mMode2 =")
+                             ).findings
+        self.assertTrue(any("TEST_Examples.bas: differs" in item for item in found), found)
+
+    def test_a_comment_continued_on_the_next_line_keeps_its_case(self) -> None:
+        commit = b"x = 1 ' note _\nContinued Text\ny = 2\n"
+        self.assertEqual(check_excel_run.source_difference(
+            b"x = 1 ' note _\ncontinued text\ny = 2\n", commit, False)[0], 2)
+        self.assertEqual(check_excel_run.source_difference(
+            b"X = 1 ' note _\nContinued Text\nY = 2\n", commit, False), (0, ["x -> X", "y -> Y"], []))
+        self.assertEqual(check_excel_run.source_difference(
+            b"x = [Sheet1!A1]\n", b"x = [sheet1!A1]\n", False)[0], 1)
+        self.assertEqual(check_excel_run.source_difference(b"x = 1\n", b"x = 1\ny = 2\n",
+                                                           False)[0], 2)
+
+    def test_the_tolerated_attributes_are_those_excel_writes_for_a_document(self) -> None:
+        # The build writes the same attributes for a document module without a source file.
+        written = re.findall(r"^Attribute (\w+) =", DOCUMENT_ATTRIBUTE_LINES, re.M)
+        self.assertEqual(tuple(written), check_excel_run.DOCUMENT_ATTRIBUTES)
+        self.assertEqual(check_excel_run.document_modules(self.root, self.commit),
+                         {"ThisWorkbook.cls"})
+
+    def test_document_module_attributes_are_not_compared(self) -> None:
+        def attributes(name: str) -> Callable[[Path], None]:
+            def apply(folder: Path) -> None:
+                path = folder / "exported" / name
+                text = path.read_bytes().decode("ascii")
+                for line in ("Attribute VB_TemplateDerived = False\r\n",
+                             "Attribute VB_Customizable = True\r\n"):
+                    text = text.replace(line, "")
+                text = text.replace("VB_PredeclaredId = True", "VB_PredeclaredId = False")
+                path.write_bytes(text.encode("ascii"))
+            return apply
+        result = self.checked(attributes("ThisWorkbook.cls"))
+        self.assertEqual(result.findings, [])
+        self.assertIn("exported/ThisWorkbook.cls: document-module attributes Excel writes, not "
+                      "compared: VB_Customizable, VB_PredeclaredId, VB_TemplateDerived",
+                      result.notes)
+        # A class module's attributes are its source, and so is a document's code name.
+        found = self.checked(attributes("CFixture.cls")).findings
+        self.assertTrue(any("CFixture.cls: differs" in item for item in found), found)
+        found = self.checked(edit("exported/ThisWorkbook.cls", 'VB_Name = "ThisWorkbook"',
+                                  'VB_Name = "thisworkbook"')).findings
+        self.assertTrue(any("ThisWorkbook.cls: differs" in item for item in found), found)
 
 
 if __name__ == "__main__":

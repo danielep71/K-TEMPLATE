@@ -123,6 +123,10 @@ ignores, with:
 - the sheets, code names and defined names of the
   [workbook contract](docs/methodology/WORKBOOK_CONTRACT.md), read from
   `tools/devbuild/workbook.json`;
+- the layout of `src/workbook/Template.xlsx`, when the project has one: the
+  build starts from a copy of it and keeps its formats and protection
+  ([build](docs/methodology/WORKBOOK_CONTRACT.md#build)). Without it, the
+  sheets are blank;
 - the build stamp on the reference sheet: the commit, its committer time and
   the configuration. A tracked change, or an untracked file in a source
   directory, adds *NOT evidence-grade* to the commit;
@@ -231,8 +235,13 @@ evidence-grade. Then it:
 3. runs the certification of step 5 below, with that folder and
    `tests\fixtures`;
 4. closes the workbook without saving, and quits Excel;
-5. writes `host.txt` (Windows from the registry, the four references the
-   build gives the project, and `compile=ON_DEMAND`);
+5. writes `host.txt`, the
+   [host record](docs/methodology/TEST_HARNESS.md#host-record): you as the
+   operator (your Windows user name, or `--operator "<name>"`), the start and
+   finish times, Windows from the registry, the Excel build and bitness, the
+   `AutomationSecurity` and the Trust access it found, which it reads and
+   never changes, the four references the build gives the project,
+   `compile=ON_DEMAND` and the outcome;
 6. runs the check of step 9 with `--workbook` and `--require-binding`.
 
 It prints the report and saves it as `test-results\excel-run-report.txt`.
@@ -251,9 +260,12 @@ says so; a module the run never calls is not compiled.
 
 Excel opens visibly while the run lasts. Apart from **Enable Content**, leave
 it alone: a dialog it shows stops the run until you close it, and the command
-gives up after `--timeout` seconds (600 by default). If the macros are not
-enabled in time, nothing runs and nothing is recorded; run the command
-again.
+gives up after `--timeout` seconds (600 by default). A run that stops early
+still writes `host.txt`, with the outcome `NOT_ENABLED` when the macros were
+not enabled in time, `EXECUTION_TIMEOUT` after `--timeout`, `UNAVAILABLE`
+when Excel could not be started or `INCOMPLETE` when the run stopped before
+its end. That record is evidence of how the run stopped, never of a pass;
+run the command again.
 
 Use the steps below instead when the project has forms, when the build
 fails, or when you need a full compile.
@@ -312,14 +324,41 @@ fails, or when you need a full compile.
 8. **Write `host.txt`** in the folder:
 
    ```text
+   operator=<your name>
+   started=2026-11-03T14:05:09+01:00
+   finished=2026-11-03T14:21:40+01:00
    windows=Windows 11 Pro, version 24H2, OS build 26100.4061
+   excel=16.0 build 17928
+   bitness=64-bit
+   automation_security=Low
+   vba_project_access=NOT_TRUSTED
    references=Visual Basic For Applications; Microsoft Excel 16.0 Object Library; OLE Automation; Microsoft Office 16.0 Object Library
    compile=PASS
+   outcome=PASS
    ```
 
-   `windows` is what `winver` shows. `references` lists the boxes ticked
-   in **Tools → References**, separated by `; `. Write `compile=PASS` only if
-   step 4 completed with no error; otherwise write what it reported.
+   The [host record](docs/methodology/TEST_HARNESS.md#host-record) defines
+   each field:
+   - `started` and `finished` are when you began step 4 and ended step 6,
+     with your UTC offset.
+   - `windows` is what `winver` shows.
+   - `excel` is what `? Application.Version & " build " & Application.Build`
+     prints in the Immediate window, and `bitness` what **File → Account →
+     About Excel** shows.
+   - `automation_security` is what `? Application.AutomationSecurity` prints:
+     1 is `Low`, 2 `ByUI`, 3 `ForceDisable`. Only read it; never change it.
+   - `vba_project_access` is `TRUSTED` when **File → Options → Trust Center →
+     Trust Center Settings → Macro Settings** ticks *Trust access to the VBA
+     project object model*, `NOT_TRUSTED` otherwise. Change nothing there.
+   - `references` lists the boxes ticked in **Tools → References**, separated
+     by `; `.
+   - Write `compile=PASS` only if step 4 completed with no error; otherwise
+     write what it reported.
+   - `outcome` is `PASS` when step 5 ended with `CERTIFICATION=PASS` for
+     every suite, and `FAIL` when a certification raised. When you stop
+     early, write the record anyway, with `IMPORT_FAILED` (step 3),
+     `COMPILE_FAILED` (step 4), `NOT_ENABLED`, `INCOMPLETE` or `UNAVAILABLE`
+     (Excel would not start), and `UNKNOWN` for a value you could not read.
 9. **Check** the folder against the commit, with Python 3.11 or later and
    Git:
 
@@ -344,7 +383,7 @@ fails, or when you need a full compile.
 
 | It fails when | Because |
 | --- | --- |
-| An exported module differs from the commit's file line for line, a form's `.frx` differs byte for byte, or one is missing or extra | The workbook was not built from that commit |
+| An exported module differs from the commit's file line for line, a form's `.frx` differs byte for byte, or one is missing or extra. Code outside strings and comments is compared without letter case, because the VBE re-cases a name ([HB-01](docs/methodology/VALIDATION_PLAN.md#host-behaviour)): each re-cased identifier is reported on a `Note:` line instead. In a document module of `src/workbook/`, the attributes Excel writes itself (`VB_Base`, `VB_GlobalNameSpace`, `VB_Creatable`, `VB_PredeclaredId`, `VB_Exposed`, `VB_TemplateDerived`, `VB_Customizable`) are not compared; `VB_Name` is | The workbook was not built from that commit |
 | A log is missing or empty, does not end with `RESULT`, holds more than one run, or a line is not a `KEY=value` record | The log is incomplete |
 | A record is missing, extra or out of the order in which the commit's suite writes it, or an unexpected error (`ERROR`) is logged | The run did not execute the suite as written |
 | The normal run is `INCOMPLETE` | A mandatory case or assertion did not run |
@@ -353,14 +392,15 @@ fails, or when you need a full compile.
 | The two failure runs do not end as [documented](#running-the-harness), or fail anything but their own failure: the injected run its one designated assertion, with the expected value the suite injects and the same values in each record, the skipped-case run only `harness.completeness` | The failure paths did not behave |
 | `certification.log` is missing, a mode did not end as it must, a failure run did not reach its caller as `ERR_TEST_FAILED`, or it does not end with `CERTIFICATION=PASS` and `COMPLETE` | The certification did not pass |
 | `ENVIRONMENT` lacks a field, differs between the logs, or Office is not 64-bit | The host is unknown or not the supported target |
-| `host.txt` lacks a field, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), or `compile` is not `PASS` (or `ON_DEMAND` for a run without export) | The host record is incomplete |
+| `host.txt` lacks a field or holds a value the [host record](docs/methodology/TEST_HARNESS.md#host-record) does not allow, a time lacks its UTC offset, the run finished before it started, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), `compile` is not `PASS` (or `ON_DEMAND` for a run without export), or `excel` or `bitness` differs from the logs' `ENVIRONMENT` | The host record is incomplete |
+| `outcome` in `host.txt` is not `PASS` | The run stopped early or failed: the record is evidence of that outcome, never of a pass |
 | Without `exported\`, a part of the workbook given with `--workbook` differs from a rebuild of the commit, or a part is missing or extra | It was saved after the build, or not built from that commit (`Binding: FAIL`) |
 | `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |
 | With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
 | The commit holds `tests/accuracy/contracts.json`, and `results.json` is missing, names another commit or a build with local changes, lacks a result, holds a result outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
 
-It cannot see Excel: the compile result, the references and the Windows
-build are the runner's own record. A PASS says the evidence is consistent
+It cannot see Excel: the host record, from the operator to the outcome, is
+the runner's own record. A PASS says the evidence is consistent
 with the commit. It validates a calculation only as far as its accuracy
 contracts and their reference values do; the template's illustrative
 contract validates none.

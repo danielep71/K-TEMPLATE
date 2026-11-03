@@ -10,7 +10,11 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
 
 - source identity: the modules exported back from the workbook equal, line
   for line, the commit's VBA components, each form's .frx equals the
-  commit's byte for byte, and none is missing or extra;
+  commit's byte for byte, and none is missing or extra. Code outside string
+  literals and comments is compared without letter case, because the VBE
+  re-cases every use of a name (HB-01): a re-cased identifier is a note, not a
+  finding. In a document module, the attributes Excel writes itself are not
+  compared (DOCUMENT_ATTRIBUTES);
 - the three logs saved with TEST_Harness.SaveLog: each holds, record for
   record, what the commit's suite writes in its mode (no record missing,
   extra or out of order, no ERROR), with cleanup PASS and no recovery: the
@@ -26,10 +30,16 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
 - each project suite the policy lists under "suites": its normal-run log
   holds what the suite writes, passes and is COMPLETE, from the same host,
   and its own certification log records that run and CERTIFICATION=PASS.
+  A policy that names a volume benchmark (a TEST_Benchmark module) as the
+  harness or a suite is rejected.
   Every suite is read as the policy's Office bitness compiles it, so a case
   or assertion inside #If Win64 counts only on the host it runs on;
-- host.txt: the Windows build, the references (exactly those of the policy)
-  and that Debug > Compile VBAProject completed;
+- host.txt, the host record: who ran it, when it started and finished (with
+  the UTC offset), Windows, the Excel build and bitness, the macro policy
+  (AutomationSecurity) and the Trust access to the VBA project as found, the
+  references (exactly those of the policy), that Debug > Compile VBAProject
+  completed, and the outcome. An outcome other than PASS is evidence of that
+  outcome, never of a pass;
 - results.json, written by TEST_Harness.SaveResults, when the commit holds
   accuracy contracts (tests/accuracy/contracts.json): tools/check_accuracy.py
   measures them on it, against the commit's own test cases, so the results
@@ -73,6 +83,7 @@ import tempfile
 import zipfile
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
 from xml.etree import ElementTree
@@ -82,6 +93,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_accuracy  # noqa: E402
 import check_vba_conditionals  # noqa: E402
+import vba_lexer  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "devbuild"))
 
@@ -91,6 +103,19 @@ VBA_SUFFIXES = (".bas", ".cls", ".frm")
 # A form's binary resources, exported beside its .frm and compared byte for byte.
 RESOURCE_SUFFIXES = (".frx",)
 
+# The module attributes of a document module (ThisWorkbook or a sheet, a .cls in
+# build_workbook.DOCUMENT_HOME) that Excel writes itself when it exports one:
+# they follow from the object the module belongs to, not from its source. The
+# guided import pastes a document module's code without its Attribute lines,
+# so whatever the commit's file holds, the export holds Excel's own lines,
+# which it may add, drop or spell differently. VB_Name is not among them: it
+# is the code name, and a different one is a different component.
+DOCUMENT_ATTRIBUTES = ("VB_Base", "VB_GlobalNameSpace", "VB_Creatable", "VB_PredeclaredId",
+                       "VB_Exposed", "VB_TemplateDerived", "VB_Customizable")
+DOCUMENT_ATTRIBUTE = re.compile(rf"^Attribute ({'|'.join(DOCUMENT_ATTRIBUTES)})\s*=",
+                                re.IGNORECASE)
+IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
 # The evidence policy: the suite, its modes, the evidence layout and the
 # supported host. It is read from the commit being checked.
 POLICY = ".github/excel-evidence-policy.json"
@@ -98,12 +123,27 @@ POLICY = ".github/excel-evidence-policy.json"
 # NORMAL may pass, the others are deliberate failures.
 MODE_KINDS = ("NORMAL", "INJECTED_FAILURE", "SKIPPED_CASE")
 OFFICE_BITNESS = ("64-bit", "32-bit")
+# The module prefix of a volume benchmark, which is never certified evidence
+# (docs/methodology/TEST_HARNESS.md, Volume benchmarks).
+BENCHMARK_PREFIX = "TEST_Benchmark"
 # The compilation environment of check_vba_conditionals.py for each bitness.
 BITNESS_ENVIRONMENT = {"64-bit": "vba7-win64", "32-bit": "vba7-win32"}
 MANIFEST_FORMAT = "vba-export-1"
 BUILD_CONFIG = "tools/devbuild/workbook.json"
 ENVIRONMENT_FIELDS = ("host", "version", "build", "os", "office", "runtime")
-HOST_FIELDS = ("windows", "references", "compile")
+# The host record, one key=value line each (docs/methodology/TEST_HARNESS.md).
+HOST_FIELDS = ("operator", "started", "finished", "windows", "excel", "bitness",
+               "automation_security", "vba_project_access", "references", "compile", "outcome")
+# How a run ended. Only PASS can pass; any other outcome is evidence of itself.
+OUTCOMES = ("PASS", "FAIL", "IMPORT_FAILED", "COMPILE_FAILED", "EXECUTION_TIMEOUT",
+            "INCOMPLETE", "NOT_ENABLED", "UNAVAILABLE")
+# What a run that stopped early writes for a host value it could not read; the
+# record of a PASS has none.
+UNKNOWN = "UNKNOWN"
+# Excel's AutomationSecurity, as msoAutomationSecurityLow, ByUI and ForceDisable.
+AUTOMATION_SECURITY = ("Low", "ByUI", "ForceDisable")
+VBA_PROJECT_ACCESS = ("TRUSTED", "NOT_TRUSTED")
+EXCEL_BUILD = re.compile(r"^\d+\.\d+ build \d+$")
 # compile= of a run whose whole project could not be compiled: VBA compiled on
 # demand the modules the run called. Accepted only with identity by rebuild.
 COMPILE_ON_DEMAND = "ON_DEMAND"
@@ -225,6 +265,8 @@ def policy_problems(data: dict[str, Any], modes: list[tuple[str, str, Any]],
         if path.is_absolute() or ".." in path.parts or path.suffix != ".bas":
             problems.append(f"{source}: harness and suite sources must be .bas files "
                             "inside the repository")
+        if path.stem.casefold().startswith(BENCHMARK_PREFIX.casefold()):
+            problems.append(f"{source}: a volume benchmark is never certified evidence")
     for suite in (policy, *policy.project_suites):
         for name in ("expected_cases", "expected_assertions"):
             value = getattr(suite, name)
@@ -288,6 +330,7 @@ class Evidence:
     binding: str = "UNVERIFIED"
     binding_notes: list[str] = field(default_factory=list)
     accuracy: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -377,9 +420,81 @@ def read_suite(source: bytes, office: str = "64-bit") -> Suite:
                  constants.get("EXPECTED_ASSERTIONS", -1), injected_expected)
 
 
+def document_modules(root: Path, commit: str) -> set[str]:
+    """The file names of the commit's document modules: the .cls files of the
+    build's document home."""
+    listed = git(root, "ls-tree", "-r", "-z", "--name-only", commit, "--",
+                 build_workbook.DOCUMENT_HOME).split(b"\0")
+    return {PurePosixPath(item.decode("utf-8")).name for item in listed
+            if item.decode("utf-8").lower().endswith(".cls")}
+
+
+@dataclass
+class SourceLine:
+    """One line of a module: its number, its text, and its text with the letters
+    of code outside strings and comments in lower case."""
+
+    number: int
+    text: str
+    key: str
+
+
+def source_lines(data: bytes, document: bool) -> list[SourceLine]:
+    """The lines of a module (LF line ends) as they are compared, without the
+    attributes Excel writes for a document module. A string literal, a [...]
+    expression and a comment, continued or not, keep their letter case."""
+    lines = []
+    continued = False
+    # Latin-1 maps each byte to one character, so no two bytes compare equal.
+    for number, text in enumerate(data.decode("latin-1").split("\n"), 1):
+        if document and DOCUMENT_ATTRIBUTE.match(text):
+            continue
+        if continued:
+            continued = bool(vba_lexer.CONTINUATION.search(text))
+            lines.append(SourceLine(number, text, text))
+            continue
+        # strip_code keeps the columns of the code before a comment and blanks
+        # the content of strings and brackets: only code keeps its characters.
+        code = vba_lexer.strip_code(text, blank_strings=True)
+        continued = len(vba_lexer.strip_code(text)) < len(text.rstrip()) and \
+            bool(vba_lexer.CONTINUATION.search(text))
+        key = "".join(char.lower() if "A" <= char <= "Z" and index < len(code)
+                      and code[index] == char else char for index, char in enumerate(text))
+        lines.append(SourceLine(number, text, key))
+    return lines
+
+
+def source_difference(actual: bytes, expected: bytes, document: bool
+                      ) -> tuple[int, list[str], list[str]]:
+    """How an exported module differs from the commit's: the line of the export
+    where it first differs other than in the letter case of code (0 when it does
+    not), the identifiers re-cased, as "commit spelling -> exported spelling",
+    and the document-module attributes that differ."""
+    left, right = source_lines(actual, document), source_lines(expected, document)
+    recased: dict[str, None] = {}
+    for line, other in zip(left, right, strict=False):
+        if line.key != other.key:
+            return line.number, [], []
+        if line.text != other.text:
+            for match in IDENTIFIER.finditer(line.text):
+                spelling = other.text[match.start():match.end()]
+                if spelling != match.group():
+                    recased[f"{spelling} -> {match.group()}"] = None
+    if len(left) > len(right):
+        return left[len(right)].number, [], []
+    if len(left) < len(right):
+        return (left[-1].number + 1 if left else 1), [], []
+    changed = set(actual.decode("latin-1").split("\n")) ^ \
+        set(expected.decode("latin-1").split("\n"))
+    attributes = sorted({found.group(1) for found in map(DOCUMENT_ATTRIBUTE.match, changed)
+                         if found}) if document else []
+    return 0, list(recased), attributes
+
+
 def check_sources(root: Path, commit: str, folder: Path, evidence: Evidence,
                   policy: Policy) -> dict[str, bytes]:
     expected = components(root, commit)
+    documents = document_modules(root, commit)
     exported = folder / policy.exported
     present = {path.name: path for path in exported.iterdir()} if exported.is_dir() else {}
     if not expected:
@@ -396,11 +511,18 @@ def check_sources(root: Path, commit: str, folder: Path, evidence: Evidence,
                                          f"{commit[:12]} (binary resource, compared byte for "
                                          "byte)")
             continue
-        actual = actual.replace(b"\r\n", b"\n")
-        if actual != data:
+        line, recased, attributes = source_difference(actual.replace(b"\r\n", b"\n"), data,
+                                                      name in documents)
+        if line:
             evidence.findings.append(f"{policy.exported}/{name}: differs from {name} at "
-                                     f"{commit[:12]} "
-                                     f"(first difference at line {first_difference(actual, data)})")
+                                     f"{commit[:12]} (first difference at line {line})")
+        if recased:
+            evidence.notes.append(f"{policy.exported}/{name}: {len(recased)} identifier(s) "
+                                  "re-cased outside strings and comments, as the VBE re-cases "
+                                  f"a name (HB-01): {', '.join(recased)}")
+        if attributes:
+            evidence.notes.append(f"{policy.exported}/{name}: document-module attributes "
+                                  f"Excel writes, not compared: {', '.join(attributes)}")
     for name in sorted(set(present) - set(expected)):
         evidence.findings.append(f"{policy.exported}/{name}: not a VBA component of the commit")
     return expected
@@ -410,14 +532,6 @@ def git_blob(data: bytes) -> str:
     """The Git blob id of ``data``, as ``git hash-object`` gives it."""
     # Git names objects by SHA-1; this is an identifier, not a security control.
     return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()
-
-
-def first_difference(actual: bytes, expected: bytes) -> int:
-    for number, (left, right) in enumerate(zip(actual.split(b"\n"), expected.split(b"\n"),
-                                               strict=False), 1):
-        if left != right:
-            return number
-    return min(actual.count(b"\n"), expected.count(b"\n")) + 1
 
 
 @dataclass
@@ -604,6 +718,13 @@ def check_host(folder: Path, evidence: Evidence, policy: Policy,
     for key in HOST_FIELDS:
         if not host.get(key):
             evidence.findings.append(f"{policy.host}: no {key}=")
+    evidence.findings += host_findings(host, policy, evidence.environment)
+    outcome = host.get("outcome")
+    if outcome in OUTCOMES and outcome != "PASS":
+        # The rest of the evidence is still checked: it shows what the run left.
+        evidence.findings.append(f"{policy.host}: outcome={outcome}: the record is evidence "
+                                 f"of a run that ended {outcome}, never of a pass")
+        return
     references = tuple(item.strip() for item in host.get("references", "").split(";"))
     if host.get("references") and sorted(references) != sorted(policy.references):
         evidence.findings.append(f"{policy.host}: references must be exactly "
@@ -616,6 +737,63 @@ def check_host(folder: Path, evidence: Evidence, policy: Policy,
                                     "identity by rebuild)"))
     if evidence.environment and evidence.environment.get("office") != policy.office:
         evidence.findings.append(f"not the supported target: Office is not {policy.office}")
+    if host.get("bitness") in OFFICE_BITNESS and host["bitness"] != policy.office:
+        evidence.findings.append(f"{policy.host}: not the supported target: bitness is not "
+                                 f"{policy.office}")
+
+
+def time_findings(host: dict[str, str], policy: Policy) -> list[str]:
+    """Where started= and finished= are not ISO 8601 times with their UTC offset,
+    or the run finished before it started."""
+    findings = []
+    times = []
+    for key in ("started", "finished"):
+        try:
+            moment = datetime.fromisoformat(host.get(key, ""))
+        except ValueError:
+            moment = None
+        if moment is not None and moment.utcoffset() is not None:
+            times.append(moment)
+        elif host.get(key):
+            findings.append(f"{policy.host}: {key}={host[key]} is not an ISO 8601 time with "
+                            "its UTC offset, such as 2026-11-03T14:05:09+01:00")
+    if len(times) == 2 and times[1] < times[0]:
+        findings.append(f"{policy.host}: finished before it started")
+    return findings
+
+
+def host_findings(host: dict[str, str], policy: Policy,
+                  environment: dict[str, str]) -> list[str]:
+    """What is wrong with the values of a host record, whatever its outcome. A run
+    that stopped early may write UNKNOWN for what it could not read, apart from
+    who ran it, when and how it ended."""
+    outcome = host.get("outcome", "")
+    findings = time_findings(host, policy)
+    expected = {"outcome": ", ".join(OUTCOMES), "bitness": ", ".join(OFFICE_BITNESS),
+                "automation_security": ", ".join(AUTOMATION_SECURITY),
+                "vba_project_access": ", ".join(VBA_PROJECT_ACCESS)}
+    stopped = outcome in OUTCOMES and outcome != "PASS"
+    for key in ("windows", "excel", *expected):
+        value = host.get(key)
+        if not value or (value == UNKNOWN and stopped and key != "outcome"):
+            continue
+        if value == UNKNOWN and key != "outcome":
+            findings.append(f"{policy.host}: {key}={UNKNOWN}, but only a run that stopped early "
+                            "may leave a value unread")
+        elif key == "excel" and not EXCEL_BUILD.match(value):
+            findings.append(f"{policy.host}: excel={value}, expected <version> build <build>, "
+                            "such as 16.0 build 17928")
+        elif key in expected and value not in expected[key].split(", "):
+            findings.append(f"{policy.host}: {key}={value}, expected one of {expected[key]}")
+    if outcome == "PASS" and environment:
+        logged = f"{environment.get('version')} build {environment.get('build')}"
+        if host.get("excel") and host["excel"] != logged:
+            findings.append(f"{policy.host}: excel={host['excel']}, but the logs' ENVIRONMENT "
+                            f"is {logged}")
+        if host.get("bitness") and host["bitness"] != environment.get("office"):
+            findings.append(f"{policy.host}: bitness={host['bitness']}, but the logs' "
+                            f"ENVIRONMENT is office={environment.get('office')}")
+    return findings
 
 
 def test_failed_number(source: bytes) -> int | None:
@@ -977,11 +1155,19 @@ def report(commit: str, evidence: Evidence) -> str:
                             for key in ENVIRONMENT_FIELDS)
     lines = [f"Candidate commit: {commit}",
              f"Environment: {environment}",
+             f"Operator: {evidence.host.get('operator', '')}",
+             f"Run: {evidence.host.get('started', '')} to {evidence.host.get('finished', '')}",
              f"Windows: {evidence.host.get('windows', '')}",
+             f"Excel: {evidence.host.get('excel', '')}, {evidence.host.get('bitness', '')}",
+             f"Macro policy found: AutomationSecurity="
+             f"{evidence.host.get('automation_security', '')}; VBA project access "
+             f"{evidence.host.get('vba_project_access', '')}",
              f"References: {evidence.host.get('references', '')}",
              f"Compile: {evidence.host.get('compile', '')}",
+             f"Outcome: {evidence.host.get('outcome', '')}",
              "Imported components (Git blob ids at the commit):"]
     lines += [f"  {name} {blob}" for name, blob in sorted(evidence.hashes.items())]
+    lines += [f"Note: {note}" for note in evidence.notes]
     lines += [f"Accuracy: {line}" for line in evidence.accuracy]
     notes = f" ({'; '.join(evidence.binding_notes)})" if evidence.binding_notes else ""
     lines.append(f"Binding: {evidence.binding}{notes}")

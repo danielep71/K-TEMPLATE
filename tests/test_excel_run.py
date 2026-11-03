@@ -2,18 +2,22 @@
 
 The command runs only on Windows with Excel. These tests check the rest: the
 host record it writes is accepted by check_excel_run.py and names the
-project's references, the Windows description, the evidence folder it
-empties, and the PowerShell script that drives Excel.
+project's references, the record of a run that stops early, the Windows
+description, the Excel bitness and Trust access it reads, the evidence folder
+it empties, and the PowerShell script that drives Excel, which is faked.
 """
 
 from __future__ import annotations
 
 import base64
+import contextlib
 import io
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -27,6 +31,39 @@ import check_excel_run  # noqa: E402
 import excel_run  # noqa: E402
 
 POLICY = check_excel_run.working_policy(ROOT)
+# What the PowerShell script prints once Excel has started.
+EXCEL_OUTPUT = ("EXCEL-VERSION=16.0\nEXCEL-BUILD=17928\n"
+                "EXCEL-PATH=C:\\Program Files\\Microsoft Office\\root\\Office16\n"
+                "EXCEL-AUTOMATION-SECURITY=2\n")
+TIME = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d\d:\d\d$")
+
+
+def pe_header(machine: int) -> bytes:
+    """The start of a Windows executable whose PE header names ``machine``."""
+    return b"MZ" + bytes(0x3A) + (0x40).to_bytes(4, "little") + b"PE\0\0" + \
+        machine.to_bytes(2, "little")
+
+
+def fake_winreg(values: dict[str, object], failures: dict[str, type[OSError]]) -> object:
+    """A stand-in for winreg: each value is found by a part of its path
+    (hive\\key\\name); a path holding a part of ``failures`` raises that error, and
+    any other path is missing (FileNotFoundError), as winreg reports them."""
+    def query(handle: str, name: str) -> tuple[object, int]:
+        path = f"{handle}\\{name}"
+        for part, error in failures.items():
+            if part in path:
+                raise error(5, "Access is denied")
+        for part, value in values.items():
+            if part in path:
+                return value, 4
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+    return types.SimpleNamespace(
+        HKEY_CURRENT_USER="HKEY_CURRENT_USER", HKEY_LOCAL_MACHINE="HKEY_LOCAL_MACHINE",
+        OpenKey=lambda hive, key: contextlib.nullcontext(f"{hive}\\{key}"), QueryValueEx=query)
+
+
+def read_host(path: Path) -> dict[str, str]:
+    return dict(line.split("=", 1) for line in path.read_text(encoding="utf-8").splitlines())
 
 
 class HostRecordTest(unittest.TestCase):
@@ -34,9 +71,17 @@ class HostRecordTest(unittest.TestCase):
         self.assertEqual(sorted(excel_run.built_references()), sorted(POLICY.references))
 
     def test_the_record_passes_the_check_only_with_identity_by_rebuild(self) -> None:
-        record = excel_run.host_record("Windows 11 Pro, version 24H2, OS build 26100.4061",
-                                       excel_run.built_references())
+        record = excel_run.host_record({
+            "operator": "someone", "started": "2026-11-03T14:05:09+01:00",
+            "finished": "2026-11-03T14:07:41+01:00",
+            "windows": "Windows 11 Pro, version 24H2, OS build 26100.4061",
+            "excel": "16.0 build 17928", "bitness": "64-bit", "automation_security": "ByUI",
+            "vba_project_access": "NOT_TRUSTED",
+            "references": "; ".join(excel_run.built_references()),
+            "compile": check_excel_run.COMPILE_ON_DEMAND, "outcome": "PASS"})
         self.assertIn("compile=ON_DEMAND", record)
+        self.assertEqual([line.split("=")[0] for line in record.splitlines()],
+                         list(check_excel_run.HOST_FIELDS))
         with tempfile.TemporaryDirectory() as temporary:
             folder = Path(temporary)
             (folder / POLICY.host).write_text(record, encoding="utf-8")
@@ -59,6 +104,75 @@ class HostRecordTest(unittest.TestCase):
                          "Windows 10 Enterprise, version 22H2, OS build 19045.5247")
         self.assertEqual(excel_run.describe_windows({"ProductName": "Windows 10 Pro"}),
                          "Windows 10 Pro")
+
+    def test_a_value_not_read_is_unknown(self) -> None:
+        record = excel_run.host_record({"operator": "someone", "outcome": "UNAVAILABLE"})
+        self.assertIn("excel=UNKNOWN\n", record)
+        self.assertIn("automation_security=UNKNOWN\n", record)
+
+    def test_the_bitness_is_read_from_the_executable_header(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "EXCEL.EXE"
+            for data, expected in ((pe_header(0x8664), "64-bit"), (pe_header(0x014C), "32-bit"),
+                                   (pe_header(0x0200), "UNKNOWN"), (b"not a program", "UNKNOWN")):
+                with self.subTest(expected=expected):
+                    path.write_bytes(data)
+                    self.assertEqual(excel_run.executable_bitness(path), expected)
+            self.assertEqual(excel_run.executable_bitness(Path(temporary) / "absent.exe"),
+                             "UNKNOWN")
+
+    def test_trust_access_is_read_with_a_policy_first(self) -> None:
+        user = r"HKEY_CURRENT_USER\Software\Microsoft\Office\16.0\Excel\Security\AccessVBOM"
+        policy = (r"HKEY_CURRENT_USER\Software\Policies\Microsoft\Office\16.0\Excel"
+                  r"\Security\AccessVBOM")
+        for values, expected in (({}, "NOT_TRUSTED"), ({user: 1}, "TRUSTED"),
+                                 ({user: 0}, "NOT_TRUSTED"), ({user: 1, policy: 0}, "NOT_TRUSTED")):
+            with self.subTest(values=values):
+                def read(hive: str, key: str, name: str,
+                         values: dict[str, int] = values) -> object | None:
+                    return values.get(f"{hive}\\{key}\\{name}")
+                self.assertEqual(excel_run.vba_project_access("16.0", read), expected)
+
+    def test_a_failed_registry_read_is_unknown_never_a_lower_setting(self) -> None:
+        # Only a missing key or value falls through to the next location; a read that
+        # fails at any of them leaves the setting unknown.
+        for failing in ("HKEY_CURRENT_USER\\Software\\Policies", "HKEY_LOCAL_MACHINE",
+                        "HKEY_CURRENT_USER\\Software\\Microsoft"):
+            with self.subTest(failing=failing):
+                with mock.patch.dict(sys.modules, {"winreg": fake_winreg(
+                        {r"HKEY_CURRENT_USER\Software\Microsoft": 1},
+                        {failing: PermissionError})}):
+                    self.assertEqual(excel_run.vba_project_access("16.0"), "UNKNOWN")
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg({}, {"HKEY": PermissionError})}):
+            self.assertEqual(excel_run.vba_project_access("16.0"), "UNKNOWN")
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg(
+                {r"HKEY_CURRENT_USER\Software\Microsoft": 1}, {})}):
+            self.assertEqual(excel_run.vba_project_access("16.0"), "TRUSTED")
+
+    def test_a_failed_windows_read_is_unknown_not_a_shorter_description(self) -> None:
+        values = {"ProductName": "Windows 10 Pro", "CurrentBuild": "26100", "UBR": 4061}
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg(values, {})}):
+            # A value that is absent is left out, as on a Windows without DisplayVersion.
+            self.assertEqual(excel_run.windows_found(), "Windows 11 Pro, OS build 26100.4061")
+        with mock.patch.dict(sys.modules, {"winreg": fake_winreg(
+                values, {"UBR": PermissionError})}):
+            self.assertEqual(excel_run.windows_found(), "UNKNOWN")
+
+    def test_the_excel_fields_come_from_what_the_script_prints(self) -> None:
+        with mock.patch.object(excel_run, "executable_bitness", return_value="64-bit") as bits, \
+                mock.patch.object(excel_run, "vba_project_access", return_value="NOT_TRUSTED"):
+            fields = excel_run.excel_host("noise\n" + EXCEL_OUTPUT)
+        self.assertEqual(fields, {"excel": "16.0 build 17928", "bitness": "64-bit",
+                                  "automation_security": "ByUI",
+                                  "vba_project_access": "NOT_TRUSTED"})
+        self.assertEqual(bits.call_args.args[0].name, "EXCEL.EXE")
+        self.assertEqual(excel_run.excel_host("EXCEL-AUTOMATION-SECURITY=9"),
+                         {"excel": "", "bitness": "", "automation_security": ""})
+
+    def test_the_tool_reads_the_macro_settings_and_never_writes_them(self) -> None:
+        source = (ROOT / "tools/devbuild/excel_run.py").read_text(encoding="utf-8")
+        for call in ("SetValue", "CreateKey", "DeleteValue", "DeleteKey"):
+            self.assertNotIn(call, source)
 
 
 class EvidenceFolderTest(unittest.TestCase):
@@ -101,8 +215,11 @@ class PowerShellTest(unittest.TestCase):
 
     def test_no_macro_setting_changes_and_a_person_enables_the_macros(self) -> None:
         # A policy may open the workbook with macros disabled (HB-02); the script never
-        # overrides it, and waits for Enable Content instead.
-        self.assertNotIn("AutomationSecurity", self.script)
+        # overrides it, and waits for Enable Content instead. It only reads the setting.
+        self.assertIsNone(re.search(r"AutomationSecurity\s*=", self.script, re.I))
+        self.assertIn('Write-Output ("EXCEL-AUTOMATION-SECURITY=" + [int]$excel.'
+                      'AutomationSecurity)', self.script)
+        self.assertNotIn("AccessVBOM", self.script)
         probe = self.script.index("[void]$excel.Run($prefix + 'TEST_Harness.LastResult')")
         opened = self.script.index("$excel.Workbooks.Open(")
         run = self.script.index(f"$excel.Run($prefix + 'TEST_Examples.{POLICY.entry_point}'")
@@ -112,6 +229,15 @@ class PowerShellTest(unittest.TestCase):
         self.assertIn("Start-Sleep -Seconds 2", self.script)
         self.assertIn('$failure = "NOT-ENABLED"', self.script)
         self.assertIn("exit 4", self.script)
+
+    def test_each_way_the_run_ends_has_its_exit_code(self) -> None:
+        for code in excel_run.OUTCOME_BY_EXIT:
+            if code:
+                self.assertIn(f"exit {code}", self.script)
+        self.assertEqual(set(excel_run.OUTCOME_BY_EXIT.values()) - set(check_excel_run.OUTCOMES),
+                         set())
+        self.assertIn('if ($null -eq $excel) { "UNAVAILABLE" } else { "INCOMPLETE" }',
+                      self.script)
 
     def test_progress_records_do_not_reach_the_output(self) -> None:
         self.assertIn("$ProgressPreference = 'SilentlyContinue'", self.script)
@@ -157,23 +283,64 @@ class PowerShellTest(unittest.TestCase):
 
 
 class CommandTest(unittest.TestCase):
-    def test_macros_never_enabled_stop_without_a_record(self) -> None:
+    def stopped(self, run: mock.Mock, error: str, outcome: str) -> dict[str, str]:
+        """The host record a run that stops early leaves, with PowerShell faked by ``run``."""
         built = mock.Mock(commit="a" * 40, clean=True)
         folder = ROOT / "test-results" / "excel-run-unit-test"
         try:
             with mock.patch.object(excel_run.build_workbook, "build", return_value=built), \
-                    mock.patch.object(excel_run, "run_excel",
-                                      return_value=(excel_run.NOT_ENABLED,
-                                                    "EXCEL-RUN=NOT-ENABLED")), \
-                    mock.patch.object(excel_run, "windows_version") as windows, \
+                    mock.patch.object(subprocess, "run", run), \
+                    mock.patch.object(excel_run, "windows_version",
+                                      return_value="Windows 11 Pro, version 24H2"), \
+                    mock.patch.object(excel_run, "executable_bitness", return_value="64-bit"), \
+                    mock.patch.object(excel_run, "vba_project_access",
+                                      return_value="NOT_TRUSTED"), \
+                    mock.patch.object(excel_run.check_excel_run, "check") as check, \
                     redirect_stdout(io.StringIO()) as output:
-                with self.assertRaisesRegex(excel_run.RunError, "not enabled within 300 s"):
-                    excel_run.record(ROOT, folder, 600, 300)
-            windows.assert_not_called()
-            self.assertFalse((folder / POLICY.host).exists())
+                with self.assertRaisesRegex(excel_run.RunError, error):
+                    excel_run.record(ROOT, folder, 600, 300, "Operator Name")
+            check.assert_not_called()
             self.assertIn("click Enable Content", output.getvalue())
+            self.assertIn(f"outcome={outcome}", output.getvalue())
+            host = read_host(folder / POLICY.host)
+            evidence = check_excel_run.Evidence()
+            check_excel_run.check_host(folder, evidence, POLICY, rebuilt=True)
         finally:
             shutil.rmtree(folder, ignore_errors=True)
+        self.assertEqual(list(host), list(check_excel_run.HOST_FIELDS))
+        self.assertEqual((host["outcome"], host["operator"]), (outcome, "Operator Name"))
+        self.assertRegex(host["started"], TIME)
+        self.assertRegex(host["finished"], TIME)
+        self.assertEqual(host["windows"], "Windows 11 Pro, version 24H2")
+        # The record is valid, and evidence of its outcome only.
+        self.assertEqual(evidence.findings, [f"host.txt: outcome={outcome}: the record is "
+                                             f"evidence of a run that ended {outcome}, never "
+                                             "of a pass"])
+        return host
+
+    def test_macros_never_enabled_leave_a_record_of_that_outcome(self) -> None:
+        run = mock.Mock(return_value=subprocess.CompletedProcess(
+            [], excel_run.NOT_ENABLED, EXCEL_OUTPUT + "EXCEL-RUN=NOT-ENABLED", ""))
+        host = self.stopped(run, "not enabled within 300 s", "NOT_ENABLED")
+        self.assertEqual((host["excel"], host["bitness"], host["automation_security"],
+                          host["vba_project_access"]),
+                         ("16.0 build 17928", "64-bit", "ByUI", "NOT_TRUSTED"))
+
+    def test_a_timeout_leaves_a_record_of_that_outcome(self) -> None:
+        run = mock.Mock(side_effect=subprocess.TimeoutExpired([], 600, output=EXCEL_OUTPUT))
+        host = self.stopped(run, "did not finish within 600 s", "EXECUTION_TIMEOUT")
+        self.assertEqual(host["automation_security"], "ByUI")
+
+    def test_excel_or_powershell_unavailable_leaves_a_record(self) -> None:
+        missing = mock.Mock(side_effect=FileNotFoundError("powershell.exe"))
+        host = self.stopped(missing, "PowerShell could not be started", "UNAVAILABLE")
+        self.assertEqual(host["excel"], "UNKNOWN")
+        no_excel = mock.Mock(return_value=subprocess.CompletedProcess(
+            [], 5, "EXCEL-RUN=UNAVAILABLE; class not registered", ""))
+        self.stopped(no_excel, "exit 5, outcome UNAVAILABLE", "UNAVAILABLE")
+        opened = mock.Mock(return_value=subprocess.CompletedProcess(
+            [], 6, EXCEL_OUTPUT + "EXCEL-RUN=INCOMPLETE; cannot open", ""))
+        self.stopped(opened, "exit 6, outcome INCOMPLETE", "INCOMPLETE")
 
     def test_the_wait_for_enable_content_is_shorter_than_the_run(self) -> None:
         with redirect_stdout(io.StringIO()), mock.patch("sys.stderr", io.StringIO()), \
