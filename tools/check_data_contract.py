@@ -37,11 +37,14 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = Path("docs/methodology/data-contract.json")
 DEFAULT_ENCODING = "UTF-8"
 
-DATASET_ID = re.compile(r"^DS-\d+$")
-SNAKE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
-CURRENCY = re.compile(r"^[A-Z]{3}$")
-DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-INTEGER = re.compile(r"^[+-]?\d+$")
+# Each pattern must match a whole value (fullmatch): a quoted cell may hold a
+# line break, which "$" would accept at its end. Digits are ASCII: \d and
+# Decimal() would also accept other scripts' digits.
+DATASET_ID = re.compile(r"DS-[0-9]+")
+SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+CURRENCY = re.compile(r"[A-Z]{3}")
+DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+INTEGER = re.compile(r"[+-]?[0-9]+")
 
 CONTRACT_KEYS = frozenset({"schema_version", "kind", "datasets"})
 DATASET_KEYS = frozenset({"id", "illustrative", "description", "provider", "frequency",
@@ -230,7 +233,7 @@ def parse_field(data: object, where: str, problems: list[str]) -> Field | None:
         return None
     before = len(problems)
     name, kind = data["name"], data["type"]
-    if not isinstance(name, str) or not SNAKE.match(name):
+    if not isinstance(name, str) or not SNAKE.fullmatch(name):
         problems.append(f"{where}: name {name!r} is not lower snake case")
     if kind not in TYPES:
         problems.append(f"{where}: type {kind!r} is not one of {', '.join(sorted(TYPES))}")
@@ -288,7 +291,7 @@ def parse_dataset(data: object, where: str, problems: list[str]) -> Dataset | No
         problems.append(f"{where}: {problem}")
         return None
     before = len(problems)
-    if not isinstance(data["id"], str) or not DATASET_ID.match(data["id"]):
+    if not isinstance(data["id"], str) or not DATASET_ID.fullmatch(data["id"]):
         problems.append(f"{where}: id {data['id']!r} is not a DS- ID")
     if not isinstance(data["illustrative"], bool):
         problems.append(f"{where}: illustrative is not true or false")
@@ -375,7 +378,7 @@ def allowed_text(field: Field) -> str:
 # The reference validator.
 
 def is_date(text: str) -> bool:
-    if not DATE.match(text):
+    if not DATE.fullmatch(text):
         return False
     try:
         datetime.date.fromisoformat(text)
@@ -387,9 +390,10 @@ def is_date(text: str) -> bool:
 def number(text: str, field: Field, separator: str) -> Decimal | None:
     """The value of an integer or decimal cell, or None when it is not one."""
     if field.type == "integer":
-        return Decimal(text) if INTEGER.match(text) else None
-    pattern = rf"^[+-]?\d+(?:{re.escape(separator)}\d+)?$"
-    return Decimal(text.replace(separator, ".")) if re.match(pattern, text) else None
+        return Decimal(text) if INTEGER.fullmatch(text) else None
+    # Only a full match reaches Decimal(), which would accept surrounding blanks.
+    pattern = rf"[+-]?[0-9]+(?:{re.escape(separator)}[0-9]+)?"
+    return Decimal(text.replace(separator, ".")) if re.fullmatch(pattern, text) else None
 
 
 def value_findings(text: str, field: Field, separator: str, line: int) -> list[Finding]:
@@ -403,7 +407,7 @@ def value_findings(text: str, field: Field, separator: str, line: int) -> list[F
                 (field.maximum is not None and value > field.maximum):
             return [Finding("DC-RANGE", line, f"{shown} is not {allowed_text(field)}")]
     valid = {"date": is_date(text), "boolean": text in ("true", "false"),
-             "currency": bool(CURRENCY.match(text))}.get(field.type, True)
+             "currency": bool(CURRENCY.fullmatch(text))}.get(field.type, True)
     if not valid:
         return [Finding("DC-TYPE", line, f"{shown} is not {field.type}")]
     if field.values is not None and text not in field.values:

@@ -93,8 +93,10 @@ case. It reads a file this way:
 - Each further row has one cell per column; a blank line is a row with no
   cell. LF and CRLF line endings are both read, and a cell may be quoted with
   double quotes.
-- An empty cell is a missing value. A number has no thousands separator, no
-  exponent and no surrounding blanks.
+- An empty cell is a missing value. Each other cell is matched whole: a
+  number is written in ASCII digits, with no thousands separator, exponent,
+  surrounding blank or line break, and a quoted line break makes a code,
+  date or `true` invalid too.
 
 It checks the layout and the values of a file, never what they mean: test a
 key that must be unique, a reconciliation against control totals or a rule of

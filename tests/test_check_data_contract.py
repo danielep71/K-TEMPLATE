@@ -123,6 +123,19 @@ class InvalidFileTest(unittest.TestCase):
         ("exponent", HEADER + "P1,BUY,EUR,1e3\n", [("DC-TYPE", 2)]),
         ("thousands separator", HEADER + 'P1,BUY,EUR,"1,000"\n', [("DC-TYPE", 2)]),
         ("surrounding blank", HEADER + "P1,BUY,EUR, 1\n", [("DC-TYPE", 2)]),
+        ("trailing blank", HEADER + "P1,BUY,EUR,1 \n", [("DC-TYPE", 2)]),
+        ("digits of another script", HEADER + "P1,BUY,EUR,\u0661\n", [("DC-TYPE", 2)]),
+        # A quoted cell may hold a line break, which ends the record on line 3.
+        ("decimal with a quoted line break", HEADER + 'P1,BUY,EUR,"1\n"\n', [("DC-TYPE", 3)]),
+        ("currency with a quoted line break", HEADER + 'P1,BUY,"EUR\n",1\n',
+         [("DC-TYPE", 3)]),
+        ("currency with blanks", HEADER + 'P1,BUY," EUR ",1\n', [("DC-TYPE", 2)]),
+        ("integer with a quoted line break", one("trade_count", '"1\n"'), [("DC-TYPE", 3)]),
+        ("date with a quoted line break", one("start_date", '"2026-01-02\n"'),
+         [("DC-TYPE", 3)]),
+        ("boolean with a quoted line break", one("netted", '"true\n"'), [("DC-TYPE", 3)]),
+        ("allowed value with a quoted line break", HEADER + 'P1,"BUY\n",EUR,1\n',
+         [("DC-VALUE", 3)]),
         ("decimal comma in a decimal point file", HEADER + 'P1,BUY,EUR,"1,5"\n',
          [("DC-TYPE", 2)]),
         ("currency in lower case", HEADER + "P1,BUY,eur,1\n", [("DC-TYPE", 2)]),
@@ -181,6 +194,7 @@ class ContractTest(unittest.TestCase):
             return lambda c: c["datasets"][0].update(changes)
         cases: list[tuple[Edit, str]] = [
             (ds(id="DS-2a"), "is not a DS- ID"),
+            (ds(id="DS-2\n"), "is not a DS- ID"),
             (ds(illustrative="yes"), "illustrative is not true or false"),
             (ds(description="a | b"), "description is not a text for one table cell"),
             (ds(source="`x`.csv"), "source holds a backtick"),
@@ -214,6 +228,7 @@ class ContractTest(unittest.TestCase):
             return lambda c: c["datasets"][0]["fields"][index].update(changes)
         cases: list[tuple[Edit, str]] = [
             (fd(0, name="PositionId"), "is not lower snake case"),
+            (fd(0, name="position_id\n"), "is not lower snake case"),
             (fd(0, type="money"), "type 'money' is not one of"),
             (fd(0, required="yes"), "required is not true or false"),
             (fd(0, unit=""), "unit is not null, a text or"),
