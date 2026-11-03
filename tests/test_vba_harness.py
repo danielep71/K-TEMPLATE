@@ -4,7 +4,9 @@ The harness runs only in Excel. These tests check, without Excel, what its
 source can show: that the example suite's expected counts equal the cases and
 assertions it contains, that every case runs once with a well-formed unique
 identifier, that the documented passing RESULT line matches the counts, and
-that every record the harness writes is documented.
+that every record the harness writes is documented. The relation suite is
+checked the same way, and each of its cases must pair the relation with its
+corruption check.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from typing import ClassVar
 
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "tests/modules/TEST_Examples.bas"
+RELATIONS = ROOT / "tests/modules/TEST_Relations.bas"
 HARNESS = ROOT / "tests/modules/TEST_Harness.bas"
 GUIDE = ROOT / "docs/methodology/TEST_HARNESS.md"
 REGISTRY = ROOT / "tests/accuracy/contracts.json"
@@ -130,6 +133,50 @@ class ExampleSuiteTest(unittest.TestCase):
     def test_the_certification_saves_the_results_of_the_normal_run(self) -> None:
         body = self.bodies["CertifyExamples"]
         self.assertRegex(body, r'CertifyMode "NORMAL"[^\n]*\n\s+TEST_Harness\.SaveResults ')
+
+
+class RelationSuiteTest(unittest.TestCase):
+    text = source(RELATIONS)
+    bodies = procedures(text)
+    cases: ClassVar[dict[str, str]] = {name: body for name, body in bodies.items() if name.startswith("Case")}
+
+    @staticmethod
+    def assertions(body: str) -> list[str]:
+        return re.findall(r'TEST_Harness\.Assert\w+ "([^"]+)"', body)
+
+    def test_runner_calls_every_case_once_in_order(self) -> None:
+        called = re.findall(r"^\s+(Case\w+)$", self.bodies["RunRelationTests"], re.M)
+        self.assertEqual(called, list(self.cases))
+        self.assertTrue(self.cases)
+
+    def test_each_case_begins_once_with_a_unique_identifier(self) -> None:
+        identifiers = []
+        for name, body in self.cases.items():
+            begun = re.findall(r'TEST_Harness\.BeginCase "([^"]+)"', body)
+            self.assertEqual(len(begun), 1, name)
+            self.assertRegex(begun[0], CASE_ID)
+            self.assertIn("TEST_Harness.RecordCaseError", body, name)
+            identifiers += begun
+        self.assertEqual(len(identifiers), len(set(identifiers)))
+
+    def test_every_relation_has_its_corruption_check(self) -> None:
+        for name, body in self.cases.items():
+            with self.subTest(case=name):
+                self.assertEqual(sorted(self.assertions(body)), ["detects-corruption", "holds"])
+                self.assertRegex(body, r'AssertTrue "detects-corruption", _\s+Not ')
+
+    def test_expected_counts_match_the_source(self) -> None:
+        assertions = sum(len(self.assertions(body)) for body in self.cases.values())
+        cases = constant(self.text, "EXPECTED_CASES")
+        self.assertEqual(cases, len(self.cases))
+        self.assertEqual(constant(self.text, "EXPECTED_ASSERTIONS"), assertions)
+        for name, body in self.cases.items():
+            stated = re.search(r"(\d+) assertions?\.", body)
+            self.assertIsNotNone(stated, name)
+            assert stated is not None
+            self.assertEqual(int(stated.group(1)), len(self.assertions(body)), name)
+        passing = re.sub(r"\n'\s+", " ", self.bodies["RunRelationTests"])
+        self.assertIn(f"cases={cases}; assertions={assertions}; failures=0", passing)
 
 
 class HarnessTest(unittest.TestCase):

@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- The VBA harness has patterns for three more kinds of test.
+  `tests/modules/TEST_Relations.bas` holds illustrative relation tests
+  (additivity, symmetry, monotonicity, zero input) on a stand-in total, each
+  with a check that a deliberately corrupted output fails it; it is not
+  certified, and `tests/test_vba_harness.py` keeps its counts and checks
+  consistent. The harness guide gives the skeleton of an end-to-end case
+  runner, which restores the input sheets it writes, and the conventions of a
+  volume benchmark, which `check_excel_run.py` refuses as an evidence suite.
+  Static checks only: the new module has not been run in Excel (#246).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs

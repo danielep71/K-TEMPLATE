@@ -385,12 +385,26 @@ Each fixture declares one `category`:
 - Inputs that JSON cannot express, such as non-finite numbers or wrong VBA
   types, are tested in a VBA test module instead of a fixture.
 
+<a id="other-tests"></a>
+
+## Relation, end-to-end and volume tests
+
+Three kinds of VBA test complement the cases. Each is described in the
+[harness guide](TEST_HARNESS.md), and none adds a category:
+
+| Test | Uses | Shows |
+| --- | --- | --- |
+| [Relation test](TEST_HARNESS.md#relation-tests) | No fixture or expected file: inputs written in the test module | A property of the calculation, such as additivity, symmetry, monotonicity or a zero input giving zero, with a corruption check that a deliberately corrupted output fails it |
+| [End-to-end case runner](TEST_HARNESS.md#end-to-end-case-runner) | A case's fixture and expected file, written to the input sheets | That the workbook, run through its public entry point, gives the case's expected values within its tolerance |
+| [Volume benchmark](TEST_HARNESS.md#volume-benchmarks) | A large synthetic input built in memory, never committed | How long the calculation takes on one host; never a reference value and never certification evidence |
+
 <a id="completeness-policy"></a>
 
 ## Completeness policy
 
 - A rule is **validated** only when at least one `published` or
-  `independent` case passes for it. `illustrative` cases never count.
+  `independent` case passes for it. `illustrative` cases, relation tests and
+  volume benchmarks never count.
 - Each implemented rule also needs at least one `boundary` case, and each
   input domain at least one `invalid` case, as a fixture or a VBA test.
 - A run that does not execute every expected case and assertion is
