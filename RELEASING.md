@@ -140,17 +140,19 @@ Build the development workbook from the candidate with
 ([building a workbook from source](INSTALLATION.md#building-a-workbook-from-source)).
 Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md)
 as [recording an Excel run](INSTALLATION.md#recording-an-excel-run)
-describes, with the export bound to the workbook by
-`tools/devbuild/export_manifest.py`. Then check the evidence folder against
-the candidate:
+describes: with `python tools/devbuild/excel_run.py`, which builds, runs,
+checks and proves identity by rebuild, or by hand, with the export bound to
+the workbook by `tools/devbuild/export_manifest.py`. Then check the evidence
+folder against the candidate (the command does this itself):
 
 ```sh
 python tools/check_excel_run.py test-results/excel-run --commit CANDIDATE_SHA \
   --workbook test-results/build/Workbook-development.xlsm --require-binding
 ```
 
-It must end with `Binding: VERIFIED` and `excel-run: PASS`: the export came
-from a clean build of the candidate, and the run is consistent with it. This check is a release gate, not a
+It must end with `Binding: VERIFIED` and `excel-run: PASS`: the workbook, or
+the export, came from a clean build of the candidate, and the run is
+consistent with it. This check is a release gate, not a
 **Repository integrity** step, because the evidence exists only for a
 candidate. If a case or the check fails, fix it through a task pull request
 and start again at step 2.

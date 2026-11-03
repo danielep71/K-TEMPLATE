@@ -384,6 +384,9 @@ def package(layout: Layout, build: Build, vba_bin: bytes) -> bytes:
         for name, data in blobs.items():
             info = zipfile.ZipInfo(name, date_time=ZIP_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
+            # ZipInfo takes the creating system from sys.platform; fix it to Unix, the
+            # system the permission bits below belong to, so every platform agrees.
+            info.create_system = 3
             info.external_attr = 0o644 << 16
             archive.writestr(info, data)
     return buffer.getvalue()
