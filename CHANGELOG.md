@@ -63,6 +63,12 @@ milestones and their pull requests.
 
 ### Added
 
+- The evidence of an Excel run can certify project suites beside the example
+  suite: the evidence policy, now version 2, lists them under `suites`, each
+  with its certification entry point, counts and two logs. `excel_run.py` runs
+  every entry point, `check_excel_run.py` checks each suite's normal run and
+  certification from the same host, and every suite is read as the policy's
+  Office bitness compiles it, so `#If Win64` cases count only there (#237).
 - `tools/devbuild/excel_run.py` records an Excel run with one command on
   Windows. It builds the workbook, runs the certification in Excel through
   COM, closes without saving and writes `host.txt`, then checks the
