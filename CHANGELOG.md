@@ -188,6 +188,12 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/check_excel_run.py` compares the modules exported by hand with the
+  commit without the letter case of code outside strings and comments, as the
+  VBE re-cases a name (`HB-01`, still `assumed`), and reports each re-cased
+  identifier on a `Note:` line. In a document module it no longer compares the
+  attributes Excel writes itself, such as `VB_Base`; `VB_Name`, string
+  literals, comments and any other difference still fail (#245).
 - mypy also reports unreachable code (`warn_unreachable`), such as a branch
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,

@@ -37,6 +37,7 @@ import build_workbook  # noqa: E402
 import check_accuracy  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
+import vba_project  # noqa: E402
 from check_excel_run import Suite, components, read_suite  # noqa: E402
 
 # The policy of the working tree; make_repository commits it with the modules.
@@ -977,6 +978,118 @@ class ProjectSuiteTest(unittest.TestCase):
         self.assertTrue(any("EXPECTED_CASES is 3, but" in item for item in
                             check_excel_run.suite_findings(stated, wide, PROJECT_SOURCE, "x")))
         self.assertEqual(check_excel_run.suite_findings(stated, narrow, PROJECT_SOURCE, "x"), [])
+
+
+# A document module as Excel exports it, and a class with the same attributes.
+DOCUMENT_HEADER = "VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n"
+DOCUMENT_ATTRIBUTE_LINES = "\n".join(
+    vba_project.document_module("ThisWorkbook", True).source.split("\r\n")[1:-2])
+DOCUMENT = (f'{DOCUMENT_HEADER}Attribute VB_Name = "ThisWorkbook"\n{DOCUMENT_ATTRIBUTE_LINES}\n'
+            "Option Explicit\n\nPrivate Sub Workbook_Open()\n"
+            '    Application.StatusBar = "Opened"   \'Shown once\nEnd Sub\n').encode()
+CLASS = DOCUMENT.replace(b'"ThisWorkbook"', b'"CFixture"')
+
+
+class SourceIdentityTest(unittest.TestCase):
+    """The export is compared with the commit without the letter case of code, as
+    the VBE re-cases a name (HB-01), and without the attributes Excel writes for a
+    document module; any other difference fails."""
+
+    root: ClassVar[Path]
+    commit: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not shutil.which("git"):
+            raise unittest.SkipTest("needs Git")
+        cls.root, cls.commit = make_repository(extra={"src/workbook/ThisWorkbook.cls": DOCUMENT,
+                                                      "src/classes/CFixture.cls": CLASS})
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def checked(self, *changes: Callable[[Path], None]) -> check_excel_run.Evidence:
+        def apply(folder: Path) -> None:
+            for change in changes:
+                change(folder)
+        with evidence(apply, self.root, self.commit) as folder:
+            return check_excel_run.check(self.root, self.commit, folder)
+
+    def test_a_recased_identifier_passes_with_a_counted_note(self) -> None:
+        result = self.checked(edit("exported/TEST_Examples.bas",
+                                   'If mMode = "INJECTED_FAILURE" Then',
+                                   'If MMODE = "INJECTED_FAILURE" Then'),
+                              edit("exported/TEST_Harness.bas", "ERR_TEST_FAILED        As Long",
+                                   "Err_Test_Failed        As Long"))
+        self.assertEqual(result.findings, [])
+        self.assertIn("exported/TEST_Examples.bas: 1 identifier(s) re-cased outside strings and "
+                      "comments, as the VBE re-cases a name (HB-01): mMode -> MMODE",
+                      result.notes)
+        self.assertTrue(any("TEST_Harness.bas: 1 identifier(s)" in note and
+                            "ERR_TEST_FAILED -> Err_Test_Failed" in note
+                            for note in result.notes), result.notes)
+        self.assertIn("Note: exported/TEST_Examples.bas: 1 identifier(s)",
+                      check_excel_run.report(self.commit, result))
+
+    def test_a_change_of_case_in_a_string_or_a_comment_fails(self) -> None:
+        for change in (edit("exported/TEST_Examples.bas", '"INJECTED_FAILURE" Then',
+                            '"injected_failure" Then'),
+                       edit("exported/TEST_Examples.bas", "'Expected sum;", "'expected sum;"),
+                       edit("exported/TEST_Harness.bas", "'vbObjectError + 4065",
+                            "'VbObjectError + 4065"),
+                       edit("exported/ThisWorkbook.cls", '"Opened"', '"opened"'),
+                       edit("exported/ThisWorkbook.cls", "'Shown once", "'shown once")):
+            with self.subTest(change=change):
+                found = self.checked(change).findings
+                self.assertTrue(any("differs from" in item and "first difference at line" in item
+                                    for item in found), found)
+
+    def test_any_other_difference_still_fails(self) -> None:
+        found = self.checked(edit("exported/TEST_Examples.bas", "If mMode =", "If mMode2 =")
+                             ).findings
+        self.assertTrue(any("TEST_Examples.bas: differs" in item for item in found), found)
+
+    def test_a_comment_continued_on_the_next_line_keeps_its_case(self) -> None:
+        commit = b"x = 1 ' note _\nContinued Text\ny = 2\n"
+        self.assertEqual(check_excel_run.source_difference(
+            b"x = 1 ' note _\ncontinued text\ny = 2\n", commit, False)[0], 2)
+        self.assertEqual(check_excel_run.source_difference(
+            b"X = 1 ' note _\nContinued Text\nY = 2\n", commit, False), (0, ["x -> X", "y -> Y"], []))
+        self.assertEqual(check_excel_run.source_difference(
+            b"x = [Sheet1!A1]\n", b"x = [sheet1!A1]\n", False)[0], 1)
+        self.assertEqual(check_excel_run.source_difference(b"x = 1\n", b"x = 1\ny = 2\n",
+                                                           False)[0], 2)
+
+    def test_the_tolerated_attributes_are_those_excel_writes_for_a_document(self) -> None:
+        # The build writes the same attributes for a document module without a source file.
+        written = re.findall(r"^Attribute (\w+) =", DOCUMENT_ATTRIBUTE_LINES, re.M)
+        self.assertEqual(tuple(written), check_excel_run.DOCUMENT_ATTRIBUTES)
+        self.assertEqual(check_excel_run.document_modules(self.root, self.commit),
+                         {"ThisWorkbook.cls"})
+
+    def test_document_module_attributes_are_not_compared(self) -> None:
+        def attributes(name: str) -> Callable[[Path], None]:
+            def apply(folder: Path) -> None:
+                path = folder / "exported" / name
+                text = path.read_bytes().decode("ascii")
+                for line in ("Attribute VB_TemplateDerived = False\r\n",
+                             "Attribute VB_Customizable = True\r\n"):
+                    text = text.replace(line, "")
+                text = text.replace("VB_PredeclaredId = True", "VB_PredeclaredId = False")
+                path.write_bytes(text.encode("ascii"))
+            return apply
+        result = self.checked(attributes("ThisWorkbook.cls"))
+        self.assertEqual(result.findings, [])
+        self.assertIn("exported/ThisWorkbook.cls: document-module attributes Excel writes, not "
+                      "compared: VB_Customizable, VB_PredeclaredId, VB_TemplateDerived",
+                      result.notes)
+        # A class module's attributes are its source, and so is a document's code name.
+        found = self.checked(attributes("CFixture.cls")).findings
+        self.assertTrue(any("CFixture.cls: differs" in item for item in found), found)
+        found = self.checked(edit("exported/ThisWorkbook.cls", 'VB_Name = "ThisWorkbook"',
+                                  'VB_Name = "thisworkbook"')).findings
+        self.assertTrue(any("ThisWorkbook.cls: differs" in item for item in found), found)
 
 
 if __name__ == "__main__":
