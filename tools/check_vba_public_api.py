@@ -56,6 +56,8 @@ VARIABLE = re.compile(r"^\s*(?:Public|Global)\s+(?P<withevents>WithEvents\s+)?"
                       r"(?P<name>[A-Za-z_]\w*)\b(?P<rest>.*)$", re.I)
 IMPLICIT = re.compile(r"^\s*(?:Static\s+)?(?:Sub|Function|Property\s+(?:Get|Let|Set)|Enum|Type|"
                       r"Event|Declare\s+(?:PtrSafe\s+)?(?:Function|Sub))\b", re.I)
+# Module-level Dim and Const are private by default, but state no visibility.
+UNSTATED = re.compile(r"^\s*(?:Dim|Const)\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,9 @@ def scan_statement(scan: Scan, line: int, code: str) -> None:
     """A module-level statement other than a procedure or a Public Enum or Type."""
     if IMPLICIT.match(code):
         scan.reject(line, f"implicit public module-level declaration: {norm(code)}")
+        return
+    if UNSTATED.match(code):
+        scan.reject(line, f"module-level declaration without Private or Public: {norm(code)}")
         return
     outcome = module_declaration(code)
     standard = Path(scan.path).suffix.lower() == ".bas"

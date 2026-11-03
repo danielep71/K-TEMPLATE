@@ -154,7 +154,7 @@ Public Sub BeginRun( _
 '   cleanup at EndRun; it does not stop the run.
 '
 ' UPDATED
-'   2026-10-24
+'   2026-11-03
 '==============================================================================
 '
 
@@ -172,9 +172,10 @@ Public Sub BeginRun( _
             mLastResult = "RESULT=FAIL; suite=" & SuiteName & "; operation=NOT_RUN" & _
                 "; completeness=INCOMPLETE; cases=0; assertions=0; failures=0" & _
                 "; cleanup=NOT_RUN; recovery=REQUIRED"
-            Say mLastResult
+            'RESULT is always the last record of a run.
             Say "RECOVERY=REQUIRED; reason=" & mRecoveryReason & _
                 "; action=check Excel state, then run TEST_Harness.ResetTests"
+            Say mLastResult
             Err.Raise ERR_TEST_DIRTY_START, "TEST_Harness.BeginRun", _
                 "Recovery required: " & mRecoveryReason & ". Run TEST_Harness.ResetTests."
         End If
