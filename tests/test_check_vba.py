@@ -22,6 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import check_vba_calls  # noqa: E402
 import check_vba_conditionals  # noqa: E402
 import check_vba_dependencies  # noqa: E402
 import check_vba_identifiers  # noqa: E402
@@ -1493,6 +1494,128 @@ class IdentifierTest(unittest.TestCase):
         with repository(VALID) as root:
             _, components, procedures = check_vba_identifiers.check(root)
         self.assertEqual((components, procedures), (7, 6))
+
+
+CALLEE = """Attribute VB_Name = "TEST_Callee"
+Option Explicit
+Option Private Module
+
+Public Sub Pair(ByVal First As Long, ByVal Second As Long)
+End Sub
+
+Public Function Scaled(ByVal Value As Double, Optional ByVal Factor As Double = 1) As Double
+        Scaled = Value * Factor
+End Function
+
+Public Sub Collect(ByVal Label As String, ParamArray Values() As Variant)
+End Sub
+
+Public Function Grid() As Variant
+        Grid = Array(1, 2)
+End Function
+
+Public Property Get Size(ByVal Index As Long) As Long
+        Size = Index
+End Property
+
+Private Sub Hidden(ByVal Value As Long)
+End Sub
+
+Private Function Secret() As Long
+End Function
+"""
+CALLS_VALID = """
+Private Totals(1 To 3) As Double
+
+
+Public Sub Run()
+        Dim Values(1 To 2) As Double
+        Dim Items As Collection
+        Dim Pair(1 To 2) As Long
+        Pair(1) = 1
+        TEST_Callee.Pair 1, 2
+        Call TEST_Callee.Pair(1, Second:=2)
+        Debug.Print Scaled(1), Scaled(1, 2), TEST_Callee.Scaled(Value:=1, Factor:=2)
+        Collect "a, b"
+        Collect "a", 1, , "c", 3
+        Call Collect(Label:="a")
+        Values(1) = Scaled(Values(2))
+        Totals(1) = Values(1)
+        If Scaled(1) > 0 Then Collect "x", 1 Else Helper 1
+        Debug.Print Grid(1), TEST_Callee.Size(1, 2)
+        Set Items = New Collection
+        With Items
+            .Add Scaled(2), "Key"
+            .Add 1, 2, 3, 4, 5
+            .Scaled = 1
+        End With
+        Items.Scaled 1, 2, 3
+        Helper Value:=1
+        TEST_Fixture.Helper 1
+        Debug.Print "Scaled(1, 2, 3)"
+End Sub
+
+
+Private Sub Helper(ByVal Value As Long)
+End Sub
+"""
+CALLS_INVALID = {
+    "too-few": ("TEST_Callee.Pair 1", "call to TEST_Callee.Pair in Run: required argument(s) "
+                                      "Second not passed"),
+    "too-many": ("Pair 1, 2, 3", "call to TEST_Callee.Pair in Run: 3 argument(s) passed, at "
+                                 "most 2 accepted"),
+    "omitted-required": ('Pair , "2"', "required argument(s) First not passed"),
+    "too-many-in-an-expression": ("Debug.Print Scaled(1, 2, 3)",
+                                  "call to TEST_Callee.Scaled in Run: 3 argument(s) passed"),
+    "too-few-nested": ("Debug.Print Scaled(Scaled())",
+                       "call to TEST_Callee.Scaled in Run: required argument(s) Value"),
+    "unknown-named": ("Call Pair(1, Second:=2, Third:=3)", "no parameter is named Third"),
+    "paramarray-without-its-required-argument": ("Collect", "required argument(s) Label"),
+    "private-of-another-module": ("TEST_Callee.Hidden 1", "call to TEST_Callee.Hidden in Run: "
+                                                          "Hidden is Private in TEST_Callee"),
+    "private-in-an-expression": ("Debug.Print TEST_Callee.Hidden(1)",
+                                 "Hidden is Private in TEST_Callee"),
+    "private-without-parameters": ("Debug.Print TEST_Callee.Secret()",
+                                   "Secret is Private in TEST_Callee"),
+}
+
+
+class CallTest(unittest.TestCase):
+    def files(self, body: str) -> dict[str, str | bytes]:
+        return {**standalone(module(body)), "tests/modules/TEST_Callee.bas": CALLEE}
+
+    def test_valid_calls_pass(self) -> None:
+        self.assertEqual(run_check(check_vba_calls.check, self.files(CALLS_VALID)), [])
+        self.assertEqual(run_check(check_vba_calls.check, VALID), [])
+
+    def test_invalid_calls_are_reported(self) -> None:
+        for name, (statement, text) in CALLS_INVALID.items():
+            with self.subTest(name=name):
+                body = f"\nPublic Sub Run()\n        {statement}\nEnd Sub\n"
+                findings = run_check(check_vba_calls.check, self.files(body))
+                self.assertEqual(len(findings), 1, findings)
+                self.assertIn(text, findings[0])
+                self.assertTrue(findings[0].startswith("tests/modules/TEST_Fixture.bas:6: "))
+
+    def test_with_block_members_are_not_calls(self) -> None:
+        body = ("\nPublic Sub Run()\n        With New Collection\n            .Pair = 1\n"
+                "            .Pair 1, 2, 3\n            .Hidden\n"
+                "            Debug.Print .Scaled(1, 2, 3)\n        End With\nEnd Sub\n")
+        self.assertEqual(run_check(check_vba_calls.check, self.files(body)), [])
+
+    def test_repository_vba_has_no_findings(self) -> None:
+        findings, components, resolved = check_vba_calls.check(ROOT)
+        self.assertEqual(findings, [])
+        if components:
+            self.assertGreater(resolved, 0)
+
+    def test_main_exits_1_on_a_finding(self) -> None:
+        body = "\nPublic Sub Run()\n        TEST_Callee.Hidden 1\nEnd Sub\n"
+        for files, expected in ((self.files(CALLS_VALID), 0), (self.files(body), 1)):
+            with self.subTest(expected=expected), repository(files) as root, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(check_vba_calls.main(["--root", str(root)]), expected)
+                self.assertIn("resolved call(s); static check", output.getvalue())
 
 
 class MainTest(unittest.TestCase):

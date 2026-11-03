@@ -73,6 +73,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `vba-public-api` | `python tools/check_vba_public_api.py` |
 | `vba-dependencies` | `python tools/check_vba_dependencies.py` |
 | `vba-identifiers` | `python tools/check_vba_identifiers.py` |
+| `vba-calls` | `python tools/check_vba_calls.py` (advisory: findings warn, never fail the run) |
 | `test-cases` | `python tools/check_test_cases.py` |
 | `derivations` | `python tools/check_derivations.py` |
 | `accuracy` | `python tools/check_accuracy.py` |

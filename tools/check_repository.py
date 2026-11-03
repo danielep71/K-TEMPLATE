@@ -12,7 +12,8 @@ test-results/integrity/:
   $GITHUB_STEP_SUMMARY.
 
 A check whose tool or GitHub context is missing is skipped and reported as
-such; --strict, which CI passes, makes it fail instead. The run covers the
+such; --strict, which CI passes, makes it fail instead. An advisory check
+reports its findings as a warning and does not fail the run. The run covers the
 repository only: it compiles no VBA, runs no Excel and certifies no figure.
 """
 
@@ -67,6 +68,8 @@ class Check:
     function: Callable[[Context], list[Finding]] | None = None
     # Why the check cannot run here, if it cannot.
     missing: str | None = None
+    # Findings are reported as a warning and do not fail the run.
+    advisory: bool = False
 
 
 @dataclass
@@ -218,6 +221,7 @@ def checks(context: Context) -> list[Check]:
         *[Check(f"vba-{name.replace('_', '-')}", [python, f"tools/check_vba_{name}.py"])
           for name in ("source", "conditionals", "jumps", "public_api", "dependencies",
                        "identifiers")],
+        Check("vba-calls", [python, "tools/check_vba_calls.py"], advisory=True),
         Check("test-cases", [python, "tools/check_test_cases.py"]),
         Check("derivations", [python, "tools/check_derivations.py"]),
         Check("accuracy", [python, "tools/check_accuracy.py"]),
@@ -245,6 +249,14 @@ def annotate(finding: Finding) -> str:
 
 
 def run_check(check: Check, context: Context, strict: bool) -> Result:
+    result = run_one(check, context, strict)
+    if check.advisory and result.status == "fail":
+        result.status = "warn"
+        result.detail = f"advisory, not a failure: {result.detail}"
+    return result
+
+
+def run_one(check: Check, context: Context, strict: bool) -> Result:
     if check.missing:
         status = "fail" if strict else "skip"
         return Result(check.name, status, check.command, None, check.missing, check.missing)
@@ -297,7 +309,7 @@ def build_report(context: Context, results: Sequence[Result]) -> dict[str, Any]:
 
 
 def summary(report: dict[str, Any]) -> str:
-    marks = {"pass": "✅ pass", "fail": "❌ fail", "skip": "⏭️ skip"}
+    marks = {"pass": "✅ pass", "fail": "❌ fail", "warn": "⚠️ warn", "skip": "⏭️ skip"}
     lines = [f"## Repository integrity: {report['status'].upper()}", "",
              f"- Commit: `{report['commit']}`" + (" (dirty working tree)" if report["dirty"]
                                                    else ""),
@@ -323,7 +335,7 @@ def run(context: Context, listed: Sequence[Check], out: Path, strict: bool,
         results.append(result)
         print(f"{check.name}: {result.status.upper()}"
               + (f" ({result.detail})" if result.detail else ""), flush=True)
-        if result.status == "fail" and result.log:
+        if result.status in ("fail", "warn") and result.log:
             print(result.log.rstrip(), flush=True)
     report = build_report(context, results)
     (out / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

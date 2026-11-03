@@ -13,7 +13,8 @@ Each NAME has a renderer here that computes the block from the repository:
   end with, read from the suite that .github/excel-evidence-policy.json names
   by the same code that checks Excel-run evidence (tools/check_excel_run.py);
 - integrity-checks, in CONTRIBUTING.md: the checks that
-  tools/check_repository.py runs, in order, with what each runs.
+  tools/check_repository.py runs, in order, with what each runs and whether
+  it is advisory.
 
 --check fails when a block differs from a fresh render, when its markers are
 missing, unbalanced or repeated, or when a marker names no renderer. --write
@@ -112,6 +113,8 @@ def integrity_checks(root: Path) -> str:
                                  "docstring to describe it")
             summary = lines[0]
             runs = f"Built in: {summary}"
+        if check.advisory:
+            runs += " (advisory: findings warn, never fail the run)"
         rows.append(f"| `{check.name}` | {runs} |")
     return "\n".join(["| Check | Runs |", "| --- | --- |", *rows])
 
