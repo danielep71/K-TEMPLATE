@@ -63,6 +63,10 @@ milestones and their pull requests.
 
 ### Added
 
+- **Repository integrity** fails a committed Office package, outside the
+  regulatory source copies, that carries macros (a `vbaProject` part, a
+  reference to one or a macro-enabled content type) or personal metadata (an
+  author, last editor, company or manager in `docProps/`) (#241).
 - `tools/devbuild/excel_run.py` records an Excel run with one command on
   Windows. It builds the workbook, runs the certification in Excel through
   COM, closes without saving and writes `host.txt`, then checks the

@@ -16,7 +16,15 @@ bytes, which are all that Git inspects. A binary file passes only if it is:
 - listed in .github/binary-allowlist.json with its current SHA-256.
 
 .gitignore keeps such files out by default; this check catches one added on
-purpose, for example with git add -f. It never changes a file.
+purpose, for example with git add -f.
+
+An Office Open XML package that passes (a .xlsx, .xltx, .docx or similar
+file, as a ZIP with [Content_Types].xml) also fails when it carries macros, a
+vbaProject.bin part or a reference to one, or personal document metadata: an
+author or last editor in docProps/core.xml, or a company or manager in
+docProps/app.xml. The byte-preserved regulatory sources under
+docs/methodology/sources/ are exempt: they stay as published. It never
+changes a file.
 """
 
 from __future__ import annotations
@@ -25,8 +33,10 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import re
 import subprocess
 import sys
+import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -39,6 +49,14 @@ APPROVED_PATHS = ("docs/methodology/sources/*", "tests/fixtures/*/*/*",
 # Read in chunks: Git looks at the first 8000 bytes only, so a NUL byte later in
 # the file would otherwise stay unseen.
 CHUNK_BYTES = 1 << 16
+# Office packages are inspected for macros and personal metadata, except the
+# byte-preserved regulatory sources.
+SOURCE_COPIES = "docs/methodology/sources/"
+# A VBA part, its content type or relationship, or a macro-enabled main part.
+MACRO_PART = re.compile(r"vbaProject|macroEnabled", re.I)
+# docProps fields that name a person or an organization, by part.
+PERSONAL_FIELDS = {"docProps/core.xml": ("creator", "lastModifiedBy"),
+                   "docProps/app.xml": ("Company", "Manager")}
 
 
 def git(root: Path, *args: str, stdin: str | None = None) -> str:
@@ -97,6 +115,38 @@ def load_allowlist(root: Path, findings: list[str]) -> dict[str, str]:
     return allowed
 
 
+def field_value(xml: str, field: str) -> str:
+    """The text of the first element named ``field``, whatever its namespace prefix."""
+    match = re.search(rf"<(?:\w+:)?{field}\b[^>]*>(.*?)</(?:\w+:)?{field}>", xml, re.S)
+    return match.group(1).strip() if match else ""
+
+
+def package_problems(path: Path) -> list[str]:
+    """Macros or personal metadata in an Office Open XML package; none for other files."""
+    try:
+        with zipfile.ZipFile(path) as package:
+            names = package.namelist()
+            if "[Content_Types].xml" not in names:
+                return []
+            problems = []
+            texts = {name: package.read(name).decode("utf-8", "replace") for name in names
+                     if name == "[Content_Types].xml" or name.endswith(".rels")
+                     or name in PERSONAL_FIELDS}
+    except (zipfile.BadZipFile, OSError):
+        return []
+    if any(MACRO_PART.search(name) for name in names) or \
+            any(MACRO_PART.search(texts[name]) for name in texts if name not in PERSONAL_FIELDS):
+        problems.append("carries macros (a vbaProject part, a reference to one or a "
+                        "macro-enabled content type); commit "
+                        "the macro-free package and keep the code as exported source")
+    for part, fields in PERSONAL_FIELDS.items():
+        found = [field for field in fields if field_value(texts.get(part, ""), field)]
+        if found:
+            problems.append(f"{part} names a person or organization ({', '.join(found)}); "
+                            "clear it, as DISTRIBUTION.md describes")
+    return problems
+
+
 def approved(name: str, tracked: set[str]) -> bool:
     if any(fnmatch.fnmatchcase(name, pattern) for pattern in APPROVED_PATHS):
         return True
@@ -115,6 +165,8 @@ def check(root: Path) -> tuple[list[str], int]:
         path = root / name
         if not path.is_file():
             continue
+        if not name.startswith(SOURCE_COPIES):
+            findings.extend(f"{name}: {problem}" for problem in package_problems(path))
         # An allowlisted file is checked against its recorded hash whatever its
         # content is now, so a replacement never passes by no longer looking binary.
         if name in allowed:

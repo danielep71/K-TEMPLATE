@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,29 @@ sys.path.insert(0, str(ROOT / "tools"))
 import check_binaries  # noqa: E402
 
 PNG = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR"
+CONTENT_TYPES = ('<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/'
+                 'package/2006/content-types"><Default Extension="xml" '
+                 'ContentType="application/xml"/>{extra}</Types>')
+CORE = ('<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/'
+        'metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:creator>{creator}</dc:creator><cp:lastModifiedBy>{editor}</cp:lastModifiedBy>'
+        '</cp:coreProperties>')
+APP = '<Properties><Company>{company}</Company><Manager>{manager}</Manager></Properties>'
+
+
+def package(extra_types: str = "", parts: dict[str, str] | None = None) -> bytes:
+    """A minimal Office Open XML package with the given extra content types and parts."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", CONTENT_TYPES.format(extra=extra_types))
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+        for name, text in (parts or {}).items():
+            archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+CLEAN = package(parts={"docProps/core.xml": CORE.format(creator="", editor=""),
+                       "docProps/app.xml": APP.format(company="", manager="")})
 
 
 @unittest.skipIf(shutil.which("git") is None, "git is not installed")
@@ -83,6 +107,45 @@ class BinaryCheckTest(unittest.TestCase):
         self.assertFinding(self.repository({"late.txt": late}), "late.txt")
         tail = b"x" * (1 << 16) + b"\0"  # the NUL in the second chunk read
         self.assertFinding(self.repository({"tail.txt": tail}), "tail.txt")
+
+    def test_a_clean_office_package_passes(self) -> None:
+        self.assertEqual(self.repository({"src/workbook/Template.xlsx": CLEAN}), [])
+
+    def test_an_office_package_with_macros_fails(self) -> None:
+        cases = {
+            "vba part": package(parts={"xl/vbaProject.bin": "\0"}),
+            "vba content type": package('<Default Extension="bin" ContentType='
+                                        '"application/vnd.ms-office.vbaProject"/>'),
+            "vba relationship": package(parts={"xl/_rels/workbook.xml.rels":
+                                               '<Relationships><Relationship '
+                                               'Target="vbaProject.bin"/></Relationships>'}),
+            "macro-enabled main part": package('<Override PartName="/xl/workbook.xml" '
+                                               'ContentType="application/vnd.ms-excel.'
+                                               'sheet.macroEnabled.main+xml"/>'),
+        }
+        for label, content in cases.items():
+            with self.subTest(label=label):
+                self.assertFinding(self.repository({"src/workbook/Template.xlsx": content}),
+                                   "carries macros")
+
+    def test_an_office_package_with_personal_metadata_fails(self) -> None:
+        cases = {
+            "creator": ("docProps/core.xml", CORE.format(creator="A. Person", editor="")),
+            "last editor": ("docProps/core.xml", CORE.format(creator="", editor="A. Person")),
+            "company": ("docProps/app.xml", APP.format(company="Firm", manager="")),
+            "manager": ("docProps/app.xml", APP.format(company="", manager="A. Boss")),
+        }
+        for label, (part, text) in cases.items():
+            with self.subTest(label=label):
+                found = self.repository({"tests/fixtures/a-case/variant/input.xlsx":
+                                         package(parts={part: text})})
+                self.assertFinding(found, f"{part} names a person or organization")
+
+    def test_regulatory_source_copies_are_not_inspected(self) -> None:
+        published = package(parts={"xl/vbaProject.bin": "\0", "docProps/core.xml":
+                                   CORE.format(creator="Regulator", editor="Staff")})
+        self.assertEqual(self.repository({"docs/methodology/sources/SRC-01_template.xlsm":
+                                          published}), [])
 
     def test_allowlist(self) -> None:
         digest = hashlib.sha256(PNG).hexdigest()
