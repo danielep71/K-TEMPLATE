@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- With `src/workbook/Template.xlsx`, `tools/devbuild/build_workbook.py` builds
+  the workbook from a copy of the template, keeping its formats, print areas
+  and protection: it sets the code names, writes the stamp and adds the VBA
+  project, and two builds stay byte-identical. Without a template it writes
+  blank sheets as before. The protection matrix,
+  `docs/methodology/workbook-protection.json`, states each sheet's protection
+  options and its input (unlocked) and output (locked) ranges;
+  `tools/check_workbook_protection.py` fails **Repository integrity** when the
+  template differs from it, and passes as inactive while neither exists (#243).
 - A machine-readable data contract, `docs/methodology/data-contract.json`,
   holds each dataset's file or sheet, encoding and delimited-text format, and
   each field's type, unit or currency field, required flag and allowed values

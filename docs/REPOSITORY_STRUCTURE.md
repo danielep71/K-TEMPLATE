@@ -17,6 +17,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `docs/` | Governance, setup, structure, style and the API inventory | Present |
 | `docs/methodology/` | Sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format and [workbook contract](methodology/WORKBOOK_CONTRACT.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
 | `docs/methodology/sources/` | Byte-preserved copies of regulatory sources | Reserved |
+| `docs/methodology/workbook-protection.json` | The [protection matrix](methodology/WORKBOOK_CONTRACT.md#protection) of `src/workbook/Template.xlsx`, added with the template | Reserved |
 | `src/core/` | Calculations and pure validation, host-independent standard modules | Reserved |
 | `src/classes/` | Host-independent classes, if the design needs them | Reserved |
 | `src/modules/` | The public facade: the supported entry points | Reserved |
