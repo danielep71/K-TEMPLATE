@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- The methodology guides trace each rule. The methodology overview has a
+  support matrix that marks each feature as supported, not supported or
+  entered by the user. The validation plan has a traceability table that
+  maps each `SRC-` paragraph to its `CALC-` step, its VBA procedure, its test
+  cases and a status: Validated, Exercised, Not validated or Not implemented.
+  Each table has one illustrative row. `check_test_cases.py` fails a row whose
+  source, step, procedure under `src/` or case does not exist, whose case
+  tests another calculation, or whose status contradicts what the row names
+  (#247).
 - `RELEASING.md` step 8 checks the published workbook, with a *Published
   workbook* section in the release certification: the attached workbook's
   build stamp names the candidate and `production`, a rebuild of the tag
