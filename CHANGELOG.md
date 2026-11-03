@@ -63,6 +63,12 @@ milestones and their pull requests.
 
 ### Added
 
+- The evidence of an Excel run can certify project suites beside the example
+  suite: the evidence policy, now version 2, lists them under `suites`, each
+  with its certification entry point, counts and two logs. `excel_run.py` runs
+  every entry point, `check_excel_run.py` checks each suite's normal run and
+  certification from the same host, and every suite is read as the policy's
+  Office bitness compiles it, so `#If Win64` cases count only there (#237).
 - **Repository integrity** fails a committed Office package, outside the
   regulatory source copies, that carries macros (a `vbaProject` part, a
   reference to one or a macro-enabled content type) or personal metadata (an

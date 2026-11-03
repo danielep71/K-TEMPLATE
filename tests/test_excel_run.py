@@ -88,7 +88,7 @@ class EvidenceFolderTest(unittest.TestCase):
 class PowerShellTest(unittest.TestCase):
     script = excel_run.powershell_script(Path(r"C:\Dev\it's\Workbook-development.xlsm"),
                                          Path(r"C:\Dev\run"), Path(r"C:\Dev\tests\fixtures"),
-                                         "TEST_Examples", POLICY.entry_point,
+                                         [f"TEST_Examples.{POLICY.entry_point}"],
                                          "TEST_Harness.LastResult", 300)
 
     def test_the_workbook_is_opened_read_only_and_never_saved(self) -> None:
@@ -105,7 +105,7 @@ class PowerShellTest(unittest.TestCase):
         self.assertNotIn("AutomationSecurity", self.script)
         probe = self.script.index("[void]$excel.Run($prefix + 'TEST_Harness.LastResult')")
         opened = self.script.index("$excel.Workbooks.Open(")
-        run = self.script.index(f'$excel.Run($prefix + "TEST_Examples.{POLICY.entry_point}"')
+        run = self.script.index(f"$excel.Run($prefix + 'TEST_Examples.{POLICY.entry_point}'")
         self.assertLess(opened, probe)
         self.assertLess(probe, run)
         self.assertIn("$deadline = (Get-Date).AddSeconds(300)", self.script)
@@ -117,12 +117,32 @@ class PowerShellTest(unittest.TestCase):
         self.assertIn("$ProgressPreference = 'SilentlyContinue'", self.script)
 
     def test_the_entry_point_runs_with_both_folders(self) -> None:
-        self.assertIn(f'$excel.Run($prefix + "TEST_Examples.{POLICY.entry_point}", $evidence, '
+        self.assertIn(f"$excel.Run($prefix + 'TEST_Examples.{POLICY.entry_point}', $evidence, "
                       "$fixtures)", self.script)
         self.assertIn(r"$evidence = 'C:\Dev\run'", self.script)
         self.assertIn(r"$fixtures = 'C:\Dev\tests\fixtures'", self.script)
         # A quote in a path is doubled, so a path cannot end the literal.
         self.assertIn(r"$workbookPath = 'C:\Dev\it''s\Workbook-development.xlsm'", self.script)
+
+    def test_every_suite_runs_even_after_one_fails(self) -> None:
+        script = excel_run.powershell_script(Path(r"C:\Dev\Workbook-development.xlsm"),
+                                             Path(r"C:\Dev\run"), Path(r"C:\Dev\fixtures"),
+                                             ["TEST_Examples.CertifyExamples",
+                                              "TEST_Project.CertifyProject"],
+                                             "TEST_Harness.LastResult", 300)
+        first = script.index("$excel.Run($prefix + 'TEST_Examples.CertifyExamples'")
+        second = script.index("$excel.Run($prefix + 'TEST_Project.CertifyProject'")
+        self.assertLess(first, second)
+        # Each call has its own catch, and only the first failure is kept.
+        self.assertEqual(script.count("if (-not $failure) { $failure = "), 2)
+        policy = check_excel_run.parse_policy(
+            (ROOT / check_excel_run.POLICY).read_text(encoding="utf-8").replace(
+                '"suites": []', '"suites": [{"name": "project", "source": '
+                '"tests/modules/TEST_Project.bas", "certification_entry_point": '
+                '"CertifyProject", "expected_cases": 1, "expected_assertions": 1, '
+                '"log": "project.log", "certification_log": "project-certification.log"}]'))
+        self.assertEqual(excel_run.entry_points(policy),
+                         [f"TEST_Examples.{POLICY.entry_point}", "TEST_Project.CertifyProject"])
 
     def test_the_command_is_encoded_and_skips_the_profile(self) -> None:
         text = excel_run.encoded(self.script)

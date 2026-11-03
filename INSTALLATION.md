@@ -290,7 +290,10 @@ fails, or when you need a full compile.
    the error *Suite examples did not pass*. Those errors are recorded, not
    raised, so that every log is written. The certification ends with
    `CERTIFICATION=PASS`; otherwise it raises *Certification of examples did
-   not pass* after writing its log.
+   not pass* after writing its log. Then type the certification entry point
+   of each project suite that `.github/excel-evidence-policy.json` lists under
+   `suites`, in order, with the same two arguments; each saves its log and its
+   certification log.
 6. **Export the modules back.** In the VBE, right-click each component →
    **Export File**, into `exported\`, under its own name. Export every VBA
    component of the commit, the test modules included; a form exports as its
