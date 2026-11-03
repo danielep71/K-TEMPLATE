@@ -22,6 +22,17 @@ Resolves #
 
 ## 💡 Why
 
+## 🧮 Calculation impact
+
+<!-- For a change to a calculation's results, rules or expected values: the
+source each changed rule cites (its `SRC-` ID and locator) and the class of
+the expected values that test it: `published`, `independent` or
+`illustrative`, as the reference classes of docs/methodology/TEST_CASES.md
+define them. Otherwise replace both lines with "No calculation change". -->
+
+- Source:
+- Class of the expected values:
+
 ## ✅ Validated
 
 <!-- Commands and checks actually run, with results. Hosted checks run on this pull request. -->
@@ -71,4 +82,5 @@ comment on the pull request. -->
 - [ ] Each linked issue has the assignee, exactly one priority label, an open milestone and a target end date before the milestone's due date; this PR has no milestone, links the relevant issues and carries appropriate labels.
 - [ ] Scope is focused: no unrelated changes, local artifacts or generated output.
 - [ ] Documentation affected by the change is updated.
+- [ ] `CHANGELOG.md` has an entry under `[Unreleased]` for this change, or the change is one its maintenance policy says needs none.
 - [ ] No tokens, credentials, real portfolio or client data.
