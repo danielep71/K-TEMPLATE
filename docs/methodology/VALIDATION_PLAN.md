@@ -32,6 +32,9 @@ validate a rule.
 | --- | --- | --- | --- |
 | *Illustrative:* `CALC-01` | Hand-computed totals for a synthetic portfolio; empty input; invalid input rejected | Evidence record per release candidate | Not started |
 
+The [traceability table](#traceability) gives the status of each rule of a
+calculation.
+
 Cover, for each calculation, with the case categories of the
 [test-case format](TEST_CASES.md#categories):
 
@@ -40,6 +43,42 @@ Cover, for each calculation, with the case categories of the
   rejects;
 - failure: earlier outputs are withdrawn;
 - repeatability: the same input gives the same output.
+
+## Traceability
+
+Each rule is traced from the paragraph of its source to the step of the
+calculation contract that states it, to the VBA procedure that implements it
+and to the test cases that test it, with its validation status:
+
+| Source | Paragraph | Calculation step | VBA procedure | Test cases | Status |
+| --- | --- | --- | --- | --- | --- |
+| *Illustrative:* `SRC-01` | Article 1(1) | `CALC-01.1` | — | `illustrative-format-example`, `illustrative-file-import-example` | Not implemented |
+
+- **Source and paragraph:** a `SRC-` ID of the [source register](SOURCES.md)
+  and the exact paragraph, as in the step's *Source* column.
+- **Calculation step:** `CALC-NN.<step>`, a step of the *Rules* table of
+  that [calculation contract](CALCULATION_CONTRACTS.md). A rule implemented
+  in several steps has one row per step.
+- **VBA procedure:** `Module.Procedure` of a component under `src/`, or `—`
+  while none implements the rule. Name every procedure that applies the rule.
+- **Test cases:** the IDs of the [test cases](TEST_CASES.md) that test the
+  step, or `—`. Each case tests the row's calculation.
+- **Status:** one of the four below.
+
+| Status | Meaning | The row names |
+| --- | --- | --- |
+| Validated | A `published` or `independent` case passes for the rule on an Excel run of the release candidate ([completeness policy](TEST_CASES.md#completeness-policy)) | A procedure, and at least one `published` or `independent` case |
+| Exercised | Cases run the rule, but none is a `published` or `independent` case that passed: they are `illustrative`, or the reference cases have not passed yet | A procedure and at least one case |
+| Not validated | Implemented, but no case tests it | A procedure and no case |
+| Not implemented | No procedure implements it yet; its cases may come first | No procedure |
+
+`python tools/check_test_cases.py`, which **Repository integrity** runs,
+fails a row whose source is not in the register, whose step belongs to no
+declared calculation, whose procedure is not in a component under `src/`,
+whose case does not exist or tests another calculation, or whose status
+contradicts what the row names. It cannot see an Excel run: whether a
+`Validated` rule's case passed on the release candidate is the
+[evidence record](#evidence-record)'s to show.
 
 ## Evidence record
 

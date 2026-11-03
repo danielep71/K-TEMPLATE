@@ -73,8 +73,10 @@ What was checked by hand, by whom, against which independent values. Write
 ### Limits
 
 What this certification does not cover, such as hosts not tested,
-calculations without independent reference values, sources not yet
-verified, or host behaviour still `assumed` in the validation plan's
+calculations without independent reference values, rules that the validation
+plan's [traceability table](../methodology/VALIDATION_PLAN.md#traceability)
+does not mark `Validated`, sources not yet verified, or host behaviour still
+`assumed` in its
 [host behaviour register](../methodology/VALIDATION_PLAN.md#host-behaviour).
 
 ### Sign-off
