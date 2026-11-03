@@ -75,6 +75,25 @@ entry point:
 4. `EndCertification` writes `certification.log`, then raises
    `ERR_TEST_FAILED` if the certification did not pass.
 
+A project suite is certified in its normal run only. Its certification entry
+point takes the same two arguments and follows the same steps with one mode:
+
+```vb
+Public Sub CertifyProject(ByVal Folder As String, ByVal Fixtures As String)
+        TEST_Harness.BeginCertification SUITE_NAME
+        ' Run the suite in NORMAL mode, capturing its error as CertifyMode does,
+        TEST_Harness.SaveLog Folder & "\project.log"
+        TEST_Harness.CertifyRun "NORMAL", True, RunErrorNumber, RunErrorDescription
+        TEST_Harness.EndCertification Folder & "\project-certification.log"
+End Sub
+```
+
+List the suite under `suites` in the [evidence policy](#evidence-policy), with
+the names of its two logs. Each suite declares its counts for the Office
+bitness the policy supports: a case or assertion inside `#If Win64` counts
+only where that branch is compiled, and the check reads the suite the same
+way.
+
 ## Log format
 
 One record per line, `KEY=value`, with further fields separated by `; `.
@@ -141,6 +160,7 @@ reads, and it writes none.
 | `examples.log`, `injected.log`, `skipped.log` | `CertifyExamples`, one per mode |
 | `results.json` | `SaveResults`, after the normal run |
 | `certification.log` | `EndCertification` |
+| A log and a certification log per project suite, as `suites` names them | Its certification entry point |
 | `exported/` | By hand only: every VBA component exported back from the workbook after the run, each form with its `.frx`. Without it, `check_excel_run.py --workbook` proves identity by rebuilding the commit |
 | `host.txt` | You, or `tools/devbuild/excel_run.py`: `windows=`, `references=` and `compile=` (`ON_DEMAND` for a run without Trust access) |
 | `export-manifest.json` | By hand only: `tools/devbuild/export_manifest.py`, the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
@@ -150,9 +170,12 @@ reads, and it writes none.
 [`.github/excel-evidence-policy.json`](../../.github/excel-evidence-policy.json)
 holds what an Excel run must leave as evidence:
 
-- `harness` and `suite`: the harness module, the suite's name, source module
-  and certification entry point, and the case and assertion counts it
+- `harness` and `suite`: the harness module, the example suite's name, source
+  module and certification entry point, and the case and assertion counts it
   declares as `EXPECTED_CASES` and `EXPECTED_ASSERTIONS`;
+- `suites`: the project suites, each with its name, source module,
+  certification entry point, counts, `log` and `certification_log`, run in
+  `NORMAL` mode after the example suite; empty in the template;
 - `modes`: the three modes in run order, the log each one saves and whether
   it must pass (only `NORMAL`);
 - `evidence`: the names of the certification log, the export folder, the host
@@ -161,9 +184,11 @@ holds what an Excel run must leave as evidence:
 
 `tools/check_excel_run.py` reads the policy from the candidate commit, so a
 run is judged by the policy of the commit it names, and rejects a policy that
-is missing or malformed. It reads the harness and the suite at the exact paths
-the policy names, and fails when the commit has no file there, or when the
-suite's counts or entry point differ from the policy. The same policy is read
+is missing or malformed. It reads the harness and every suite at the exact
+paths the policy names, as the policy's Office bitness compiles them, and
+fails when the commit has no file there, or when a suite's counts or entry
+point differ from the policy. Every log of every suite must come from one
+host. A policy of version 1, which older commits hold, has no `suites`. The same policy is read
 by `tools/devbuild/export_manifest.py`, for the names of the export folder and
 the manifest, and by `tools/render_docs.py`, for the expected results in the
 installation guide. `tests/test_check_excel_run.py` keeps the policy equal to
