@@ -159,16 +159,41 @@ def missing(call: Call, endpoint: str) -> tuple[Json, bool]:
         raise
 
 
+def security_fixes(call: Call, root: str) -> tuple[bool, bool]:
+    """Whether Dependabot security updates are enabled, and whether GitHub has paused them."""
+    value, absent = missing(call, root + '/automated-security-fixes')
+    if absent:
+        return False, False
+    value = value or {}
+    return bool(value.get('enabled')), bool(value.get('paused'))
+
+
 def security_state(call: Call, root: str, metadata: dict[str, Json], feature: str) -> bool:
+    """Whether a feature is in effect: paused security updates are enabled, not in effect."""
     if feature == 'private_vulnerability_reporting':
         return bool((call('GET', root + '/private-vulnerability-reporting') or {}).get('enabled'))
     if feature == 'vulnerability_alerts':
         return not missing(call, root + '/vulnerability-alerts')[1]
     if feature == 'automated_security_fixes':
-        value, absent = missing(call, root + '/automated-security-fixes')
-        return not absent and bool((value or {}).get('enabled'))
+        enabled, paused = security_fixes(call, root)
+        return enabled and not paused
     analysis = metadata.get('security_and_analysis') or {}
     return bool((analysis.get(feature) or {}).get('status') == 'enabled')
+
+
+def security_matches(call: Call, root: str, metadata: dict[str, Json], feature: str,
+                     desired: bool, report: bool) -> bool:
+    if feature != 'automated_security_fixes':
+        return security_state(call, root, metadata, feature) == desired
+    enabled, paused = security_fixes(call, root)
+    if not desired:
+        # Paused updates are still enabled: turning the feature off needs the DELETE.
+        return not enabled
+    if enabled and paused and report:
+        print('NOTE: Dependabot security updates are enabled but paused, so they open no pull '
+              'requests. GitHub pauses them when Dependabot pull requests go unanswered; they '
+              'count as drift, and an apply that does not resume them fails its read-back.')
+    return enabled and not paused
 
 
 def security_plan(call: Call, root: str, metadata: dict[str, Json], config: dict[str, Json],
@@ -189,7 +214,7 @@ def security_plan(call: Call, root: str, metadata: dict[str, Json], config: dict
         desired = config['security'][feature]
         if SECURITY_PUBLIC_ONLY[feature] and not public:
             continue
-        if security_state(call, root, metadata, feature) == desired:
+        if security_matches(call, root, metadata, feature, desired, report):
             continue
         if feature in ANALYSIS_KEYS:
             analysis[feature] = {'status': 'enabled' if desired else 'disabled'}
@@ -242,8 +267,12 @@ def evidence(call: Call, repo: str, config: dict[str, Json], metadata: dict[str,
               for key, value in config['repository'].items()]
     lines += ['', '## Security features', '', '| Feature | Configured | Observed |', '| --- | --- | --- |']
     for feature, value in config['security'].items():
-        observed = ('not applied (public repositories only)' if SECURITY_PUBLIC_ONLY[feature] and not public
-                    else cell(security_state(call, root, metadata, feature)))
+        if SECURITY_PUBLIC_ONLY[feature] and not public:
+            observed = 'not applied (public repositories only)'
+        elif feature == 'automated_security_fixes' and security_fixes(call, root) == (True, True):
+            observed = 'on (paused)'
+        else:
+            observed = cell(security_state(call, root, metadata, feature))
         lines.append(f'| `{feature}` | {cell(value)} | {observed} |')
     lines += ['', '## Managed rulesets', '', '| Ruleset | ID | Status |', '| --- | --- | --- |']
     for rule in config['rulesets']:

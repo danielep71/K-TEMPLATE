@@ -27,9 +27,19 @@ class FakeAPI:
         self.reporting = False
         self.alerts = False
         self.fixes = False
+        self.paused = False
 
     def not_found(self, endpoint):
         raise setup.SetupError(f'GET {endpoint} failed (HTTP 404). Check gh authentication.')
+
+    def switch_state(self, attribute, endpoint):
+        if attribute == 'reporting':
+            return {'enabled': self.reporting}
+        if attribute == 'alerts':
+            return None if self.alerts else self.not_found(endpoint)
+        if not self.alerts or not self.fixes:
+            return self.not_found(endpoint)
+        return {'enabled': True, 'paused': self.paused}
 
     def __call__(self, method, endpoint, payload=None):
         switches = {'/private-vulnerability-reporting': 'reporting',
@@ -37,11 +47,7 @@ class FakeAPI:
         for suffix, attribute in switches.items():
             if endpoint.endswith(suffix):
                 if method == 'GET':
-                    if attribute == 'reporting':
-                        return {'enabled': self.reporting}
-                    if attribute == 'alerts':
-                        return None if self.alerts else self.not_found(endpoint)
-                    return {'enabled': self.fixes, 'paused': False} if self.alerts else self.not_found(endpoint)
+                    return self.switch_state(attribute, endpoint)
                 self.writes.append((method, endpoint, payload))
                 setattr(self, attribute, method == 'PUT')
                 return None
@@ -229,6 +235,52 @@ class SetupTests(unittest.TestCase):
             self.assertIn('| Protect main | 5 | matches |', verified)
             self.assertIn('| `vulnerability_alerts` | on | on |', verified)
         self.assertEqual([w for w in self.api.writes if 'evidence' in w[1]], [])
+
+    def configure(self):
+        self.args.apply = True
+        self.assertEqual(self.run_setup(), 0)
+        self.api.writes.clear()
+        self.args.apply = False
+
+    def test_paused_security_updates_are_drift_not_enabled(self):
+        self.configure()
+        self.api.paused = True
+        with tempfile.TemporaryDirectory() as directory:
+            self.args.report = Path(directory) / 'settings.md'
+            self.args.check = True
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(setup.run(self.args, self.api), 1)
+            record = self.args.report.read_text(encoding='utf-8')
+        self.assertIn('enabled but paused', output.getvalue())
+        self.assertIn('PUT repos/example/project/automated-security-fixes', output.getvalue())
+        self.assertIn('- Result: **DRIFT**', record)
+        self.assertIn('| `automated_security_fixes` | on | on (paused) |', record)
+        self.assertEqual(self.api.writes, [])
+
+    def test_apply_that_leaves_updates_paused_fails_the_readback(self):
+        self.configure()
+        self.api.paused = True
+        self.args.apply = True
+        with self.assertRaisesRegex(setup.SetupError, 'Read-back'):
+            self.run_setup()
+        self.assertEqual([w[:2] for w in self.api.writes],
+                         [('PUT', 'repos/example/project/automated-security-fixes')])
+
+    def test_unpaused_security_updates_verify(self):
+        self.configure()
+        self.args.check = True
+        self.assertEqual(self.run_setup(), 0)
+
+    def test_paused_updates_still_count_as_enabled_when_configured_off(self):
+        self.configure()
+        self.api.paused = True
+        config = setup.load_config(setup.CONFIG)
+        config['security']['automated_security_fixes'] = False
+        metadata = self.api('GET', 'repos/example/project')
+        with redirect_stdout(io.StringIO()):
+            plan = setup.security_plan(self.api, 'repos/example/project', metadata, config, True)
+        self.assertEqual(plan, [('DELETE', 'repos/example/project/automated-security-fixes', None)])
 
     def test_required_status_check_is_the_integrity_job(self):
         from test_workflow_controls import REQUIRED_CHECK

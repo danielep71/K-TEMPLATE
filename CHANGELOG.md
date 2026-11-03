@@ -200,4 +200,10 @@ milestones and their pull requests.
   and the workflow control tests reject duplicate YAML keys in the workflows,
   Dependabot's configuration and the issue forms (#114).
 
+### Fixed
+
+- `tools/setup_repository.py` no longer reports paused Dependabot security
+  updates as on: they count as drift, the setup record shows `on (paused)`,
+  and an apply that leaves them paused fails its read-back (#190).
+
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
