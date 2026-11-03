@@ -155,6 +155,10 @@ milestones and their pull requests.
 
 ### Changed
 
+- Label synchronization no longer deletes a label that an issue or pull request,
+  open or closed, still carries: with `prune: true`, it checks every label it
+  would delete and stops before any change. A name with a comma is refused,
+  because its use cannot be queried (#188).
 - A sixth static check of exported VBA source, `tools/check_vba_identifiers.py`,
   runs in **Repository integrity**. In each compilation environment, it fails
   when a procedure assigns a name that nothing declares, when a statement
@@ -199,5 +203,11 @@ milestones and their pull requests.
 - **Repository integrity** proves that actionlint rejects an invalid workflow,
   and the workflow control tests reject duplicate YAML keys in the workflows,
   Dependabot's configuration and the issue forms (#114).
+
+### Fixed
+
+- A backtick, pipe or line break in a label name, colour or API error no
+  longer breaks the code span or table row of the label synchronization and
+  drift summaries (#189).
 
 [Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
