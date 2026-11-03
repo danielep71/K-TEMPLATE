@@ -7,7 +7,8 @@ only in their homes, each with its role's name prefix and a VB_Name equal to
 its file name; ASCII only; Option Explicit, and Option Private Module where
 required; no Option Base, tab or trailing white space; string literals
 closed; forms beside their .frx; LF storage with CRLF checkout; no workbook
-committed except the macro-free src/workbook/Template.xlsx.
+committed except the macro-free src/workbook/Template.xlsx and the
+byte-preserved copies of regulatory sources under docs/methodology/sources/.
 """
 
 from __future__ import annotations

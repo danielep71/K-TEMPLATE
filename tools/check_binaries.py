@@ -4,7 +4,8 @@
 A file is binary when .gitattributes unsets its text attribute (the
 office-doc, opaque and vba-form-bin rules, the byte-preserved regulatory
 sources and the variant files of file-based test cases), or when a file Git
-would treat as text contains a NUL byte. A binary file passes only if it is:
+would treat as text contains a NUL byte anywhere, also past the first 8000
+bytes, which are all that Git inspects. A binary file passes only if it is:
 
 - under docs/methodology/sources/, the byte-preserved regulatory sources;
 - in a variant directory of a file-based test case,
@@ -35,7 +36,9 @@ ALLOWLIST = Path(".github/binary-allowlist.json")
 # fnmatch's * also matches "/": the second pattern needs a variant directory.
 APPROVED_PATHS = ("docs/methodology/sources/*", "tests/fixtures/*/*/*",
                   "src/workbook/Template.xlsx")
-SNIFF_BYTES = 8000
+# Read in chunks: Git looks at the first 8000 bytes only, so a NUL byte later in
+# the file would otherwise stay unseen.
+CHUNK_BYTES = 1 << 16
 
 
 def git(root: Path, *args: str, stdin: str | None = None) -> str:
@@ -55,8 +58,12 @@ def text_attributes(root: Path, names: Sequence[str]) -> dict[str, str]:
 
 
 def has_nul(path: Path) -> bool:
+    """Whether the file holds a NUL byte anywhere."""
     with path.open("rb") as handle:
-        return b"\0" in handle.read(SNIFF_BYTES)
+        while chunk := handle.read(CHUNK_BYTES):
+            if b"\0" in chunk:
+                return True
+    return False
 
 
 def sha256(path: Path) -> str:
