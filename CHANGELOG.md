@@ -194,6 +194,13 @@ milestones and their pull requests.
   identifier on a `Note:` line. In a document module it no longer compares the
   attributes Excel writes itself, such as `VB_Base`; `VB_Name`, string
   literals, comments and any other difference still fail (#245).
+- The pull request template asks for the calculation impact of a change: the
+  source of each changed rule and the class of the expected values that test
+  it, or "No calculation change". Its checklist asks for the `[Unreleased]`
+  changelog entry. `CONTRIBUTING.md` states the rules of evidence (expected
+  values never come from the code under test; a skipped test is not a pass),
+  what a commit message says, and what a contract change is and what it
+  updates (#240).
 - mypy also reports unreachable code (`warn_unreachable`), such as a branch
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
