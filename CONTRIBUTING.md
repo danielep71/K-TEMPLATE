@@ -32,14 +32,22 @@ closed, with a *Resolution* section.
 ## 🧪 Local checks
 
 Run these before opening a pull request. The tests need Node.js for the label
-scripts and the pinned configuration parser for the workflow control tests:
+scripts and the pinned configuration parser for the workflow control tests.
+The quality checks need Ruff and mypy, whose hashes cover CPython 3.13 on
+Linux x86_64, and actionlint:
 
 ```sh
 python -m pip install --require-hashes -r .github/requirements.txt
+python -m pip install --only-binary=:all: --require-hashes -r tools/requirements-quality-ci.txt
 python tools/check_repository.py
 ```
 
-The second command runs every check of **Repository integrity**, the tests
+For actionlint, download the release that `ACTIONLINT_VERSION` names in
+`.github/workflows/repository-integrity.yml` and put it on your `PATH`. On
+Linux x86_64, first check the archive against `ACTIONLINT_LINUX_AMD64_SHA256`
+there, as CI does.
+
+The last command runs every check of **Repository integrity**, the tests
 included, and writes a log for each, `report.json` and `summary.md` under
 `test-results/integrity/`, which Git ignores. It runs these checks, in this order:
 
@@ -91,9 +99,8 @@ its own command, for example `python -m unittest discover -s tests` or
 re-import a rewritten module into the VBE before committing
 ([house style](docs/VBA_HOUSE_STYLE.md#source-representation)).
 
-Ruff, strict mypy and actionlint also run in **Repository integrity**; the
-[setup guide](docs/setup/REPOSITORY_SETUP.md#-maintain-the-baseline) explains how
-to run them locally with the same pinned versions.
+To run Ruff and strict mypy on their own, see the
+[setup guide](docs/setup/REPOSITORY_SETUP.md#-maintain-the-baseline).
 
 ## 📄 Data and licensing
 
