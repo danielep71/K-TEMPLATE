@@ -54,6 +54,17 @@ Each run of a check in Excel records:
 A check that was not run is recorded as `NOT RUN` with the reason. It is
 never a pass.
 
+### What an accuracy contract proves
+
+A frozen [accuracy contract](TEST_CASES.md#accuracy-contracts) whose results
+pass on an Excel run of the candidate shows that, on that host, the worst
+error of the calculation over its calibration and holdout cases stays within
+the threshold. The holdout cases played no part in setting the threshold,
+and their values are `published` or `independent`. It proves nothing outside
+those cases, regime and host. A draft contract, and any contract on
+`illustrative` values, validates nothing. Record each contract's worst errors
+with the evidence.
+
 <a id="host-behaviour"></a>
 
 ## Host behaviour
