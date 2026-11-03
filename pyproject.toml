@@ -20,10 +20,16 @@ max-complexity = 15
 
 [tool.mypy]
 python_version = "3.11"
-files = ["tools"]
+files = ["tools", "tests"]
+mypy_path = ["tools", "tools/devbuild"]
 pretty = true
 show_error_codes = true
 warn_unused_configs = true
 strict = true
 # Not part of strict: report code that type narrowing proves can never run.
 warn_unreachable = true
+
+[[tool.mypy.overrides]]
+# PyYAML ships no type information; its stubs are not installed.
+module = ["yaml", "yaml.*"]
+ignore_missing_imports = true

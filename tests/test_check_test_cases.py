@@ -169,7 +169,7 @@ class FixtureTest(FindingTest):
                                  ("reporting_date", "2026-02-30", "reporting_date is not"),
                                  ("reporting_currency_code", "eur", "is not a currency code")):
             with self.subTest(key=key):
-                self.assertFinding(run(lambda f, e, k=key, v=value: f.update({k: v})), text)
+                self.assertFinding(run(lambda f, e: f.update({key: value})), text)
 
     def test_missing_and_unknown_keys(self) -> None:
         self.assertFinding(run(lambda f, e: f.pop("datasets")), "missing datasets")
@@ -251,7 +251,7 @@ class ExpectedTest(FindingTest):
                                  ("tolerance", {"absolute": 0}, "exactly absolute and relative"),
                                  ("tolerance", {"absolute": -1, "relative": 0}, "at least 0")):
             with self.subTest(key=key):
-                self.assertFinding(run(lambda f, e, k=key, v=value: output(e).update({k: v})),
+                self.assertFinding(run(lambda f, e: output(e).update({key: value})),
                                    text)
         self.assertFinding(run(lambda f, e: output(e).pop("tolerance")), "missing tolerance")
         self.assertFinding(run(lambda f, e: output(e).update(text=1)), "unknown")
@@ -314,6 +314,140 @@ class ExpectedTest(FindingTest):
         self.assertFinding(run(all_illustrative), "illustrative- prefix must be used exactly")
 
 
+PLAN_HEADER = ("# Plan\n\n## Traceability\n\n"
+               "| Source | Paragraph | Calculation step | VBA procedure | Test cases | Status |\n"
+               "| --- | --- | --- | --- | --- | --- |\n")
+TRACED = "| `SRC-02` | Article 1(1) | `CALC-02.1` | `CORE_Totals.TotalNotional` | `case-one` | Validated |"
+CORE = ('Attribute VB_Name = "CORE_Totals"\nOption Explicit\nOption Private Module\n\n'
+        "Public Function TotalNotional(ByVal Amount As Double) As Double\n"
+        "    TotalNotional = Amount\nEnd Function\n")
+
+
+def plan(*rows: str) -> dict[str, str]:
+    """A validation plan whose Traceability table holds rows, and the core module it names."""
+    table = PLAN_HEADER + "".join(f"{row}\n" for row in rows)
+    return {"docs/methodology/VALIDATION_PLAN.md": table + "\nText after the table.\n\n"
+            "| Status | Meaning |\n| --- | --- |\n| Validated | Not a row |\n",
+            "src/core/CORE_Totals.bas": CORE}
+
+
+def traced(column: str, value: str) -> str:
+    """TRACED with one column replaced."""
+    columns = ["Source", "Paragraph", "Calculation step", "VBA procedure", "Test cases", "Status"]
+    values = [cell.strip() for cell in TRACED.strip("|").split("|")]
+    values[columns.index(column)] = value
+    return "| " + " | ".join(values) + " |"
+
+
+class TraceabilityTest(FindingTest):
+    def test_a_traced_rule_passes(self) -> None:
+        self.assertEqual(run(extra=plan(TRACED)), [])
+        # Names ignore case, as in VBA; a rule not implemented yet names no procedure.
+        self.assertEqual(run(extra=plan(traced("VBA procedure", "`core_totals.totalnotional`"),
+                                        traced("Status", "Exercised"),
+                                        "| *Illustrative:* `SRC-01` | Article 2 | `CALC-01.1` "
+                                        "| \u2014 | \u2014 | Not implemented |")), [])
+
+    def test_a_named_procedure_or_case_must_exist(self) -> None:
+        for column, value, text in (
+                ("VBA procedure", "`CORE_Totals.Missing`",
+                 "VBA procedure 'CORE_Totals.Missing' is not in a component under src/"),
+                ("VBA procedure", "`CORE_Other.TotalNotional`", "is not in a component"),
+                ("VBA procedure", "`TotalNotional`", "is not Module.Procedure"),
+                ("VBA procedure", "TotalNotional", "must name Module.Procedure"),
+                ("Test cases", "`case-one`, `case-two`", "test case 'case-two' does not exist"),
+                ("Test cases", "case-one", "must be case IDs")):
+            with self.subTest(column=column, value=value):
+                findings = run(extra=plan(traced(column, value)))
+                self.assertFinding(findings, text)
+                self.assertEqual(len(findings), 1, findings)
+                self.assertTrue(findings[0].startswith("docs/methodology/VALIDATION_PLAN.md:7: "))
+
+    def test_a_procedure_outside_src_does_not_count(self) -> None:
+        files = plan(TRACED)
+        files["tests/modules/CORE_Totals.bas"] = files.pop("src/core/CORE_Totals.bas")
+        self.assertFinding(run(extra=files), "is not in a component under src/")
+
+    def test_the_row_matches_the_guides(self) -> None:
+        for column, value, text in (
+                ("Source", "`SRC-09`", "is not one SRC- ID of the register"),
+                ("Source", "`IMPL-01`", "is not one SRC- ID of the register"),
+                ("Paragraph", "", "names no paragraph"),
+                ("Calculation step", "`CALC-09.1`", "is not a step of a declared calculation"),
+                ("Calculation step", "`CALC-02`", "is not a step of a declared calculation"),
+                ("Calculation step", "`CALC-01.1`", "test case 'case-one' tests CALC-02, not "
+                                                    "CALC-01")):
+            with self.subTest(column=column, value=value):
+                self.assertFinding(run(extra=plan(traced(column, value))), text)
+
+    def test_the_status_agrees_with_the_row(self) -> None:
+        def illustrative(f: dict[str, Any], e: dict[str, Any]) -> None:
+            output(e)["reference"].update({"class": "illustrative", "derivation": "Example"})
+            f.update(id="illustrative-one")
+            e.update(fixture="illustrative-one")
+        no_case = traced("Test cases", "\u2014")
+        for row, text in (
+                (traced("Status", "Done"), "status 'Done' is not one of"),
+                (traced("Status", "Not implemented"), "'Not implemented' needs no VBA procedure"),
+                (traced("VBA procedure", "\u2014"), "'Validated' needs a VBA procedure"),
+                (traced("Status", "Not validated"), "a rule with test cases is not"),
+                (no_case.replace("Validated", "Exercised"), "'Exercised' needs a test case")):
+            with self.subTest(row=row):
+                self.assertFinding(run(extra=plan(row)), text)
+        self.assertEqual(run(extra=plan(no_case.replace("Validated", "Not validated"))), [])
+        self.assertFinding(run(illustrative, name="illustrative-one", extra=plan(
+            traced("Test cases", "`illustrative-one`"))),
+            "'Validated' needs a test case with a published or independent output for "
+            "CALC-02.1")
+
+    def test_validated_needs_reference_evidence_for_its_own_step(self) -> None:
+        def two_steps(f: dict[str, Any], e: dict[str, Any]) -> None:
+            second = copy.deepcopy(OUTPUT)
+            second.update(quantity="average_notional_amount", rule="CALC-02.2")
+            second["reference"].update({"class": "illustrative", "source": None,
+                                        "locator": None, "derivation": "Example"})
+            e["outputs"].append(second)
+        # case-one holds a published output for CALC-02.1 only.
+        self.assertFinding(run(two_steps, extra=plan(traced("Calculation step", "`CALC-02.2`"))),
+                           "'Validated' needs a test case with a published or independent "
+                           "output for CALC-02.2")
+        self.assertEqual(run(two_steps, extra=plan(TRACED)), [])
+
+    def test_an_invalid_case_is_compared_when_its_calculation_is_checked(self) -> None:
+        row = ("| *Illustrative:* `SRC-01` | Article 1(1) | `CALC-01.1` "
+               "| `CORE_Totals.TotalNotional` | `{}` | Exercised |")
+
+        def invalid(manifest: dict[str, Any], expected: dict[str, Any]) -> None:
+            manifest["category"] = "invalid"
+        # A file-based case's manifest is checked in every category, so its
+        # calculation is trusted and must be the row's.
+        self.assertFinding(file_case(invalid, extra=plan(row.format("file-one"))),
+                           "test case 'file-one' tests CALC-02, not CALC-01")
+        # An invalid JSON fixture may break its calculation, so it is not compared.
+        findings = run(lambda f, e: f.update(category="invalid"),
+                       extra=plan(row.format("case-one")))
+        self.assertFalse([item for item in findings if "VALIDATION_PLAN.md" in item], findings)
+
+    def test_the_table_needs_its_columns(self) -> None:
+        files = {"docs/methodology/VALIDATION_PLAN.md":
+                 "## Traceability\n\n| Source | Status |\n| --- | --- |\n"}
+        self.assertFinding(run(extra=files), "VALIDATION_PLAN.md:3: the Traceability table has no "
+                                             "Paragraph, Calculation step, VBA procedure, Test "
+                                             "cases column")
+
+    def test_rows_are_checked_without_any_case(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path, text in {**plan(TRACED),
+                               "docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
+                               "docs/methodology/DATA_CONTRACT.md": DATA,
+                               "docs/methodology/SOURCES.md": SOURCES}.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text, encoding="utf-8")
+            self.assertFinding(check_test_cases.check(root)[0],
+                               "test case 'case-one' does not exist")
+
+
 DATA_FILES = ("# Data\n\n## Datasets\n\n| ID | Description | File or sheet | Encoding |\n"
               "| --- | --- | --- | --- |\n"
               "| `DS-02` | Real positions | `positions.csv`, `limits.csv` | |\n"
@@ -327,7 +461,28 @@ MANIFEST: dict[str, Any] = {
     "datasets": ["DS-02", "DS-03"]}
 VARIANT_FILES = {"lf/positions.csv": b"id,notional\nP1,600000\n",
                  "crlf/positions.csv": b"id,notional\r\nP1,600000\r\n",
-                 "crlf/legacy.txt": "caf\u00e9\r\n".encode("cp1252")}
+                 "crlf/legacy.txt": "name\r\ncaf\u00e9\r\n".encode("cp1252")}
+
+
+def contract_dataset(dataset: str, source: str, fields: list[dict[str, Any]],
+                     encoding: str | None = "UTF-8", delimiter: str | None = ",") -> dict[str, Any]:
+    return {"id": dataset, "illustrative": dataset == "DS-01", "description": "A dataset",
+            "provider": "A system", "frequency": "Daily", "granularity": "One row per record",
+            "source": source, "encoding": encoding, "delimiter": delimiter,
+            "decimal_separator": "." if delimiter else None,
+            "fields": [{"unit": None, "required": True, "allowed": None, "notes": "", **item}
+                       for item in fields]}
+
+
+# The machine-readable contract of the datasets in DATA_FILES.
+CONTRACT_FILE: dict[str, Any] = {"schema_version": 1, "kind": "data-contract", "datasets": [
+    contract_dataset("DS-02", "positions.csv", [
+        {"name": "id", "type": "text"},
+        {"name": "notional", "type": "decimal", "allowed": {"min": 0}}]),
+    contract_dataset("DS-03", "legacy.txt", [{"name": "name", "type": "text"}], "cp1252"),
+    contract_dataset("DS-04", "Inputs", [{"name": "id", "type": "text"}], None, None),
+    contract_dataset("DS-01", "example.csv", [{"name": "id", "type": "text"}]),
+]}
 EXPECTED_VARIANTS: dict[str, Any] = {
     "schema_version": 1, "kind": "test-expected", "fixture": "file-one",
     "variants": {"lf": [OUTPUT], "crlf": [OUTPUT]}}
@@ -348,6 +503,7 @@ def file_case(edit: Edit | None = None, files: dict[str, bytes | None] | None = 
         root = Path(directory)
         texts = {"docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
                  "docs/methodology/DATA_CONTRACT.md": DATA_FILES,
+                 "docs/methodology/data-contract.json": json.dumps(CONTRACT_FILE),
                  "docs/methodology/SOURCES.md": SOURCES,
                  "tests/fixtures/file-one/case.json": json.dumps(manifest),
                  "tests/expected/file-one.json": json.dumps(expected), **(extra or {})}
@@ -418,6 +574,55 @@ class FileBasedCaseTest(FindingTest):
         self.assertEqual(file_case(invalid, files={"lf/positions.csv": b"\xff"}), [])
         self.assertFinding(file_case(lambda m, e: m.update(category="invalid")),
                            "variants.lf: an invalid case needs a _status text output")
+
+    def test_variant_files_are_validated_against_the_contract(self) -> None:
+        self.assertFinding(file_case(files={"lf/positions.csv": b"id,notional\nP1,-5\n"}),
+                           "tests/fixtures/file-one/lf/positions.csv: line 2: DC-RANGE: field "
+                           "notional value '-5' is not \u2265 0")
+        findings = file_case(files={"crlf/positions.csv": b"id,amount\r\nP1,1\r\n",
+                                    "crlf/legacy.txt": "nom\r\n".encode("cp1252")})
+        self.assertEqual(findings, [
+            "tests/fixtures/file-one/crlf/legacy.txt: line 1: DC-UNKNOWN-COLUMN: column 'nom' "
+            "is not a field of DS-03",
+            "tests/fixtures/file-one/crlf/legacy.txt: line 1: DC-MISSING-COLUMN: required field "
+            "name has no column",
+            "tests/fixtures/file-one/crlf/positions.csv: line 1: DC-UNKNOWN-COLUMN: column "
+            "'amount' is not a field of DS-02",
+            "tests/fixtures/file-one/crlf/positions.csv: line 1: DC-MISSING-COLUMN: required "
+            "field notional has no column"])
+
+    def test_an_invalid_case_may_break_the_contract(self) -> None:
+        def invalid(m: dict[str, Any], e: dict[str, Any]) -> None:
+            m["category"] = "invalid"
+            status = {"quantity": "import_status", "text": "REJECTED_NEGATIVE", "scope": None,
+                      "rule": "CALC-02.1", "reference": OUTPUT["reference"]}
+            e["variants"] = {"lf": [status], "crlf": [status]}
+        self.assertEqual(file_case(invalid, files={"lf/positions.csv": b"id,notional\nP1,-5\n"}),
+                         [])
+
+    def test_the_contract_must_describe_each_file(self) -> None:
+        self.assertFinding(file_case(files={"lf/limits.csv": b"id\nL1\n"}),
+                           "lf/limits.csv: is not the file of a dataset of "
+                           "docs/methodology/data-contract.json")
+
+    def test_the_contract_must_exist_and_be_valid(self) -> None:
+        missing = file_case(extra={"docs/methodology/data-contract.json": ""})
+        self.assertFinding(missing, "data-contract.json: is not a valid data contract (1 "
+                                    "problem(s); python tools/check_data_contract.py lists them)")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for path, text in {"docs/methodology/DATA_CONTRACT.md": DATA_FILES,
+                               "docs/methodology/CALCULATION_CONTRACTS.md": CONTRACTS,
+                               "docs/methodology/SOURCES.md": SOURCES,
+                               "tests/fixtures/file-one/case.json": json.dumps(MANIFEST),
+                               "tests/fixtures/file-one/lf/positions.csv": "id,notional\n",
+                               "tests/expected/file-one.json": json.dumps(
+                                   {**EXPECTED_VARIANTS, "variants": {"lf": [OUTPUT]}})}.items():
+                (root / path).parent.mkdir(parents=True, exist_ok=True)
+                (root / path).write_text(text, encoding="utf-8")
+            self.assertEqual(check_test_cases.check(root)[0], [
+                "docs/methodology/data-contract.json: is missing; the variant files of a "
+                "file-based case are validated against it"])
 
     def test_manifest(self) -> None:
         cases: list[tuple[Edit, str]] = [

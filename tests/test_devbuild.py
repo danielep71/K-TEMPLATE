@@ -6,7 +6,8 @@ separate, minimal implementation of the same specifications, so a writer
 defect fails here without Excel. They also check that
 tools/devbuild/build_workbook.py builds the sheets, code names, defined names
 and stamp of tools/devbuild/workbook.json, that this configuration matches
-docs/methodology/WORKBOOK_CONTRACT.md, and that a rebuild is byte-identical.
+docs/methodology/WORKBOOK_CONTRACT.md, and that a rebuild is byte-identical,
+from blank sheets and from a synthetic layout template.
 """
 
 from __future__ import annotations
@@ -28,10 +29,13 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools" / "devbuild"))
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 import build_workbook  # noqa: E402
+import check_binaries  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
 import vba_project  # noqa: E402
+import workbook_template  # noqa: E402
 
 ENDOFCHAIN = 0xFFFFFFFE
 
@@ -393,7 +397,7 @@ class Workbook(unittest.TestCase):
         build = build_workbook.Build("a" * 40, "2026-11-02T10:00:00+01:00", True,
                                      "development", ())
         here = build_workbook.package(self.layout, build, b"project")
-        with unittest.mock.patch.object(zipfile.sys, "platform", "win32"):
+        with unittest.mock.patch("zipfile.sys.platform", "win32"):
             windows = build_workbook.package(self.layout, build, b"project")
         self.assertEqual(here, windows)
 
@@ -460,6 +464,7 @@ class Workbook(unittest.TestCase):
                                                   str(root), "--configuration", "production"]), 0)
         self.assertIn("no VBA component: the workbook holds only its document modules",
                       output.getvalue())
+        self.assertIn(f"layout: blank sheets of {build_workbook.CONFIG}", output.getvalue())
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(build_workbook.main(["--configuration", "staging"]), 1)
         self.assertIn("unknown configuration", output.getvalue())
@@ -529,6 +534,155 @@ class ProjectSource(unittest.TestCase):
                 self.assertRaisesRegex(build_workbook.BuildError,
                                        r"shINPUTS\.cls \(code name shInputs\) differs"):
             build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
+
+
+class TemplateBuild(unittest.TestCase):
+    """Builds that start from src/workbook/Template.xlsx."""
+
+    # The parts that a build from the template rewrites; it copies every other one.
+    edited = {"[Content_Types].xml", "xl/workbook.xml", "xl/_rels/workbook.xml.rels",
+              "xl/worksheets/sheet1.xml", "xl/worksheets/sheet2.xml"}
+
+    def build(self, files: dict[str, bytes], configuration: str = "production"
+              ) -> tuple[bytes, bytes, build_workbook.Build]:
+        """Two builds of one commit, and what the first holds."""
+        with git_tree({build_workbook.TEMPLATE: workbook_template.template(), **files}) as root, \
+                tempfile.TemporaryDirectory() as temporary:
+            first, second = Path(temporary) / "first.xlsm", Path(temporary) / "second.xlsm"
+            result = build_workbook.build(root, configuration, first)
+            build_workbook.build(root, configuration, second)
+            return first.read_bytes(), second.read_bytes(), result
+
+    def test_the_fixture_is_a_clean_committable_template(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "Template.xlsx"
+            path.write_bytes(workbook_template.template())
+            self.assertEqual(check_binaries.package_problems(path), [])
+
+    def test_the_build_keeps_the_layout_and_is_byte_identical(self) -> None:
+        first, second, result = self.build({})
+        self.assertTrue(result.template)
+        self.assertEqual(first, second)
+        with zipfile.ZipFile(io.BytesIO(workbook_template.template())) as template, \
+                zipfile.ZipFile(io.BytesIO(first)) as built:
+            self.assertEqual(built.namelist(), [*template.namelist(), "xl/vbaProject.bin"])
+            for name in sorted(set(template.namelist()) - self.edited):
+                with self.subTest(part=name):
+                    self.assertEqual(built.read(name), template.read(name))
+            for info in built.infolist():
+                self.assertEqual(info.date_time, build_workbook.ZIP_TIME)
+            types = built.read("[Content_Types].xml").decode()
+            book = built.read("xl/workbook.xml").decode()
+            readme = built.read("xl/worksheets/sheet1.xml").decode()
+            inputs = built.read("xl/worksheets/sheet2.xml").decode()
+            self.assertIn(build_workbook.MACRO_MAIN, types)
+            self.assertNotIn(build_workbook.SHEET_MAIN, types)
+            self.assertIn('Target="vbaProject.bin"',
+                          built.read("xl/_rels/workbook.xml.rels").decode())
+            CompoundFile(built.read("xl/vbaProject.bin"))
+        self.assertIn('<workbookPr defaultThemeVersion="166925" codeName="ThisWorkbook"/>', book)
+        self.assertIn('localSheetId="1">Inputs!$A$1:$C$5</definedName>', book)
+        self.assertIn('mc:Ignorable="x14ac"><sheetPr codeName="shReadme"/>', readme)
+        self.assertIn('<sheetPr codeName="shInputs"/>', inputs)
+        # The stamp cell keeps its style; the label beside it is the template's own.
+        self.assertIn(f'<c r="B3" s="{workbook_template.LOCKED}" t="inlineStr">', readme)
+        self.assertIn('<c r="A3" s="0" t="s"><v>1</v></c>', readme)
+        self.assertNotIn(build_workbook.TITLE, readme)
+        self.assertIn('<sheetProtection sheet="1" objects="1" scenarios="1"/>', inputs)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "W.xlsm"
+            path.write_bytes(first)
+            for role, value in (("commit", result.commit), ("time", result.time),
+                                ("configuration", "production")):
+                with self.subTest(stamp=role):
+                    self.assertEqual(check_excel_run.read_stamp(
+                        path, build_workbook.load_layout(ROOT).stamp[role]), value)
+
+    def test_a_stamp_cell_takes_the_style_of_its_row_or_column(self) -> None:
+        sheet = workbook_template.Sheet("Readme", {"A1": (0, 0)}, columns=((2, 2, 1),))
+        xml = workbook_template.sheet_xml(sheet)
+        stamped = build_workbook.set_cell(build_workbook.set_cell(xml, 3, 2, "a"), 1, 2, "b")
+        self.assertIn('<c r="A1" s="0" t="s"><v>0</v></c><c r="B1" s="1" t="inlineStr">',
+                      stamped)
+        self.assertIn('<row r="3"><c r="B3" s="1" t="inlineStr">', stamped)
+        row = xml.replace('<row r="1" spans="1:3" x14ac:dyDescent="0.25">',
+                          '<row r="1" s="2" customFormat="1"/><row r="2">')
+        row = row.replace('<c r="A1" s="0" t="s"><v>0</v></c></row>', "</row>")
+        self.assertIn('<row r="1" s="2" customFormat="1"><c r="C1" s="2" t="inlineStr">',
+                      build_workbook.set_cell(row, 1, 3, "c"))
+
+    def test_development_appends_the_test_sheets_blank(self) -> None:
+        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config["sheets"].append({"tab": "Checks", "code_name": "shChecks", "role": "Test"})
+        config["names"].append({"name": "Checks_Results", "sheet": "shChecks", "cell": "B3",
+                                "label": "Results"})
+        files = {build_workbook.CONFIG: json.dumps(config).encode()}
+        first, second, _ = self.build(files, "development")
+        self.assertEqual(first, second)
+        with zipfile.ZipFile(io.BytesIO(first)) as built:
+            book = built.read("xl/workbook.xml").decode()
+            self.assertIn('<sheet name="Checks" sheetId="3" r:id="rIdBuildSheet"/>', book)
+            self.assertIn("<definedName name=\"Checks_Results\">'Checks'!$B$3</definedName>", book)
+            self.assertIn('Id="rIdBuildSheet" Type="http://schemas.openxmlformats.org/'
+                          'officeDocument/2006/relationships/worksheet" '
+                          'Target="worksheets/sheet3.xml"',
+                          built.read("xl/_rels/workbook.xml.rels").decode())
+            self.assertIn('PartName="/xl/worksheets/sheet3.xml"',
+                          built.read("[Content_Types].xml").decode())
+            checks = built.read("xl/worksheets/sheet3.xml").decode()
+            self.assertIn('<sheetPr codeName="shChecks"/>', checks)
+            self.assertIn("Results", checks)
+        production, _, _ = self.build(files, "production")
+        with zipfile.ZipFile(io.BytesIO(production)) as built:
+            self.assertNotIn("Checks", built.read("xl/workbook.xml").decode())
+            self.assertNotIn("xl/worksheets/sheet3.xml", built.namelist())
+
+    def test_a_template_that_differs_from_the_configuration_stops_the_build(self) -> None:
+        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config["sheets"].insert(0, {"tab": "Checks", "code_name": "shChecks", "role": "Test"})
+        names = dict(workbook_template.DEFAULT_NAMES)
+        moved = {**names, "cfg_reporting_date": "Inputs!$C$6"}
+        del names["build_time"]
+        sheets = workbook_template.default_sheets()
+        sheets[1].tab = "Settings"
+        cases = {
+            "not the sheets": workbook_template.template(sheets),
+            "does not define the workbook name build_time": workbook_template.template(
+                names=names),
+            r"cfg_reporting_date refers to Inputs!\$C\$6": workbook_template.template(
+                names=moved),
+        }
+        for expected, data in cases.items():
+            with self.subTest(expected=expected), git_tree(
+                    {build_workbook.TEMPLATE: data}) as root, \
+                    tempfile.TemporaryDirectory() as temporary, \
+                    self.assertRaisesRegex(build_workbook.BuildError, expected):
+                build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
+        with git_tree({build_workbook.TEMPLATE: workbook_template.template(),
+                       build_workbook.CONFIG: json.dumps(config).encode()}) as root, \
+                tempfile.TemporaryDirectory() as temporary, \
+                self.assertRaisesRegex(build_workbook.BuildError, "Test sheets must come last"):
+            build_workbook.build(root, "development", Path(temporary) / "W.xlsm")
+
+    def test_a_template_with_macros_stops_the_build(self) -> None:
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(workbook_template.template())) as template, \
+                zipfile.ZipFile(buffer, "w") as copy:
+            for name in template.namelist():
+                copy.writestr(name, template.read(name))
+            copy.writestr("xl/vbaProject.bin", b"project")
+        with git_tree({build_workbook.TEMPLATE: buffer.getvalue()}) as root, \
+                tempfile.TemporaryDirectory() as temporary, \
+                self.assertRaisesRegex(build_workbook.BuildError, "carries macros"):
+            build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
+
+    def test_main_names_the_layout(self) -> None:
+        with git_tree({build_workbook.TEMPLATE: workbook_template.template()}) as root, \
+                tempfile.TemporaryDirectory() as temporary, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(build_workbook.main([str(Path(temporary) / "W.xlsm"), "--root",
+                                                  str(root), "--configuration", "production"]), 0)
+        self.assertIn(f"layout: {build_workbook.TEMPLATE}", output.getvalue())
 
 
 class Manifest(unittest.TestCase):

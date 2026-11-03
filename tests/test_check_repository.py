@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -140,7 +141,7 @@ class WhitespaceTest(RepositoryTest):
 
 class RunTest(RepositoryTest):
     def run_checks(self, listed: list[Check], strict: bool = False,
-                   summary: Path | None = None) -> tuple[int, str, dict[str, object]]:
+                   summary: Path | None = None) -> tuple[int, str, dict[str, Any]]:
         with contextlib.redirect_stdout(io.StringIO()) as printed, \
                 mock.patch.dict(os.environ, {"PR_HEAD_SHA": "f" * 40, "GITHUB_ACTIONS": ""}):
             code = check_repository.run(self.context(), listed,
@@ -165,9 +166,9 @@ class RunTest(RepositoryTest):
         self.assertEqual(report["commit"], self.git("rev-parse", "HEAD").strip())
         self.assertIs(report["dirty"], True)
         self.assertEqual(report["pull_request_head"], "f" * 40)
-        self.assertEqual(set(report["files_sha256"]), {"README.md"})  # type: ignore[arg-type]
+        self.assertEqual(set(report["files_sha256"]), {"README.md"})
         statuses = {check["name"]: (check["status"], check["exit_code"])
-                    for check in report["checks"]}  # type: ignore[attr-defined]
+                    for check in report["checks"]}
         self.assertEqual(statuses, {"ok": ("pass", 0), "broken": ("fail", 1),
                                     "finding": ("fail", 1)})
         out = self.root / "test-results/integrity"
@@ -188,7 +189,7 @@ class RunTest(RepositoryTest):
         code, printed, report = self.run_checks(listed)
         self.assertEqual(code, 1)
         statuses = {check["name"]: check["status"]
-                    for check in report["checks"]}  # type: ignore[attr-defined]
+                    for check in report["checks"]}
         self.assertEqual(statuses, {"codeql-default-branch": "fail", "after": "pass"})
         log = (self.root / "test-results/integrity/codeql-default-branch.log").read_text("utf-8")
         self.assertIn("duplicate key", log)
@@ -204,6 +205,31 @@ class RunTest(RepositoryTest):
         code, _, report = self.run_checks(listed, strict=True)
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "fail")
+
+    def test_ci_fails_a_working_tree_that_differs_from_the_commit(self) -> None:
+        self.commit({".gitignore": "/test-results/\n", "README.md": "x\n"})
+        listed = [Check("clean-working-tree", function=check_repository.clean_working_tree)]
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual((code, report["dirty"]), (0, False), printed)
+        self.write({"README.md": "changed\n", "notes/new.txt": "y\n"})
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual((code, report["dirty"], report["status"]), (1, True, "fail"))
+        self.assertIn("clean-working-tree: FAIL (2 finding(s))", printed)
+        self.assertIn("FAIL: README.md: differs from the commit (git status M)", printed)
+        self.assertIn("FAIL: notes/new.txt: differs from the commit (git status ??)", printed)
+
+    def test_an_advisory_check_warns_without_failing_the_run(self) -> None:
+        self.commit()
+        listed = [Check("advice", [sys.executable, "-c", "import sys; sys.exit('a finding')"],
+                        advisory=True)]
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 0)
+        self.assertIn("advice: WARN (advisory, not a failure: exit code 1)", printed)
+        self.assertIn("a finding", printed)
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["checks"][0]["status"], "warn")
+        summary = (self.root / "test-results/integrity/summary.md").read_text(encoding="utf-8")
+        self.assertIn("| `advice` | ⚠️ warn | advisory, not a failure: exit code 1 |", summary)
 
     def test_github_annotations(self) -> None:
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
@@ -222,23 +248,29 @@ class RunTest(RepositoryTest):
             code = check_repository.main(["--root", str(self.root), "--template", "false"],
                                          listed)
         self.assertEqual(code, 0)
-        self.assertEqual((seen[0].repository, seen[0].default_branch, seen[0].is_template),
-                         ("Owner/Project", None, False))
+        self.assertEqual((seen[0].repository, seen[0].default_branch, seen[0].is_template,
+                          seen[0].ci), ("Owner/Project", None, False, False))
         with contextlib.redirect_stdout(io.StringIO()):
             check_repository.main(["--root", str(self.root), "--repository", "a/b",
-                                   "--default-branch", "trunk", "--template", ""], listed)
-        self.assertEqual((seen[1].repository, seen[1].default_branch, seen[1].is_template),
-                         ("a/b", "trunk", None))
+                                   "--default-branch", "trunk", "--template", "", "--ci"],
+                                  listed)
+        self.assertEqual((seen[1].repository, seen[1].default_branch, seen[1].is_template,
+                          seen[1].ci), ("a/b", "trunk", None, True))
 
     def test_real_check_list_names_each_check_once(self) -> None:
         self.commit()
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "vba-format",
-                         "test-cases", "derivations", "changelog", "generated-docs",
-                         "markdown-links",
+                         "vba-calls", "data-contract", "test-cases", "derivations",
+                         "independent-implementations", "workbook-protection",
+                         "changelog", "generated-docs", "markdown-links",
                          "codeql-default-branch", "whitespace-committed"):
             self.assertIn(expected, names)
+        # Only --ci checks the working tree, after every other check.
+        self.assertNotIn("clean-working-tree", names)
+        in_ci = check_repository.checks(self.context(ci=True))
+        self.assertEqual([check.name for check in in_ci], [*names, "clean-working-tree"])
         without = check_repository.checks(self.context(repository=None, is_template=None,
                                                        default_branch=None))
         missing = {check.name for check in without if check.missing}

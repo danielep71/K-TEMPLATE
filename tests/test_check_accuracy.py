@@ -121,7 +121,7 @@ class RegistryTest(unittest.TestCase):
                            "is missing, so there is nothing to measure")
 
     def test_malformed_contracts(self) -> None:
-        cases = {
+        cases: dict[str, dict[str, Any]] = {
             "id is not ACC-<number>": {"id": "X-1"},
             "regime is not a text": {"regime": " "},
             "quantities is not a non-empty list": {"quantities": []},
@@ -148,7 +148,7 @@ class RegistryTest(unittest.TestCase):
         self.assertFinding(findings({"schema_version": 2}), "envelope is not")
 
     def test_cases_must_fit_the_contract(self) -> None:
-        cases = {
+        cases: dict[str, dict[str, Any]] = {
             "calculation CALC-09 is not declared": {"calculation": "CALC-09"},
             "case missing-case has no fixture": {"calibration_cases": ["missing-case"]},
             "case illustrative-format-example tests CALC-01, not CALC-02":
@@ -313,7 +313,7 @@ class WideningTest(unittest.TestCase):
                                               "decision": "#2"}), [])
 
     def test_any_other_change_to_a_frozen_guarantee_needs_a_new_decision(self) -> None:
-        changes = {
+        changes: dict[str, dict[str, Any]] = {
             "metric is 'absolute', not 'relative'": {"metric": "absolute"},
             "regime is 'CRR2', not 'CRR3'": {"regime": "CRR2"},
             "drops holdout cases demo-holdout-2": {"holdout_cases": ["demo-holdout-1"]},

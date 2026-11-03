@@ -1,5 +1,8 @@
 """Cross-file contracts: label catalogue, Dependabot, Markdown, API versions and template-only names."""
 
+# mypy checks the bodies of these tests but does not require them to be annotated.
+# mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
+
 import json
 import re
 import subprocess
@@ -33,8 +36,9 @@ class CatalogueDocumentationTests(unittest.TestCase):
     def test_usage_guide_covers_every_label_once(self):
         manifest = json.loads((ROOT / '.github/labels.json').read_text(encoding='utf-8'))
         guide = (ROOT / 'docs/repo_governance/ISSUE_LABELS.md').read_text(encoding='utf-8')
-        section = re.search(r'^## 🧭 Using the labels$(.*?)^## ', guide, re.M | re.S).group(1)
-        names = re.findall(r'^\| `([^`]+)` \|', section, re.M)
+        section = re.search(r'^## 🧭 Using the labels$(.*?)^## ', guide, re.M | re.S)
+        assert section, 'ISSUE_LABELS.md has no "Using the labels" section'
+        names = re.findall(r'^\| `([^`]+)` \|', section.group(1), re.M)
         self.assertEqual(sorted(names, key=str.lower),
                          sorted((label['name'] for label in manifest['labels']), key=str.lower))
 
@@ -92,8 +96,9 @@ class DependabotTests(unittest.TestCase):
         self.assertTrue(labels)
         self.assertEqual([label for label in labels if label not in catalogue], [])
         form = (ROOT / '.github/ISSUE_TEMPLATE/bug.yml').read_text(encoding='utf-8')
-        assignee = re.search(r'^assignees:\s*\[\s*"?([^",\]]+)"?\s*\]', form, re.M).group(1)
-        self.assertEqual(set(yaml_list(text, 'assignees')), {assignee})
+        assignee = re.search(r'^assignees:\s*\[\s*"?([^",\]]+)"?\s*\]', form, re.M)
+        assert assignee, 'bug.yml has no assignees'
+        self.assertEqual(set(yaml_list(text, 'assignees')), {assignee.group(1)})
 
 
 class MarkdownTests(unittest.TestCase):
@@ -120,7 +125,7 @@ class MarkdownTests(unittest.TestCase):
 
 class ApiVersionTests(unittest.TestCase):
     def test_every_github_api_call_uses_the_same_version(self):
-        found = {}
+        found: dict[str, list[str]] = {}
         for path in [*ROOT.glob('tools/*.py'), *ROOT.glob('.github/workflows/*.yml'),
                      *ROOT.glob('.github/scripts/*.mjs')]:
             text = path.read_text(encoding='utf-8')
@@ -138,7 +143,9 @@ def notice_entries():
     notice = (ROOT / 'docs/licenses/THIRD_PARTY_NOTICES.txt').read_text(encoding='utf-8')
     entries = set()
     for section in re.split(r'\n(?=The (?:following|target))', notice)[1:]:
-        url = re.search(r'\((https://github\.com/[\w.-]+/[\w.-]+)\)', section).group(1)
+        match = re.search(r'\((https://github\.com/[\w.-]+/[\w.-]+)\)', section)
+        assert match, f'a notice section names no repository: {section[:60]!r}'
+        url = match.group(1)
         license_id = next(code for name, code in LICENSES.items()
                           if name in ' '.join(section.split()))
         entries |= {(url, license_id, path) for path in NOTICE_FILE.findall(section)}

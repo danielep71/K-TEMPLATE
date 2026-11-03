@@ -14,9 +14,10 @@ records.
 | --- | --- |
 | `tests/modules/TEST_Harness.bas` | The run lifecycle (`BeginRun`, `BeginCase`, `RecordCaseError`, `EndRun`), the assertions (`AssertEqualDouble`, `AssertNear`, `AssertEqualText`, `AssertTrue`, `AssertErrorValue`, `AssertRaised`, with `WithinTolerance` as the comparison rule), the log (`Say`, `Echo`, `SaveLog`, `LastResult`), the [results](#results) (`RecordResult`, `SaveResults`), recovery (`ResetTests`) and certification (`BeginCertification`, `CertifyRun`, `EndCertification`) |
 | `tests/modules/TEST_Examples.bas` | The example suite: one case per kind of assertion, one case that reads the illustrative [test cases](TEST_CASES.md) and records their totals, and the reference implementation of the [cleanup pattern](../VBA_HOUSE_STYLE.md#operation-and-cleanup-outcomes) with its failure paths. It holds no calculation of the workbook |
+| `tests/modules/TEST_Relations.bas` | The illustrative [relation tests](#relation-tests), `RunRelationTests`: four relations of a stand-in total, each with its corruption check. It is not certified, and holds no calculation of the workbook |
 
-Both use `Option Private Module`, so they never become part of the
-workbook's external surface. A production workbook contains neither.
+All three use `Option Private Module`, so they never become part of the
+workbook's external surface. A production workbook contains none of them.
 
 A project suite follows the example suite: one `Case` procedure per case,
 each starting with `BeginCase` and ending in an error handler that calls
@@ -94,6 +95,142 @@ bitness the policy supports: a case or assertion inside `#If Win64` counts
 only where that branch is compiled, and the check reads the suite the same
 way.
 
+## Relation tests
+
+A relation test checks a property of the calculation that needs no external
+expected value: additivity, symmetry under a reordering of the inputs,
+monotonicity, or a zero input giving zero. It complements the
+[test cases](TEST_CASES.md), whose expected values come from a reference.
+`TEST_Relations.bas` shows the pattern on a stand-in total:
+
+- **One case per relation.** The case computes the outputs the relation
+  links, such as the total of two lists together and the totals of each, and
+  asserts that the relation holds, as `holds`: an equality with `AssertNear`
+  and its tolerance, an order such as monotonicity with a comparison.
+- **A corruption check in every case.** The same case shifts one of those
+  outputs far outside the tolerance and asserts, as `detects-corruption`,
+  that the same comparison rejects it. A relation whose comparison accepts the
+  corrupted output too, for example because its tolerance is too wide or it
+  compares a value with itself, would pass whatever the calculation returned;
+  the corruption check makes that a failure.
+- **Fixed inputs.** The inputs are written in the case, so each run computes
+  the same values and the expected counts hold.
+
+To test a calculation of the workbook, replace `IllustrativeTotal` with a
+call to its core procedure and the relations with those its
+[calculation contract](CALCULATION_CONTRACTS.md) implies, derived from the
+contract and never from the code under test. Run the suite
+with `TEST_Relations.RunRelationTests`. It is not listed in the evidence
+policy, so an Excel run does not certify it; to certify it, give it a
+certification entry point and a `suites` entry as above. A relation that holds
+validates no figure: only a `published` or `independent` case does
+([completeness policy](TEST_CASES.md#completeness-policy)).
+
+## End-to-end case runner
+
+A case runner tests the workbook as a user runs it: it writes a test case's
+inputs to the input sheets, runs the calculation through its public entry
+point, compares the outputs with the case's expected values within the case's
+tolerance, and restores the sheets. It needs the input and result areas of the
+[workbook contract](WORKBOOK_CONTRACT.md), which the template does not lay out
+yet, so it ships no runner. The suite's runner calls one procedure per test
+case, `RunCase "<case-id>"`, which follows this skeleton; it uses the
+contract's illustrative `Inputs_Settings` area and `M_Run.RunCalculation`
+entry point:
+
+```vb
+Private Sub RunCase(ByVal CaseId As String)
+    Dim Area             As Range      'The input area the case fills
+    Dim Saved            As Variant    'Its values before the case
+    Dim RestoreDue       As Boolean    'True once Saved holds them
+    Dim Detail           As String     'Why the area could not be restored
+    Dim ErrNumber        As Long       'Error of the case; 0 for none
+    Dim ErrSource        As String
+    Dim ErrDescription   As String
+
+        On Error GoTo Failed
+        TEST_Harness.BeginCase CaseId
+        Set Area = ThisWorkbook.Names("Inputs_Settings").RefersToRange
+        Saved = Area.Value
+        RestoreDue = True
+        ' Write the case's inputs to Area, then run the entry point:
+        M_Run.RunCalculation
+        ' For each output of tests/expected/<case-id>.json, read it where the
+        ' workbook contract places it, then call TEST_Harness.AssertNear with
+        ' its value and tolerance and TEST_Harness.RecordResult with its scope.
+
+CleanUp:
+        On Error GoTo 0
+        If RestoreDue Then
+            Detail = RestoreInputs(Area, Saved)
+        End If
+        TEST_Harness.AssertTrue "inputs-restored", Len(Detail) = 0, Detail
+        If ErrNumber <> 0 Then
+            On Error GoTo CaseFailed
+            Err.Raise ErrNumber, ErrSource, ErrDescription
+        End If
+        Exit Sub
+
+Failed:
+        ErrNumber = Err.Number
+        ErrSource = Err.Source
+        ErrDescription = Err.Description
+        Resume CleanUp
+
+CaseFailed:
+        TEST_Harness.RecordCaseError
+End Sub
+```
+
+- **The inputs.** The runner stands in for the user, in a development build
+  only. It writes only `Input` areas, which code otherwise never writes, and
+  finds each by its defined name. A dataset that the
+  [data contract](DATA_CONTRACT.md) reads from a file is never written to a
+  sheet: the runner gives the import the case's files instead, the variant
+  directory of a [file-based case](TEST_CASES.md#file-based-cases).
+- **The sheets.** It captures an area before changing it and restores it on
+  the success and the error path, through a helper such as `RestoreInputs`
+  that contains its own error and returns what failed, as the
+  [cleanup pattern](../VBA_HOUSE_STYLE.md#operation-and-cleanup-outcomes)
+  requires. `inputs-restored` is asserted on both paths, so the counts hold.
+- **Excel's state.** The entry point owns the settings it changes, such as
+  `Calculation` and `ScreenUpdating`, and the runner never restores them.
+  `EndRun` compares them with their values at `BeginRun`: a setting the
+  entry point left changed fails cleanup and requires recovery, and the next
+  run is refused until you check Excel and type `TEST_Harness.ResetTests`
+  ([run outcomes](#run-outcomes)). That check does not see cell values, so a
+  failed `inputs-restored` is the only record of a sheet left changed: check
+  the input sheets by hand before the next run.
+- **The case's error.** It is saved before cleanup, raised again once the
+  sheets are restored, and recorded by `RecordCaseError`, so the next case
+  still runs.
+
+## Volume benchmarks
+
+A volume benchmark times the calculation on a large synthetic input. Its
+timing depends on the host and its load, so it is never evidence that a
+figure is right, and it stays outside the certification. A benchmark module
+follows these conventions; the template ships none:
+
+- **Name.** `TEST_Benchmark` plus a subject, such as
+  `TEST_BenchmarkTotals`, in `tests/modules/`, so that a development build
+  holds it and a production build does not.
+- **Input.** Built in memory by a fixed rule, such as the record's index
+  setting its amount, never read from a committed file, so that every run
+  times the same input. It respects the data contract, as a fixture's inputs
+  do.
+- **Run.** Between `BeginRun` and `EndRun`, under the benchmark's own suite
+  name, so that the harness refuses a dirty start and checks that the run
+  left Excel's state as it found it. Its assertions check what volume can
+  break, such as the number of results and that each is finite, never a time
+  limit. It prints the number of records and the elapsed seconds, measured
+  with `Timer`, with `TEST_Harness.Echo`.
+- **Evidence.** Never listed in the [evidence policy](#evidence-policy):
+  `tools/check_excel_run.py` rejects a policy that names a `TEST_Benchmark`
+  module as a suite. Save its log, if you keep it, outside the evidence
+  folder, for example under `test-results/benchmark/`, and record the host as
+  the [evidence record](VALIDATION_PLAN.md#evidence-record) describes.
+
 ## Log format
 
 One record per line, `KEY=value`, with further fields separated by `; `.
@@ -162,8 +299,42 @@ reads, and it writes none.
 | `certification.log` | `EndCertification` |
 | A log and a certification log per project suite, as `suites` names them | Its certification entry point |
 | `exported/` | By hand only: every VBA component exported back from the workbook after the run, each form with its `.frx`. Without it, `check_excel_run.py --workbook` proves identity by rebuilding the commit |
-| `host.txt` | You, or `tools/devbuild/excel_run.py`: `windows=`, `references=` and `compile=` (`ON_DEMAND` for a run without Trust access) |
+| `host.txt` | You, or `tools/devbuild/excel_run.py`: the [host record](#host-record), also for a run that stopped early |
 | `export-manifest.json` | By hand only: `tools/devbuild/export_manifest.py`, the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
+
+<a id="host-record"></a>
+
+### Host record
+
+`host.txt` holds one `key=value` line per field, in this order:
+
+| Field | Value |
+| --- | --- |
+| `operator` | Who ran it |
+| `started`, `finished` | When the run started and finished, in ISO 8601 with the UTC offset, such as `2026-11-03T14:05:09+01:00` |
+| `windows` | The Windows version, as `winver` shows it |
+| `excel` | `Application.Version` and `Application.Build`, such as `16.0 build 17928` |
+| `bitness` | `64-bit` or `32-bit`: the bitness of Excel |
+| `automation_security` | `Application.AutomationSecurity` as found: `Low`, `ByUI` or `ForceDisable` (1, 2 or 3). It is read, never set |
+| `vba_project_access` | *Trust access to the VBA project object model* as found: `TRUSTED` or `NOT_TRUSTED` |
+| `references` | The ticked references, separated by `; ` |
+| `compile` | `PASS` when **Debug → Compile VBAProject** completed, `ON_DEMAND` for a run without Trust access, or what the compile reported |
+| `outcome` | How the run ended: `PASS`, `FAIL`, `IMPORT_FAILED`, `COMPILE_FAILED`, `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE` |
+
+`PASS` means every certification entry point returned, and `FAIL` that one
+raised. The other outcomes say where the run stopped: the components could
+not be imported, the project did not compile, Excel did not finish in time,
+the run stopped before its end, the macros were not enabled, or Excel could
+not be started. A value that could not be read, such as a registry value whose
+read was denied, is `UNKNOWN`, never a default or a setting of lower
+precedence. Only the record of a run that stopped early may hold it; the check
+rejects it in the record of a `PASS`.
+
+`check_excel_run.py` rejects a record that lacks a field or holds a value
+outside this table, a time without its UTC offset, a finish before the start,
+or, for a `PASS`, an `excel` or `bitness` other than the logs' `ENVIRONMENT`.
+It accepts any other outcome only as evidence of that outcome: the check then
+fails, whatever the rest of the folder holds.
 
 ## Evidence policy
 
@@ -175,7 +346,8 @@ holds what an Excel run must leave as evidence:
   declares as `EXPECTED_CASES` and `EXPECTED_ASSERTIONS`;
 - `suites`: the project suites, each with its name, source module,
   certification entry point, counts, `log` and `certification_log`, run in
-  `NORMAL` mode after the example suite; empty in the template;
+  `NORMAL` mode after the example suite; empty in the template, and never a
+  [volume benchmark](#volume-benchmarks);
 - `modes`: the three modes in run order, the log each one saves and whether
   it must pass (only `NORMAL`);
 - `evidence`: the names of the certification log, the export folder, the host
@@ -210,9 +382,11 @@ Without Excel, `tests/test_vba_harness.py` checks what the source can show:
 - `EndCertification` writes the log before it raises;
 - the results case records exactly the outputs of the contracts' cases, from
   files that exist;
-- the harness reads the stamp name the build writes.
+- the harness reads the stamp name the build writes;
+- the relation suite's counts equal its cases and assertions, and every
+  relation case asserts both `holds` and `detects-corruption`.
 
 `check_excel_run.py` proves that an evidence folder is consistent with a
 commit, and measures the commit's accuracy contracts on its results file. It
-cannot see Excel: the compile result, the references and the Windows build
-are the runner's own record.
+cannot see Excel: the host record, from the operator to the outcome, is the
+runner's own record.

@@ -13,7 +13,7 @@ from decimal import Decimal
 from pathlib import Path
 
 
-def main(variant):
+def main(variant: str) -> None:
     # newline="" lets the csv module read LF and CRLF files alike.
     with open(Path(variant) / "positions.csv", encoding="utf-8", newline="") as handle:
         total = sum((Decimal(row["notional"]) for row in csv.DictReader(handle)), Decimal(0))

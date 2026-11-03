@@ -1,3 +1,6 @@
+# mypy checks the bodies of these tests but does not require them to be annotated.
+# mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
+
 import argparse
 import ast
 import copy
@@ -8,6 +11,7 @@ import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import Any
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
@@ -16,7 +20,7 @@ import setup_repository as setup
 
 class FakeAPI:
     def __init__(self):
-        self.repo = {'full_name': 'example/project', 'visibility': 'private',
+        self.repo: dict[str, Any] = {'full_name': 'example/project', 'visibility': 'private',
                      'default_branch': 'main', 'permissions': {'admin': True},
                      'allow_merge_commit': True, 'allow_squash_merge': True,
                      'delete_branch_on_merge': False, 'allow_update_branch': False,
@@ -322,7 +326,7 @@ class SetupTests(unittest.TestCase):
 
     def test_cli_uses_explicit_method_host_and_stdin(self):
         result = argparse.Namespace(returncode=0, stdout='{}', stderr='')
-        with patch.object(setup.subprocess, 'run', return_value=result) as run:
+        with patch('setup_repository.subprocess.run', return_value=result) as run:
             setup.api('PATCH', 'repos/a/b', {'has_projects': False})
             cmd = run.call_args.args[0]
             self.assertIn('github.com', cmd)
@@ -334,7 +338,7 @@ class SetupTests(unittest.TestCase):
 
     def test_api_error_does_not_print_server_detail(self):
         result = argparse.Namespace(returncode=1, stdout='', stderr='secret token HTTP 403')
-        with patch.object(setup.subprocess, 'run', return_value=result):
+        with patch('setup_repository.subprocess.run', return_value=result):
             with self.assertRaises(setup.SetupError) as caught:
                 setup.api('GET', 'repos/a/b')
         self.assertIn('HTTP 403', str(caught.exception))
@@ -353,7 +357,7 @@ class VersionGuardTests(unittest.TestCase):
                         if isinstance(node, ast.ImportFrom)
                         and node.module in {'collections.abc', 'typing'}
                         for alias in node.names)
-        evaluated = []
+        evaluated: list[str] = []
         for node in tree.body:
             if isinstance(node, ast.If) and ast.unparse(node.test) == 'TYPE_CHECKING':
                 continue

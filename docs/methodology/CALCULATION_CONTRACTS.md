@@ -51,7 +51,8 @@ happens if they occur in the input.
 **Failure behaviour:** which conditions stop it, and what it reports.
 
 **Validation:** the checks in the [validation plan](VALIDATION_PLAN.md) that
-cover it.
+cover it, and the rows of its steps in its
+[traceability table](VALIDATION_PLAN.md#traceability).
 
 ## Decisions
 
