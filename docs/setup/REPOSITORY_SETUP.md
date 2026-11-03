@@ -74,6 +74,11 @@ script cannot read, such as decisions and exceptions, below it. `--report` works
 preview, `--check` and `--apply`; after apply it records the read-back state.
 Running apply again against matching settings makes no writes.
 
+Dependabot security updates count as on only when GitHub reports them enabled and
+not paused. GitHub pauses them when Dependabot pull requests go unanswered. Paused
+updates are drift: the plan prints a note, the record shows `on (paused)`, and an
+apply that does not resume them fails its read-back.
+
 <details>
 <summary><strong>⚙️ Advanced: reconcile an existing named ruleset</strong></summary>
 
