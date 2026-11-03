@@ -72,6 +72,17 @@ milestones and their pull requests.
   runner, which restores the input sheets it writes, and the conventions of a
   volume benchmark, which `check_excel_run.py` refuses as an evidence suite.
   Static checks only: the new module has not been run in Excel (#246).
+- A machine-readable data contract, `docs/methodology/data-contract.json`,
+  holds each dataset's file or sheet, encoding and delimited-text format, and
+  each field's type, unit or currency field, required flag and allowed values
+  or range. The *Datasets* table and the field tables of `DATA_CONTRACT.md`
+  are rendered from it, and **Repository integrity** fails while they differ.
+  `tools/check_data_contract.py`, which it runs, checks the contract and, with
+  `--dataset`, validates input files against it, reporting each finding with a
+  stable code such as `DC-TYPE` or `DC-MISSING-COLUMN`.
+  `tools/check_test_cases.py` now runs that validator on every variant file of
+  a file-based case outside an `invalid` case. The illustrative dataset `DS-01`
+  lists the three columns its example file already holds (#238).
 - The evidence of an Excel run can certify project suites beside the example
   suite: the evidence policy, now version 2, lists them under `suites`, each
   with its certification entry point, counts and two logs. `excel_run.py` runs
@@ -197,6 +208,22 @@ milestones and their pull requests.
 
 ### Changed
 
+- `SECURITY.md` describes the runtime risk surface: what the test harness,
+  the example suite and `tools/devbuild/excel_run.py` read, write and delete,
+  the Excel settings they need (enabled macros, no Trust access, no change to
+  a macro setting), which access the dependency rules forbid in core and
+  classes, and what a generated repository states for its own entry points.
+  It adds a data-and-secrets section (what a workbook can hide, and that a
+  leaked secret is revoked or rotated before it is reported) and a safe
+  harbor for good-faith research. The setup guide tells a generated
+  repository to adapt the runtime section (#242).
+- The pull request template asks for the calculation impact of a change: the
+  source of each changed rule and the class of the expected values that test
+  it, or "No calculation change". Its checklist asks for the `[Unreleased]`
+  changelog entry. `CONTRIBUTING.md` states the rules of evidence (expected
+  values never come from the code under test; a skipped test is not a pass),
+  what a commit message says, and what a contract change is and what it
+  updates (#240).
 - mypy also reports unreachable code (`warn_unreachable`), such as a branch
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
