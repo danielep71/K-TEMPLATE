@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "description": "What an Excel run of the VBA harness must leave as evidence, read by tools/check_excel_run.py from the commit it checks, and by tools/render_docs.py. tests/test_check_excel_run.py keeps it equal to the example suite, its certification entry point and the host policy of INSTALLATION.md.",
+  "schema_version": 2,
+  "description": "What an Excel run of the VBA harness must leave as evidence, read by tools/check_excel_run.py from the commit it checks, and by tools/render_docs.py. suite is the example suite, which certifies the harness itself in three modes; suites lists the project's own suites, each certified in its normal run by its own entry point. tests/test_check_excel_run.py keeps it equal to the example suite, its certification entry point and the host policy of INSTALLATION.md.",
   "harness": "tests/modules/TEST_Harness.bas",
   "suite": {
     "name": "examples",
@@ -9,6 +9,7 @@
     "expected_cases": 13,
     "expected_assertions": 30
   },
+  "suites": [],
   "modes": [
     {"mode": "NORMAL", "log": "examples.log", "must_pass": true},
     {"mode": "INJECTED_FAILURE", "log": "injected.log", "must_pass": false},

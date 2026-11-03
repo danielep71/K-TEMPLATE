@@ -61,10 +61,10 @@ def example_suite_results(root: Path) -> str:
     """The passing RESULT line and the expected end of each failure mode."""
     policy = check_excel_run.working_policy(root)
     source = (root / policy.suite_source).read_bytes()
-    suite = check_excel_run.read_suite(source)
+    suite = check_excel_run.read_suite(source, policy.office)
     text = source.decode("ascii", errors="replace").replace("\r\n", "\n")
     entry_points = {mode: name for name, mode in ENTRY_POINT.findall(text)}
-    plans = check_excel_run.plans(suite, policy)
+    plans = check_excel_run.plans(suite, policy.suite)
     passing = next(plan for plan in plans if plan.mode in policy.must_pass)
     module = Path(policy.suite_source).stem
     line = "; ".join(f"{key}={passing.result[key]}" for key in RESULT_ORDER)
