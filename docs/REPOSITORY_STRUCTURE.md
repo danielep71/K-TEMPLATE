@@ -26,6 +26,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `tests/modules/` | VBA test modules: the [test harness](methodology/TEST_HARNESS.md) and its example suite | Present, with the harness and the example suite |
 | `tests/fixtures/`, `tests/expected/` | Synthetic inputs and expected results in the [test-case format](methodology/TEST_CASES.md) | Present, with one illustrative case of each form |
 | `tests/derivations/` | Scripts that compute expected values from the documented method ([derivation scripts](methodology/TEST_CASES.md#derivation-scripts)) | Present, with one illustrative script for each case |
+| `tests/accuracy/` | The [accuracy contracts](methodology/TEST_CASES.md#accuracy-contracts) of the calculations | Present, with the illustrative draft contract `ACC-01` |
 | `tools/` | Repository checks, setup and build tooling, in Python; `tools/devbuild/` builds a workbook from source ([building a workbook from source](../INSTALLATION.md#building-a-workbook-from-source)) | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
 | `test-results/` | Disposable output of local and CI runs | Ignored by Git |
@@ -39,7 +40,8 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 - **No unreviewed binaries.** **Repository integrity** runs
   `tools/check_binaries.py`, which fails on any tracked file that
   `.gitattributes` treats as binary, or that contains a NUL byte, outside those
-  paths and the `.frx` beside its `.frm`. To keep another binary, such as an
+  paths, the variant directories of file-based test cases
+  (`tests/fixtures/<case-id>/<variant>/`) and the `.frx` beside its `.frm`. To keep another binary, such as an
   image for the documentation, review it and add its path, SHA-256 and reason
   to `.github/binary-allowlist.json`; a later change to the file fails until
   the entry is updated.
@@ -86,8 +88,12 @@ Each supported declaration is recorded as two tab-separated lines:
 
 - **Kinds:** `Function`, `Sub`, `Property Get`, `Property Let`,
   `Property Set`, `Const`, `Enum` or `Type`.
-- **Normalized declaration:** the declaration with its white space reduced to
-  single spaces.
+- **Normalized declaration:** the declaration on one line, outside string
+  literals with its white space reduced to single spaces and none just inside
+  parentheses, so `Total( ByVal Amount As Double )` is recorded as
+  `Total(ByVal Amount As Double)`. An `Enum` or `Type` is recorded with its
+  whole block, each line normalized and joined with ` | `, for example
+  `Public Enum DemoMode | dmFirst = 1 | End Enum`.
 - Blank lines and other lines starting with `#` are ignored. Public members of
   a class follow the same format once the class is supported.
 

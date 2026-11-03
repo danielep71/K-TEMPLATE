@@ -15,7 +15,7 @@ Ongoing repository rules and maintenance guidance live here. One-time initializa
 | [📋 Settings configuration](../setup/repository-settings.json) | Machine-readable baseline used by the setup script. |
 | [🔒 Security policy](../../SECURITY.md) | Private vulnerability reporting, response targets, and scope. |
 | [📦 Distribution review](DISTRIBUTION.md) | What to check and record before making the repository public, sharing a copy or publishing a release. |
-| [🛠️ Contributing](../../CONTRIBUTING.md) | How to open issues and pull requests, branch names, and local checks. |
+| [🛠️ Contributing](../../CONTRIBUTING.md) | How to open issues and pull requests, which branch they target, and local checks. |
 | [🤝 Code of conduct](../../CODE_OF_CONDUCT.md) | Expected behaviour and how to report a problem. |
 
 ## Repository controls
