@@ -63,6 +63,13 @@ milestones and their pull requests.
 
 ### Added
 
+- Accuracy contracts (`tests/accuracy/contracts.json`, checked by
+  `tools/check_accuracy.py` in **Repository integrity**). A contract states
+  the worst error a calculation guarantees for one regime, over separate
+  calibration and holdout cases. Freezing it needs enough `published` or
+  `independent` holdout cases, and a frozen threshold grows only with a new
+  decision. With `--results`, the check measures the results of an Excel run.
+  The template's illustrative contract stays a draft (#162).
 - A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
   the changelog, `VERSION`, the default branch, the tag message and
   **Repository integrity**. It builds a reproducible source bundle with its
