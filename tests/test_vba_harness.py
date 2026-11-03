@@ -6,13 +6,15 @@ assertions it contains, that every case runs once with a well-formed unique
 identifier, that the documented passing RESULT line matches the counts, and
 that every record the harness writes is documented. The relation suite is
 checked the same way, and each of its cases must pair the relation with its
-corruption check.
+corruption check; its tests are skipped in a repository that deleted it.
 """
 
 from __future__ import annotations
 
+import io
 import json
 import re
+import tempfile
 import unittest
 from pathlib import Path
 from typing import ClassVar
@@ -136,9 +138,21 @@ class ExampleSuiteTest(unittest.TestCase):
 
 
 class RelationSuiteTest(unittest.TestCase):
-    text = source(RELATIONS)
-    bodies = procedures(text)
-    cases: ClassVar[dict[str, str]] = {name: body for name, body in bodies.items() if name.startswith("Case")}
+    """The relation suite, read when its tests run: a generated repository may
+    delete the module, and its tests are then skipped."""
+
+    path: ClassVar[Path] = RELATIONS
+    text: ClassVar[str]
+    bodies: ClassVar[dict[str, str]]
+    cases: ClassVar[dict[str, str]]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not cls.path.is_file():
+            raise unittest.SkipTest(f"{cls.path.name} is not in this repository")
+        cls.text = source(cls.path)
+        cls.bodies = procedures(cls.text)
+        cls.cases = {name: body for name, body in cls.bodies.items() if name.startswith("Case")}
 
     @staticmethod
     def assertions(body: str) -> list[str]:
@@ -177,6 +191,19 @@ class RelationSuiteTest(unittest.TestCase):
             self.assertEqual(int(stated.group(1)), len(self.assertions(body)), name)
         passing = re.sub(r"\n'\s+", " ", self.bodies["RunRelationTests"])
         self.assertIn(f"cases={cases}; assertions={assertions}; failures=0", passing)
+
+
+class MissingRelationSuiteTest(unittest.TestCase):
+    def test_a_deleted_relation_suite_skips_its_tests(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            missing = type("Missing", (RelationSuiteTest,),
+                           {"path": Path(directory) / "TEST_Relations.bas"})
+            suite = unittest.TestLoader().loadTestsFromTestCase(missing)
+            result = unittest.TextTestRunner(stream=io.StringIO(), verbosity=0).run(suite)
+        self.assertEqual((result.testsRun, len(result.errors), len(result.failures)),
+                         (0, 0, 0), result.errors)
+        self.assertEqual(len(result.skipped), 1)  # the class, skipped once in setUpClass
+        self.assertGreater(suite.countTestCases(), 0)
 
 
 class HarnessTest(unittest.TestCase):
