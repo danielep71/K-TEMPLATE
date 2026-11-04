@@ -463,11 +463,17 @@ def snippets(text: str) -> Iterator[tuple[int, str]]:
     yield from code_spans(paragraph)
 
 
+class Operator(str):
+    """An unquoted shell operator; a quoted ``";"`` is a word, not one of these."""
+
+
 def split_tokens(code: str) -> list[str]:
     """The words and operators of a snippet, without quotes and comments.
 
     A ``#`` starts a comment only where a word starts, outside quotes; the
-    comment ends with its line.
+    comment ends with its line. Unquoted operators are returned as
+    ``Operator``, so a word that is an operator only once its quotes are
+    removed does not end a command.
     """
     tokens: list[str] = []
     comment_end = -1
@@ -480,14 +486,16 @@ def split_tokens(code: str) -> list[str]:
             newline = code.find("\n", start)
             comment_end = len(code) if newline < 0 else newline
             continue
-        if token not in CONTINUATIONS:
+        if OPERATOR.fullmatch(token):
+            tokens.append(Operator(token))
+        elif token not in CONTINUATIONS:
             tokens.append(token.replace('"', "").replace("'", ""))
     return tokens
 
 
 def command_end(tokens: Sequence[str], start: int) -> int:
     for index in range(start, len(tokens)):
-        if OPERATOR.fullmatch(tokens[index]):
+        if isinstance(tokens[index], Operator):
             return index
     return len(tokens)
 
