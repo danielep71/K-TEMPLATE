@@ -63,6 +63,15 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_doc_commands.py` checks the commands that the tracked
+  Markdown cites, in inline code and in shell or unmarked fenced blocks:
+  each `python tools/...` script and each `python -m` module of the
+  repository must be tracked, and each subcommand and option must exist in
+  the script's `argparse` parser, which it reads from the source without
+  importing or running it. It joins continued lines, skips placeholders
+  such as `<folder>` and `X.Y.Z`, and reports a parser it cannot read
+  instead of passing it. **Repository integrity** runs it, so a renamed
+  option or a removed tool fails until the guides follow (#273).
 - `tools/check_vba_calls.py` checks VBA calls that resolve to a procedure of
   the project, in statements and in expressions, qualified or not: too many
   or too few arguments, counting `Optional`, `ParamArray` and named

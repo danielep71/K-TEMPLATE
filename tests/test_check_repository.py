@@ -264,7 +264,7 @@ class RunTest(RepositoryTest):
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "vba-format",
                          "vba-calls", "data-contract", "test-cases", "derivations",
                          "independent-implementations", "workbook-protection",
-                         "changelog", "generated-docs", "markdown-links",
+                         "changelog", "generated-docs", "markdown-links", "documented-commands",
                          "codeql-default-branch", "whitespace-committed"):
             self.assertIn(expected, names)
         # Only --ci checks the working tree, after every other check.
