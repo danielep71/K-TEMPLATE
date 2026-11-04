@@ -5,7 +5,7 @@
   was not produced. Synthetic data only; no secrets or vulnerability details.
 -->
 
-Base: <!-- the default branch, merged with a merge commit; or `release/X.Y.Z`, squashed, or merged with a merge commit for a sync PR -->
+Base: <!-- the default branch, merged with a merge commit; or `release/X.Y.Z`: a task PR squashed or merged with a merge commit, a sync PR merged with a merge commit -->
 
 ## 🔗 Linked issues
 
@@ -79,7 +79,7 @@ comment on the pull request. -->
 ## ☑️ Checklist
 
 - [ ] The base is the default branch or the active release branch, as stated above.
-- [ ] Each linked issue has the assignee, exactly one priority label, an open milestone and a target end date before the milestone's due date; this PR has no milestone, links the relevant issues and carries appropriate labels.
+- [ ] Each linked issue has the assignee, exactly one priority label (`P1` only with `bug`), only catalogue labels, an open milestone, a target end date before the milestone's due date, and a dependency section whose issue links all exist, with `blocked` exactly while a named prerequisite is unresolved; this PR has no milestone, links the relevant issues and carries appropriate labels.
 - [ ] Scope is focused: no unrelated changes, local artifacts or generated output.
 - [ ] Documentation affected by the change is updated.
 - [ ] `CHANGELOG.md` has an entry under `[Unreleased]` for this change, or the change is one its maintenance policy says needs none.
