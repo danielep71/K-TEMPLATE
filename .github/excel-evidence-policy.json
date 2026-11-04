@@ -6,8 +6,8 @@
     "name": "examples",
     "source": "tests/modules/TEST_Examples.bas",
     "certification_entry_point": "CertifyExamples",
-    "expected_cases": 13,
-    "expected_assertions": 30
+    "expected_cases": 14,
+    "expected_assertions": 34
   },
   "suites": [],
   "modes": [

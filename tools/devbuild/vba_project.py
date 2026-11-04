@@ -6,7 +6,8 @@ Implements, from the [MS-OVBA] and [MS-CFB] specifications:
   - the Data Encryption of CMG / DPB / GC (2.4.3),
   - a version-3 compound file writer (512-byte sectors, mini stream).
 _VBA_PROJECT is written with Version 0xFFFF and no performance cache, which
-tells the host to compile from source on first load. Standard modules,
+tells the host to compile from source on first load
+(docs/methodology/VALIDATION_PLAN.md, HB-05). Standard modules,
 class modules and document modules are supported; forms, which need a
 designer storage, are not. tests/test_devbuild.py reads the output back with
 an independent decoder.

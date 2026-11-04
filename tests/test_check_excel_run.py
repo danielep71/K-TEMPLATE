@@ -1002,8 +1002,8 @@ class PolicyTest(unittest.TestCase):
         self.assertEqual(len(malformed), 1)
         self.assertIn(check_excel_run.POLICY, malformed[0])
         counts = run(*make_repository(policy_text(
-            lambda data: data["suite"].update(expected_cases=14)).encode()))
-        self.assertTrue(any("EXPECTED_CASES is 13, but" in item for item in counts), counts)
+            lambda data: data["suite"].update(expected_cases=15)).encode()))
+        self.assertTrue(any("EXPECTED_CASES is 14, but" in item for item in counts), counts)
         entry = run(*make_repository(policy_text(
             lambda data: data["suite"].update(
                 certification_entry_point="CertifyOther")).encode()))

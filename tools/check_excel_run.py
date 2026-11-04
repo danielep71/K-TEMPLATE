@@ -65,8 +65,8 @@ saving, must hold the same parts as that build, in the same order and byte for
 byte once decompressed (binding VERIFIED, or FAIL). The parts, not the
 compressed package, are compared, because another platform's zlib may pack
 the same parts into other bytes.
-Excel compiles the project from source on open, so the code that ran is the
-commit's. Only a run checked this way may record compile=ON_DEMAND, as
+Excel compiles the project from source on open (HB-05), so the code that ran
+is the commit's. Only a run checked this way may record compile=ON_DEMAND, as
 tools/devbuild/excel_run.py records it: no automated run can compile the
 whole project without Trust access to the VBA project, so VBA compiled only
 the modules the run called. Any other run must record compile=PASS from Debug >

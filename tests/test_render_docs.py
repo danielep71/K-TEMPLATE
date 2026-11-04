@@ -200,10 +200,10 @@ class RepositoryTest(unittest.TestCase):
     def test_the_suite_results_follow_the_suite(self) -> None:
         text = render_docs.example_suite_results(ROOT)
         self.assertIn("RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; "
-                      "cases=13; assertions=30; failures=0; cleanup=PASS; recovery=NONE", text)
+                      "cases=14; assertions=34; failures=0; cleanup=PASS; recovery=NONE", text)
         self.assertIn("`TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, "
-                      "`operation=PASS`, `completeness=INCOMPLETE`, `cases=12`, "
-                      "`assertions=28`, `failures=1`", text)
+                      "`operation=PASS`, `completeness=INCOMPLETE`, `cases=13`, "
+                      "`assertions=32`, `failures=1`", text)
         self.assertIn("Two more entry points", text)
 
     def test_every_check_is_listed_once_and_described(self) -> None:

@@ -51,9 +51,9 @@ every case run counts as a pass. Rules: docs/repo_governance/PULL_REQUESTS.md. -
 | --- | --- |
 | Exact commit | <!-- Full SHA of the source imported --> |
 | Excel build and bitness, Windows version | |
-| `Debug → Compile VBAProject` | <!-- PASS / FAIL / NOT RUN, with a reason --> |
+| `Debug → Compile VBAProject` | <!-- PASS / FAIL / ON_DEMAND (the one-command run) / NOT RUN, with a reason --> |
 | Suite and mode | |
-| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN --> |
+| Completion state | <!-- PASS / FAIL / INCOMPLETE / NOT RUN; for a run that stopped early, the host record's outcome --> |
 | Evidence | <!-- Where the log or evidence folder is --> |
 
 ## 🔎 Final-head review

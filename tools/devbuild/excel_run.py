@@ -11,16 +11,19 @@ Excel run, and never needs Trust access to the VBA project object model:
 1. builds the development workbook with build_workbook.py, and stops if the
    build is not evidence-grade (a change in the checkout);
 2. empties the evidence folder (default test-results/excel-run, which Git
-   ignores; another folder must be empty or absent);
+   ignores; a folder under test-results/ is emptied, any other must be empty
+   or absent);
 3. opens the workbook read-only in a visible Excel through COM, from
    PowerShell started with -NoProfile and -EncodedCommand. It changes no
    macro setting: where Excel opens it with macros disabled, as under a
    policy that makes programs follow the user's macro setting
-   (VALIDATION_PLAN.md, HB-02), you click Enable Content once, and the
-   command waits for that, up to --enable-timeout seconds. Then it runs the
-   certification entry point of the example suite and of each project suite
-   the policy lists, in order, with the evidence folder and tests/fixtures,
-   closes the workbook without saving and quits Excel;
+   (VALIDATION_PLAN.md, HB-02), you click Enable Content once, which enables
+   them without reopening the workbook (HB-04), and the command waits for
+   that, up to --enable-timeout seconds. Then it runs the certification entry
+   point of the example suite and of each project suite the policy lists, in
+   order, qualified with the workbook's name so that Application.Run reaches
+   an Option Private Module module (HB-03), with the evidence folder and
+   tests/fixtures, closes the workbook without saving and quits Excel;
 4. writes host.txt, the host record of docs/methodology/TEST_HARNESS.md:
    the operator (--operator, by default the Windows user), when the run
    started and finished, Windows from the registry, the Excel build, its
@@ -237,8 +240,10 @@ def powershell_script(workbook: Path, folder: Path, fixtures: Path,
     """Open the workbook read-only, wait until its macros run, run each certification
     entry point (``Module.Procedure``) in order, close without saving, quit. Every
     entry point runs even when an earlier one fails, so each suite leaves its logs; the
-    first failure is reported. It never changes a macro setting: when the workbook opens
-    with macros disabled, a person enables them with Enable Content (HB-02). Once Excel
+    first failure is reported. Each name is qualified with the workbook's name (``$prefix``),
+    which lets Application.Run reach an Option Private Module module (HB-03). It never
+    changes a macro setting: when the workbook opens with macros disabled (HB-02), a
+    person enables them with Enable Content, without reopening it (HB-04). Once Excel
     has started it prints its version, build, folder and AutomationSecurity, which it
     only reads, for the host record. Its exit code says how the run ended
     (OUTCOME_BY_EXIT)."""

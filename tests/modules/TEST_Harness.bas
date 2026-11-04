@@ -20,8 +20,9 @@ Attribute VB_Name = "TEST_Harness"
 '   workbook's external surface.
 '
 ' DEPENDENCIES
-'   The VBA and Excel object models only: no reference, workbook fixture,
-'   worksheet or external framework.
+'   The VBA and Excel object models, and the build_commit cell of
+'   ThisWorkbook, read by SaveResults; no reference, workbook fixture or
+'   external framework.
 '
 ' STATE OWNERSHIP
 '   Owns the run counters, the case identifiers, the failure records, the
@@ -58,7 +59,7 @@ Attribute VB_Name = "TEST_Harness"
 '   of its own.
 '
 ' UPDATED
-'   2026-11-03
+'   2026-11-04
 '
 ' AUTHOR
 '   Daniele Penza
@@ -702,12 +703,14 @@ Public Sub BeginCertification( _
 '   SuiteName: the suite identifier, as in its RUN records.
 '
 ' ERROR POLICY
-'   Raises ERR_TEST_USAGE while another certification is active, and
-'   ERR_TEST_DIRTY_START when a run is active or recovery is required; it
-'   changes no run state before either check.
+'   Raises ERR_TEST_USAGE, changing nothing, while another certification
+'   is active. A run still active is taken as interrupted: it marks
+'   recovery required, with the reason, so that ResetTests is needed before
+'   any run, then raises ERR_TEST_DIRTY_START, as it does when recovery is
+'   already required. It changes no other state before raising.
 '
 ' UPDATED
-'   2026-11-02
+'   2026-11-04
 '==============================================================================
 '
 

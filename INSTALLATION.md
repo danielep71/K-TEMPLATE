@@ -75,8 +75,10 @@ revisions.
      `BEGIN` and `END` header and without its `Attribute` lines.
    - Hidden attributes need a reviewed round trip before such a component is
      accepted; never drop them silently.
-6. **Tests.** A development workbook may also import `tests/modules/`. A
-   production workbook never contains tests or examples.
+6. **Tests.** A development workbook also imports `tests/modules/` and,
+   when the project has it, `examples/modules/`, the reserved location of
+   synthetic VBA examples. A production workbook never contains tests or
+   examples.
 7. **Compile and record.** Compile only once every component is present:
    **Debug → Compile VBAProject**. Then save the workbook and run the
    documented tests. Record the full SHA, the Excel build and bitness, the
@@ -109,8 +111,8 @@ Manual import needs no *Trust access to the VBA project object model*.
 
 ## 🏗️ Building a workbook from source
 
-`tools/devbuild/build_workbook.py` builds the workbook of steps 1 to 5 above
-in one command, from the checkout:
+`tools/devbuild/build_workbook.py` builds the workbook of steps 1 to 6 above,
+apart from forms (step 4), in one command, from the checkout:
 
 ```sh
 python tools/devbuild/build_workbook.py                            # development
@@ -135,9 +137,10 @@ ignores, with:
   `tests/modules/` and `examples/modules/`. Each sheet's document module
   comes from `src/workbook/<code name>.cls`, when that file exists.
 
-Excel compiles the project from source when the workbook opens, so the build
-needs no *Trust access to the VBA project object model*. Two builds of the
-same commit and working tree are byte-identical. The build stops on a form,
+Excel compiles the project from source when the workbook opens
+([HB-05](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the
+build needs no *Trust access to the VBA project object model*. Two builds of
+the same commit and working tree are byte-identical. The build stops on a form,
 which needs a designer the builder does not write; import forms by hand
 (step 4). It also stops on a module too dense to fit the VBA compression
 format; import that module by hand.
@@ -179,7 +182,7 @@ argument. A passing run ends with:
 
 <!-- BEGIN generated: example-suite-results -->
 ```text
-RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=13; assertions=30; failures=0; cleanup=PASS; recovery=NONE
+RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; cases=14; assertions=34; failures=0; cleanup=PASS; recovery=NONE
 ```
 
 Anything else, or the error *Suite examples did not pass*, is a failure.
@@ -188,7 +191,7 @@ Two more entry points show the failure paths and are expected to fail:
 | Entry point | Expected end |
 | --- | --- |
 | `TEST_Examples.RunExampleTestsWithInjectedFailure` | `RESULT=FAIL`, `operation=FAIL`, `completeness=COMPLETE`, `failures=1`, then *Suite examples did not pass* |
-| `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=12`, `assertions=28`, `failures=1`, then *Suite examples did not pass* |
+| `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=13`, `assertions=32`, `failures=1`, then *Suite examples did not pass* |
 <!-- END generated: example-suite-results -->
 
 - **Complete log.** The Immediate window keeps only its last 200 lines. To
@@ -199,6 +202,15 @@ Two more entry points show the failure paths and are expected to fail:
   changed, leaves `recovery=REQUIRED`, and the next run is refused. Check
   **File → Options → Formulas** (calculation), the open workbooks and the
   other settings the log names, then type `TEST_Harness.ResetTests`.
+- **End or Reset.** **End** in an error dialog, or **Run → Reset** in the
+  VBE, clears the harness's state with the rest of the project's, so the
+  stop is not detected: the next run starts normally and takes Excel's state
+  as it finds it as its baseline. After such a stop, check Excel by hand
+  before the next run. In the Immediate window,
+  `? Application.Calculation, Application.ScreenUpdating, Application.DisplayAlerts, Application.EnableEvents`
+  prints the four settings the harness compares (`-4105` is automatic
+  calculation), and the open workbooks and the active window must be those
+  you had before the run. Put back anything the stopped run changed.
 - **What it proves.** The suite exercises the harness itself and validates no
   calculation of the workbook. The [harness guide](docs/methodology/TEST_HARNESS.md)
   defines the outcomes and the log format.
@@ -231,7 +243,8 @@ evidence-grade. Then it:
    programs follow your macro setting
    ([HB-02](docs/methodology/VALIDATION_PLAN.md#host-behaviour)). The command
    changes no macro setting, and waits up to `--enable-timeout` seconds (300
-   by default) for that click;
+   by default) for that click, which enables the macros without reopening
+   the workbook ([HB-04](docs/methodology/VALIDATION_PLAN.md#host-behaviour));
 3. runs the certification of step 5 below, with that folder and
    `tests\fixtures`;
 4. closes the workbook without saving, and quits Excel;
@@ -251,8 +264,9 @@ step 10 says.
 There is no export: the check proves identity by rebuilding the commit in a
 temporary worktree. The workbook Excel ran must hold the same parts as that
 build, byte for byte once decompressed, the VBA project included. Excel
-compiles the project from source on open, so the code that ran is the
-commit's.
+compiles the project from source on open
+([HB-05](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the code
+that ran is the commit's.
 
 Without Trust access no automated run can compile the whole project. VBA
 then compiles on demand only the modules the run calls, and `compile=ON_DEMAND`
