@@ -26,7 +26,7 @@
 | --- | --- |
 | **Runtime** | Python **3.11+** and a recent [GitHub CLI](https://cli.github.com/) are installed. |
 | **Destination** | The new repository exists and contains the template files. |
-| **Template cleanup** | The template-only section of `AGENTS.md`, between its `template-only` markers, is deleted; the two `contact_links` URLs in `.github/ISSUE_TEMPLATE/config.yml` and the README traffic badges name the new repository, or the badges are removed; `target-branch` in `.github/dependabot.yml` names a branch of the new repository, or is removed; and the entries and link references of `CHANGELOG.md` are the new repository's. `Repository integrity` fails in a generated repository until all five are done. |
+| **Template cleanup** | The template-only section of `AGENTS.md`, between its `template-only` markers, is deleted; the two `contact_links` URLs in `.github/ISSUE_TEMPLATE/config.yml` and the README traffic badges name the new repository, or the badges are removed; `target-branch` in `.github/dependabot.yml` names a branch of the new repository, or is removed; and the entries and link references of `CHANGELOG.md` are the new repository's. `Repository integrity` fails in a generated repository until all five are done. In a clean clone, `python tools/initialize_repository.py --repository OWNER/NEW-REPO --regime PREFIX` lists these edits, and the replacement of `<REGIME>` in `docs/VBA_HOUSE_STYLE.md`, and makes them with `--apply`; see *Recommended handover* for its options. Without it, make them by hand. |
 | **Identity** | `gh auth status --hostname github.com` shows an account with administrator access to the destination. Sign in with `gh auth login --hostname github.com`, or set `GH_TOKEN` to a fine-grained token. |
 | **Token permissions** | A fine-grained token has destination repository **Administration: write**, **Contents: read**, and **Checks: read**. A workflow `GITHUB_TOKEN` cannot administer these rulesets. Never commit tokens. |
 | **Integrity check** | Actions is enabled and `Repository integrity` has succeeded on the **current default-branch HEAD**. |
@@ -143,6 +143,7 @@ inherited policies may impose additional restrictions.
 | `tools/check_binaries.py`, `tests/test_check_binaries.py`, `.github/binary-allowlist.json` | **Keep** | Fails **Repository integrity** on a tracked binary outside the approved paths. Add a reviewed binary, such as a documentation image, to the allowlist with its SHA-256 and reason. |
 | `.gitattributes`, `.gitignore`, `.editorconfig` | **Keep** | Line-ending, binary-file, ignore and editor rules for workbooks, exported VBA source and regulatory source copies. Adjust them only with a layout change that needs it. |
 | `.github/labels.json`, `.github/scripts/`, `.github/ISSUE_TEMPLATE/`, the label, triage and milestone workflows, `tools/check_issues.py` | **Keep** | Ongoing label and issue automation; see *Initialize issue labels* above. |
+| `tools/initialize_repository.py`, `tests/test_initialize_repository.py` | **Remove once run** | Makes the *Template cleanup* edits of *Before you start* and replaces `<REGIME>`, as one diff to review and commit. Without `--apply` it lists them and writes nothing. With `--apply` it refuses a working tree that differs from the commit, and a second run changes nothing. It never changes GitHub or commits. By default it repoints the traffic badges, removes Dependabot's `target-branch` and links the changelog's `[Unreleased]` to `main`; `--remove-traffic-badges`, `--release-branch BRANCH` (an existing branch) and `--default-branch BRANCH` change that. Its test initializes a copy of the template and runs **Repository integrity** on it with `--template false`; it is skipped once the template-only section is gone. Delete both files together after committing the result: nothing else uses them. |
 | `AGENTS.md` | **Adapt** | Delete the template-only section first; keep the remaining instructions that still apply to the project. |
 | `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` | **Keep and adapt** | The contribution entry point and the Contributor Covenant 2.1 by reference, both shown in GitHub's community profile. Adapt the checks and reporting contact to the project. |
 | `SECURITY.md` | **Keep and adapt** | Names the private reporting channel, response targets and safe harbor. Adjust supported versions and scope to the project. Rewrite *Runtime risk surface* for the project's macros as they are added: for each entry point of the production workbook, what it reads, writes, saves or deletes, and whether the facade, workbook or form code starts a process, creates an external object, calls a native library or reaches the network. |
@@ -164,7 +165,7 @@ inherited policies may impose additional restrictions.
 | `.github/workflows/traffic-history.yml`, `tools/traffic_history.py`, `tests/test_traffic_history.py`, `docs/repo_governance/TRAFFIC.md` | **Keep; enable if wanted** | Optional traffic collection. It does nothing until you follow *Enabling* in `TRAFFIC.md`. Point the README's traffic badges at the new repository, or remove them; **Repository integrity** fails while they read another repository. If you never want it, remove all four files and the badges together, and in the same change: remove the files from `docs/licenses/THIRD_PARTY_NOTICES.txt` and `docs/licenses/provenance.json`; remove the two `traffic-history.yml` entries of `WRITE_PERMISSIONS` and the traffic test from `tests/test_workflow_controls.py`; and remove every link to `TRAFFIC.md`, which `python tools/check_links.py` lists. |
 | `pyproject.toml`, `tools/requirements-quality-ci.txt` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling, strict mode, the unreachable-code warning and actionlint are active, and `tests/strict_yaml.py` makes the workflow control tests reject duplicate YAML keys. |
 | `.github/dependabot.yml`, `.github/requirements.txt` | **Keep** | Proposes updates to the SHA-pinned Actions, the hash-locked configuration parser that the workflow control tests use, and the hash-locked quality tools. Its `target-branch` names the active release branch: set it to this repository's release branch or remove it to target the default branch. **Repository integrity** fails while it names a branch that does not exist. |
-| `.github/workflows/release.yml`, `tools/release.py`, `tests/test_release.py` | **Keep** | On a pushed `vX.Y.Z` tag, verifies it against the changelog, `VERSION`, the default branch, its message and **Repository integrity**. It then builds a reproducible source bundle, attests its provenance (on a private repository only with GitHub Enterprise Cloud and the repository variable `RELEASE_ATTESTATIONS` set to `enabled`) and drafts the release. A manual run is a rehearsal. Publication stays manual ([RELEASING.md](../../RELEASING.md)). |
+| `.github/workflows/release.yml`, `tools/release.py`, `tests/test_release.py` | **Keep** | On a pushed `vX.Y.Z` tag, verifies it against the changelog, `VERSION`, the default branch, its message and **Repository integrity**. It then builds a reproducible source bundle, attests its provenance (on a private repository only with GitHub Enterprise Cloud and the repository variable `RELEASE_ATTESTATIONS` set to `enabled`) and drafts the release. A manual run is a rehearsal. Publication stays manual; afterwards, `release.py verify-published` checks the published release ([RELEASING.md](../../RELEASING.md)). |
 | `.github/workflows/scorecard.yml` | **Keep; public repositories** | Scores the default branch's supply-chain posture with OpenSSF Scorecard weekly and on each push to it, and publishes the results to the Scorecard service and to code scanning. It is skipped on a private repository and is not a required check. If you never want the results published, delete it together with its `WRITE_PERMISSIONS` entry and its test in `tests/test_workflow_controls.py`. |
 | `.github/workflows/codeql.yml` | **Keep** | Scans the Python, JavaScript and workflow code with CodeQL's security-extended queries on pushes and pull requests to `main` and `release/**`, and weekly; results appear under **Security → Code scanning**. Pull requests are analyzed without write permission: their SARIF is kept as a 30-day artifact and they show no code scanning annotations. Leave GitHub's default setup off, because it rejects results from this workflow. Free on a public repository; on a private one it needs GitHub Code Security and the repository variable `CODE_SCANNING` set to `enabled`, otherwise it skips the analysis. If the default branch is not `main`, rename it in the workflow's `push` and `pull_request` branch lists; **Repository integrity** fails while they omit it. |
 | `tools/check_repository.py`, `tests/test_check_repository.py` | **Keep and evolve** | Runs every **Repository integrity** check, locally and in CI, and writes per-check logs, `report.json` (commit, dirty state, file hashes) and the job summary under `test-results/integrity/`; CI keeps them as a 30-day artifact. With `--ci`, which CI passes, it fails when the working tree differs from the commit. Add project checks to its list. |
@@ -175,7 +176,8 @@ inherited policies may impose additional restrictions.
 | `tools/check_workbook_protection.py`, `tests/test_check_workbook_protection.py`, `tests/workbook_template.py` | **Keep** | Compares the protection of `src/workbook/Template.xlsx` with its protection matrix ([workbook contract](../methodology/WORKBOOK_CONTRACT.md#protection)), in **Repository integrity**. It passes while neither exists. |
 | `tools/format_vba.py`, `tests/test_format_vba.py` | **Keep** | Brings exported VBA source into the house-style layout with `--write`; **Repository integrity** runs `--check`. It passes while there is no VBA source. |
 | `tools/render_docs.py`, `tests/test_render_docs.py` | **Keep and evolve** | Renders the documentation blocks between `BEGIN generated` and `END generated` markers, such as the list of **Repository integrity** checks and the example suite's expected results; **Repository integrity** fails while one is stale. Add a renderer for each fact the project's code already knows, and run `--write` after changing it. |
-| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links and anchors in **Repository integrity**, external links weekly. |
+| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links, anchors and HTTPS in **Repository integrity**, external links weekly, with optional expiring exceptions in `.github/link-exceptions.json` ([maintain the baseline](#-maintain-the-baseline)). |
+| `tools/check_doc_commands.py`, `tests/test_check_doc_commands.py` | **Keep** | Checks, in **Repository integrity**, that each `python tools/...` command and repository `python -m` command in the tracked Markdown runs a tracked script, and that its subcommands and options exist in the script's `argparse` parser, read from its source without running it. A parser it cannot read is a failure, not a pass. Commands of a **Remove once run** tool are skipped once its file is deleted. Keep each tool's parser literal so it stays readable. |
 | `docs/repo_governance/PULL_REQUESTS.md` | **Keep and adapt** | Final-head review procedure that the pull request template refers to. Adapt it if the project uses another automated reviewer. |
 | `.github/workflows/repository-integrity.yml` | **Keep and evolve** | Supplies the required `Repository integrity` check. Add project-specific checks as the project grows. |
 | GitHub **Template repository** setting | **Review separately** | Choose whether the new project should itself be reusable as a template; the setup script does not change this flag. |
@@ -298,12 +300,35 @@ ruff check tools tests
 mypy
 ```
 
-The tests already check every relative link and anchor. To also request the
-external links, as the weekly **Link check** workflow does:
+The tests already check every relative link and anchor, and that every
+external link uses HTTPS: a plain `http://` link in a Markdown link, a
+reference definition, an autolink or an HTML attribute fails **Repository
+integrity**; text in code spans and fenced blocks is not checked. To also
+request the external links, over HTTPS only, as the weekly **Link check**
+workflow does:
 
 ```sh
 python tools/check_links.py --external
 ```
+
+A 403, 429 or 5xx answer, or no answer, is a warning, because the site may
+only be busy or refuse automated requests. To keep such a link while you
+review it again later, list it in `.github/link-exceptions.json`, which the
+template does not ship; create it with the first exception:
+
+```json
+{
+  "schema_version": 1,
+  "exceptions": [
+    {"url": "https://example.org/page", "reason": "Answers 403 to automated requests", "expires": "2027-06-30"}
+  ]
+}
+```
+
+The `url` is the link without its `#fragment`. Up to and including the
+`expires` date the warning stays a warning; after it, the weekly check fails
+for that URL until you renew or remove the exception. **Repository integrity**
+fails while the file is malformed or lists a URL that no Markdown file links.
 
 Once setup tooling has been retired from a generated project, use that project's
 replacement validation and settings-maintenance process instead.

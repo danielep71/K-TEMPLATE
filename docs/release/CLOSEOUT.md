@@ -6,6 +6,19 @@ an issue for the milestone, and close the milestone only when every row links
 its evidence or records a deviation. Closing a milestone publishes nothing;
 a release follows [RELEASING.md](../../RELEASING.md) separately.
 
+When the milestone is released, check the published release as
+[RELEASING.md step 7](../../RELEASING.md#7-publish-and-verify) describes:
+
+```sh
+python tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY \
+  --milestone N --asset FILE=SHA256
+```
+
+With `--milestone`, it also fails unless the milestone is closed and has no
+open issue. Add its output to the closeout issue. The download, the unblock
+and the Excel checks of an attached workbook stay manual
+([step 8](../../RELEASING.md#8-verify-the-published-workbook)).
+
 ## Template
 
 ```markdown
@@ -19,6 +32,7 @@ a release follows [RELEASING.md](../../RELEASING.md) separately.
 | 2 | Step 1 | The file audit below |
 | 3 | Step 2 | The candidate record, the evidence index and the scope statement |
 | 4 | Step 3, if I decide to release | RELEASING.md, preparation steps |
+| 5 | Step 4, after publication | The output of `tools/release.py verify-published --milestone N`, added to this issue |
 
 ### Checklist
 

@@ -62,8 +62,9 @@ tools/check_links.py
 tests/test_check_links.py
 
 The license text is included in MPL-2.0.txt in this directory.
-Modifications limit the link checker to Markdown, skip links into this
-repository in the external check, and adapt the GitHub App credentials and
+Modifications limit the link checker to Markdown, require HTTPS, let a listed
+exception for an unverifiable link expire, skip links into this repository in
+the external check, and adapt the GitHub App credentials and
 the review procedure to this repository's workflows and documentation.
 
 The following files were adapted from danielep71/K-CVA

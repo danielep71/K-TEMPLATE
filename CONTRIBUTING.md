@@ -116,6 +116,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `issue-contact-links` | Built in: The issue forms' contact links point to this repository. |
 | `readme-traffic-badges` | Built in: The README's traffic badges read this repository's traffic. |
 | `binaries` | `python tools/check_binaries.py` |
+| `secret-files` | Built in: No tracked file is named as a secret or private key file. |
 | `vba-format` | `python tools/format_vba.py --check` |
 | `vba-source` | `python tools/check_vba_source.py` |
 | `vba-conditionals` | `python tools/check_vba_conditionals.py` |
@@ -133,6 +134,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `changelog` | `python tools/check_changelog.py` |
 | `generated-docs` | `python tools/render_docs.py --check` |
 | `markdown-links` | `python tools/check_links.py` |
+| `documented-commands` | `python tools/check_doc_commands.py` |
 | `dependabot-target-branches` | Built in: Every Dependabot target-branch exists. |
 | `codeql-default-branch` | Built in: codeql.yml lists the default branch, which branch filters cannot name. |
 | `required-documents` | Built in: The documents the repository requires exist and are not empty. |

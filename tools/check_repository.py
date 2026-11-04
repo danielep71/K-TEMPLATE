@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fnmatch
 import hashlib
 import importlib
 import importlib.util
@@ -48,6 +49,14 @@ BADGE = re.compile(r"raw\.githubusercontent\.com/([^/\s]+/[^/\s]+)/traffic-histo
 CONTACT_URL = re.compile(r'^\s*url:\s*"?([^"\s]+)"?\s*$', re.M)
 TARGET_BRANCH = re.compile(r'^\s*target-branch:\s*"?([^"\s]+)"?\s*$', re.M)
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$")
+# File names that mark a secret or a private key, matched case-insensitively
+# against the last path component. A reviewed list: .gitignore ignores the same
+# names, but git add -f bypasses it, and secret scanning matches token
+# patterns, not file types.
+SECRET_FILES = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.pvk", "*.jks",
+                "*.keystore", "id_rsa*", "id_ed25519*", "*.kdbx")
+# A sanitized example and public SSH keys stay trackable.
+SECRET_FILE_EXCEPTIONS = (".env.example", "id_rsa*.pub", "id_ed25519*.pub")
 
 Finding = tuple[str, str]
 
@@ -126,6 +135,27 @@ def traffic_badges(context: Context) -> list[Finding]:
     return [("README.md", f"A traffic badge reads {name}; point it at {context.repository} or "
                           "remove it.")
             for name in read if name.lower() != str(context.repository).lower()]
+
+
+def secret_pattern(path: str) -> str | None:
+    """The SECRET_FILES pattern a tracked path matches, unless an exception covers it."""
+    name = path.rsplit("/", 1)[-1].lower()
+    if any(fnmatch.fnmatchcase(name, pattern) for pattern in SECRET_FILE_EXCEPTIONS):
+        return None
+    return next((pattern for pattern in SECRET_FILES if fnmatch.fnmatchcase(name, pattern)), None)
+
+
+def secret_files(context: Context) -> list[Finding]:
+    """No tracked file is named as a secret or private key file."""
+    findings = []
+    for path in git(context.root, "ls-files", "-z").split("\0"):
+        pattern = secret_pattern(path) if path else None
+        if pattern:
+            findings.append((path, f"is tracked and named as a secret or key file ({pattern}); "
+                                   "remove it from the repository, rotate the secret it holds, "
+                                   "and follow Handling a finding in "
+                                   "docs/repo_governance/DISTRIBUTION.md."))
+    return findings
 
 
 def dependabot_branches(context: Context) -> list[Finding]:
@@ -230,6 +260,7 @@ def checks(context: Context) -> list[Check]:
         Check("issue-contact-links", function=contact_links, missing=no_repository),
         Check("readme-traffic-badges", function=traffic_badges, missing=no_repository),
         Check("binaries", [python, "tools/check_binaries.py"]),
+        Check("secret-files", function=secret_files),
         Check("vba-format", [python, "tools/format_vba.py", "--check"]),
         *[Check(f"vba-{name.replace('_', '-')}", [python, f"tools/check_vba_{name}.py"])
           for name in ("source", "conditionals", "jumps", "public_api", "dependencies",
@@ -244,6 +275,7 @@ def checks(context: Context) -> list[Check]:
         Check("changelog", changelog),
         Check("generated-docs", [python, "tools/render_docs.py", "--check"]),
         Check("markdown-links", [python, "tools/check_links.py"]),
+        Check("documented-commands", [python, "tools/check_doc_commands.py"]),
         Check("dependabot-target-branches", function=dependabot_branches),
         Check("codeql-default-branch", function=codeql_default_branch,
               missing=None if context.default_branch

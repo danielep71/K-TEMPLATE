@@ -63,6 +63,49 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_doc_commands.py` checks the commands that the tracked
+  Markdown cites, in inline code and in shell or unmarked fenced blocks:
+  each `python tools/...` script and each `python -m` module of the
+  repository must be tracked, and each subcommand and option must exist in
+  the script's `argparse` parser, which it reads from the source without
+  importing or running it. It joins continued lines, skips placeholders
+  such as `<folder>` and `X.Y.Z`, and reports a parser it cannot read
+  instead of passing it. **Repository integrity** runs it, so a renamed
+  option or a removed tool fails until the guides follow; only the
+  commands of a tool marked **Remove once run**, once it is deleted, are
+  skipped (#273).
+- **Repository integrity** has a `secret-files` check: it fails on a tracked
+  file named as a secret or key file (`.env` and `.env.*` except
+  `.env.example`; `.pem`, `.key`, `.p12`, `.pfx`, `.pvk`, `.jks`,
+  `.keystore`; `id_rsa*` and `id_ed25519*` except their `.pub` keys;
+  `.kdbx`), also one force-added past `.gitignore`, and says to remove the
+  file, rotate the secret and follow *Handling a finding* in
+  `DISTRIBUTION.md`. `.gitignore` now ignores every one of these names
+  (#276).
+- `tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY
+  [--milestone N] [--asset FILE=SHA256]` checks a published release through
+  `gh`, read-only, and prints one line per fact: the tag is annotated and
+  points at the commit its `Candidate` line names, **Repository integrity**
+  succeeded on it, the release is published and not a draft, its assets are
+  exactly the source bundle, `SHA256SUMS` and each `--asset`, with the
+  SHA-256 values that `SHA256SUMS` and `--asset` record, `gh attestation
+  verify` passes on the bundle, and the milestone is closed with no open
+  issue. It fails on any of these. `RELEASING.md` step 7, the milestone
+  closeout and the release certification now use it; the download, the
+  unblock and the Excel checks of a published workbook stay manual (#274).
+
+- `tools/initialize_repository.py` adapts a repository created from the
+  template in one diff: it deletes the template-only section of `AGENTS.md`,
+  points the contact links and the traffic badges at the new repository, or
+  removes the badges, sets or removes Dependabot's `target-branch`, replaces
+  the changelog's entries and link references with an empty `[Unreleased]`
+  section, and replaces `<REGIME>` in the house style. Without `--apply` it
+  only lists the changes; with it, it refuses a working tree that differs from
+  the commit. It changes nothing on GitHub, and a second run changes nothing.
+  A test initializes a copy of the template and runs **Repository integrity**
+  on it with `--template false`. README step 2 and the setup guide name the
+  command, with the manual edits as the fallback; the initializer and its test
+  can be deleted once run (#272).
 - `tools/check_vba_calls.py` checks VBA calls that resolve to a procedure of
   the project, in statements and in expressions, qualified or not: too many
   or too few arguments, counting `Optional`, `ParamArray` and named
@@ -262,6 +305,15 @@ milestones and their pull requests.
 
 ### Changed
 
+- External links must use HTTPS: `tools/check_links.py` fails a plain
+  `http://` link in a Markdown link, a reference definition, an autolink or an
+  HTML attribute, outside code, in **Repository integrity**, and the weekly
+  **Link check** requests links over HTTPS only and fails a redirect to
+  another protocol. A 403, 429 or 5xx answer stays a warning, but one listed
+  in the optional `.github/link-exceptions.json`, with a reason and an
+  `expires` date, fails once that date has passed; **Repository integrity**
+  fails while the file is malformed or lists a URL that no Markdown file
+  links (#275).
 - **Repository integrity** cancels the run of a pull request commit that a
   newer commit replaces; a push run is never cancelled. CI runs
   `tools/check_repository.py` with `--ci`, which fails when, after the
