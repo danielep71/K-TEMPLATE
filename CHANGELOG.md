@@ -294,6 +294,15 @@ milestones and their pull requests.
 
 ### Changed
 
+- External links must use HTTPS: `tools/check_links.py` fails a plain
+  `http://` link in a Markdown link, a reference definition, an autolink or an
+  HTML attribute, outside code, in **Repository integrity**, and the weekly
+  **Link check** requests links over HTTPS only and fails a redirect to
+  another protocol. A 403, 429 or 5xx answer stays a warning, but one listed
+  in the optional `.github/link-exceptions.json`, with a reason and an
+  `expires` date, fails once that date has passed; **Repository integrity**
+  fails while the file is malformed or lists a URL that no Markdown file
+  links (#275).
 - **Repository integrity** cancels the run of a pull request commit that a
   newer commit replaces; a push run is never cancelled. CI runs
   `tools/check_repository.py` with `--ci`, which fails when, after the

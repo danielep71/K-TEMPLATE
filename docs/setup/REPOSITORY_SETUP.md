@@ -176,7 +176,7 @@ inherited policies may impose additional restrictions.
 | `tools/check_workbook_protection.py`, `tests/test_check_workbook_protection.py`, `tests/workbook_template.py` | **Keep** | Compares the protection of `src/workbook/Template.xlsx` with its protection matrix ([workbook contract](../methodology/WORKBOOK_CONTRACT.md#protection)), in **Repository integrity**. It passes while neither exists. |
 | `tools/format_vba.py`, `tests/test_format_vba.py` | **Keep** | Brings exported VBA source into the house-style layout with `--write`; **Repository integrity** runs `--check`. It passes while there is no VBA source. |
 | `tools/render_docs.py`, `tests/test_render_docs.py` | **Keep and evolve** | Renders the documentation blocks between `BEGIN generated` and `END generated` markers, such as the list of **Repository integrity** checks and the example suite's expected results; **Repository integrity** fails while one is stale. Add a renderer for each fact the project's code already knows, and run `--write` after changing it. |
-| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links and anchors in **Repository integrity**, external links weekly. |
+| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links, anchors and HTTPS in **Repository integrity**, external links weekly, with optional expiring exceptions in `.github/link-exceptions.json` ([maintain the baseline](#-maintain-the-baseline)). |
 | `docs/repo_governance/PULL_REQUESTS.md` | **Keep and adapt** | Final-head review procedure that the pull request template refers to. Adapt it if the project uses another automated reviewer. |
 | `.github/workflows/repository-integrity.yml` | **Keep and evolve** | Supplies the required `Repository integrity` check. Add project-specific checks as the project grows. |
 | GitHub **Template repository** setting | **Review separately** | Choose whether the new project should itself be reusable as a template; the setup script does not change this flag. |
@@ -299,12 +299,35 @@ ruff check tools tests
 mypy
 ```
 
-The tests already check every relative link and anchor. To also request the
-external links, as the weekly **Link check** workflow does:
+The tests already check every relative link and anchor, and that every
+external link uses HTTPS: a plain `http://` link in a Markdown link, a
+reference definition, an autolink or an HTML attribute fails **Repository
+integrity**; text in code spans and fenced blocks is not checked. To also
+request the external links, over HTTPS only, as the weekly **Link check**
+workflow does:
 
 ```sh
 python tools/check_links.py --external
 ```
+
+A 403, 429 or 5xx answer, or no answer, is a warning, because the site may
+only be busy or refuse automated requests. To keep such a link while you
+review it again later, list it in `.github/link-exceptions.json`, which the
+template does not ship; create it with the first exception:
+
+```json
+{
+  "schema_version": 1,
+  "exceptions": [
+    {"url": "https://example.org/page", "reason": "Answers 403 to automated requests", "expires": "2027-06-30"}
+  ]
+}
+```
+
+The `url` is the link without its `#fragment`. Up to and including the
+`expires` date the warning stays a warning; after it, the weekly check fails
+for that URL until you renew or remove the exception. **Repository integrity**
+fails while the file is malformed or lists a URL that no Markdown file links.
 
 Once setup tooling has been retired from a generated project, use that project's
 replacement validation and settings-maintenance process instead.
