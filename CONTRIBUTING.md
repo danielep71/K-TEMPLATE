@@ -116,6 +116,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `issue-contact-links` | Built in: The issue forms' contact links point to this repository. |
 | `readme-traffic-badges` | Built in: The README's traffic badges read this repository's traffic. |
 | `binaries` | `python tools/check_binaries.py` |
+| `secret-files` | Built in: No tracked file is named as a secret or private key file. |
 | `vba-format` | `python tools/format_vba.py --check` |
 | `vba-source` | `python tools/check_vba_source.py` |
 | `vba-conditionals` | `python tools/check_vba_conditionals.py` |

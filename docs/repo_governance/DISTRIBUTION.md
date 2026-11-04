@@ -66,7 +66,10 @@ git rev-list --all | xargs git grep -n -I -i -E 'PATTERN'
 Search for at least:
 
 - credentials: tokens, keys, passwords, connection strings and private
-  certificates;
+  certificates, and any file with a
+  [secret or key file name](../../SECURITY.md#%EF%B8%8F-data-and-secrets),
+  such as `.env`, `*.pem` or `id_rsa`, in any commit: **Repository
+  integrity** fails on such a file in the current tree only;
 - people: names, email addresses and user names other than your own;
 - organizations: employer, client, counterparty and vendor names, internal
   host names, paths and system identifiers;

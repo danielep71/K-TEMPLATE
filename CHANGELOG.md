@@ -63,6 +63,14 @@ milestones and their pull requests.
 
 ### Added
 
+- **Repository integrity** has a `secret-files` check: it fails on a tracked
+  file named as a secret or key file (`.env` and `.env.*` except
+  `.env.example`; `.pem`, `.key`, `.p12`, `.pfx`, `.pvk`, `.jks`,
+  `.keystore`; `id_rsa*` and `id_ed25519*` except their `.pub` keys;
+  `.kdbx`), also one force-added past `.gitignore`, and says to remove the
+  file, rotate the secret and follow *Handling a finding* in
+  `DISTRIBUTION.md`. `.gitignore` now ignores every one of these names
+  (#276).
 - `tools/check_vba_calls.py` checks VBA calls that resolve to a procedure of
   the project, in statements and in expressions, qualified or not: too many
   or too few arguments, counting `Optional`, `ParamArray` and named
