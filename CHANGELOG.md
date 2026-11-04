@@ -74,6 +74,14 @@ milestones and their pull requests.
   option or a removed tool fails until the guides follow; only the
   commands of a tool marked **Remove once run**, once it is deleted, are
   skipped (#273).
+- **Repository integrity** has a `secret-files` check: it fails on a tracked
+  file named as a secret or key file (`.env` and `.env.*` except
+  `.env.example`; `.pem`, `.key`, `.p12`, `.pfx`, `.pvk`, `.jks`,
+  `.keystore`; `id_rsa*` and `id_ed25519*` except their `.pub` keys;
+  `.kdbx`), also one force-added past `.gitignore`, and says to remove the
+  file, rotate the secret and follow *Handling a finding* in
+  `DISTRIBUTION.md`. `.gitignore` now ignores every one of these names
+  (#276).
 - `tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY
   [--milestone N] [--asset FILE=SHA256]` checks a published release through
   `gh`, read-only, and prints one line per fact: the tag is annotated and

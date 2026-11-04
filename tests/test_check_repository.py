@@ -108,6 +108,46 @@ class FileCheckTest(RepositoryTest):
         self.assertEqual(len(findings), 2)
         self.assertIn("omit the default branch trunk", findings[0][1])
 
+    def test_secret_files(self) -> None:
+        failing = {".env": ".env", "config/.env.local": ".env.*", ".ENV.production": ".env.*",
+                   "certs/server.pem": "*.pem", "tls.key": "*.key", "client.p12": "*.p12",
+                   "sign.PFX": "*.pfx", "code.pvk": "*.pvk", "store.jks": "*.jks",
+                   "release.keystore": "*.keystore", "keys/id_rsa": "id_rsa*",
+                   "id_rsa_deploy": "id_rsa*", "home/.ssh/id_ed25519": "id_ed25519*",
+                   "vault.kdbx": "*.kdbx", "tests/fixtures/CASE-01/base/.env": ".env"}
+        passing = (".env.example", "config/.env.example", "keys/id_rsa.pub",
+                   "id_ed25519.pub", "id_rsa_deploy.pub", ".envrc", "env.md", "keys.md",
+                   "docs/pem.txt", "tests/fixtures/CASE-01/base/input.csv")
+        # git add -f, as a force-added file bypasses .gitignore.
+        self.write(dict.fromkeys([*failing, *passing], "x\n"))
+        self.git("add", "-f", ".")
+        findings = check_repository.secret_files(self.context())
+        self.assertEqual(sorted(path for path, _ in findings), sorted(failing))
+        for path, message in findings:
+            with self.subTest(path=path):
+                self.assertIn(f"({failing[path]})", message)
+                self.assertIn("remove it from the repository, rotate the secret", message)
+                self.assertIn("Handling a finding in docs/repo_governance/DISTRIBUTION.md",
+                              message)
+
+    def test_gitignore_ignores_the_secret_file_names(self) -> None:
+        def ignored(path: str) -> bool:
+            return subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", "--no-index",
+                                   path], check=False).returncode == 0
+
+        for path in (".env", ".env.local", "a.pem", "a.key", "a.p12", "a.pfx", "a.pvk",
+                     "a.jks", "a.keystore", "id_rsa", "id_rsa_deploy", "id_ed25519", "a.kdbx"):
+            with self.subTest(path=path):
+                self.assertIsNotNone(check_repository.secret_pattern(path))
+                self.assertTrue(ignored(f"config/{path}"))
+        for path in (".env.example", "id_rsa.pub", "id_ed25519.pub"):
+            with self.subTest(path=path):
+                self.assertIsNone(check_repository.secret_pattern(path))
+                self.assertFalse(ignored(f"config/{path}"))
+
+    def test_repository_tracks_no_secret_file(self) -> None:
+        self.assertEqual(check_repository.secret_files(Context(ROOT)), [])
+
     def test_required_documents(self) -> None:
         self.write({"README.md": "x\n", "LICENSE": "",
                     "docs/repo_governance/SETTINGS.md": "x\n"})
@@ -261,8 +301,8 @@ class RunTest(RepositoryTest):
         self.commit()
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
-        for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "vba-format",
-                         "vba-calls", "data-contract", "test-cases", "derivations",
+        for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "secret-files",
+                         "vba-format", "vba-calls", "data-contract", "test-cases", "derivations",
                          "independent-implementations", "workbook-protection",
                          "changelog", "generated-docs", "markdown-links", "documented-commands",
                          "codeql-default-branch", "whitespace-committed"):

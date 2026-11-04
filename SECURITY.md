@@ -111,6 +111,17 @@ you can tell intended behaviour from a vulnerability.
   project. Inspect a workbook before you share it, as the
   [distribution review](docs/repo_governance/DISTRIBUTION.md#-workbooks)
   describes.
+- Keep secret and key files out of the repository. `.gitignore` ignores them,
+  but `git add -f` bypasses it, so **Repository integrity** also fails on a
+  tracked file with one of these names, in any directory and in any letter
+  case:
+  - `.env` and `.env.*`, except `.env.example`;
+  - `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.pvk`, `*.jks` and `*.keystore`;
+  - `id_rsa*` and `id_ed25519*`, except their `.pub` public keys;
+  - `*.kdbx`.
+
+  The check looks at names only, and secret scanning matches known token
+  patterns, so neither proves that a file holds no secret.
 - If a secret, such as a token, password or key, has leaked in a file, a
   workbook, the history, an issue or a log, revoke or rotate it first, then
   report it. Deleting it does not undo its exposure

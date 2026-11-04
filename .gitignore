@@ -209,6 +209,15 @@ Icon[[:cntrl:]]
 *.pvk
 *.key
 *.pem
+*.jks
+*.keystore
+*.kdbx
+
+# Private SSH keys; their public halves remain trackable.
+id_rsa*
+id_ed25519*
+!id_rsa*.pub
+!id_ed25519*.pub
 
 
 #------------------------------------------------------------------------------
