@@ -34,8 +34,8 @@ always checked, even when its value is attached as a placeholder
 (``--name=<value>``, ``-x$VALUE``); only a token whose name is itself a
 placeholder, such as ``--<option>`` or ``<options>``, is skipped. A
 placeholder where a subcommand belongs ends the check of that command. A
-shell operator (``|``, ``&&``, ``;``, a redirection) or a ``#`` comment
-ends a command. The dated sections of CHANGELOG.md are skipped: they are
+shell operator (``|``, ``&&``, ``;``, a redirection), with or without
+spaces around it, or a ``#`` comment ends a command. The dated sections of CHANGELOG.md are skipped: they are
 not rewritten once released. A tool that the setup guide marks **Remove
 once run** is checked while it is tracked; once it is deleted, the commands
 that cite it are skipped, because the guides keep recording how the
@@ -60,12 +60,14 @@ SHELL_FENCES = frozenset({"", "sh", "bash", "shell", "zsh", "console", "terminal
                           "batch"})
 BLOCK_START = re.compile(r"\s*$|\s*(#|>|\||[-*+]\s|\d+[.)]\s)")
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
-TOKEN = re.compile(r"""(?:"[^"]*"|'[^']*'|[^\s"'])+""")
+# A word, quoted parts and placeholders such as ``<folder>`` included, or an
+# unquoted shell operator, which needs no spaces around it (``--check;``,
+# ``2>&1``).
+TOKEN = re.compile(r"""(?:"[^"]*"|'[^']*'|<[^\s<>|&;]+>|[^\s"'|&;<>])+|[|&;<>]+\d?""")
+OPERATOR = re.compile(r"[|&;<>]+\d?")
 INTERPRETER = re.compile(r"(?:python(?:3(?:\.\d+)?)?|py)(?:\.exe)?", re.I)
 # Interpreter options that take a value.
 INTERPRETER_VALUES = frozenset({"-X", "-W"})
-OPERATORS = frozenset({"|", "||", "&&", ";", "&", "<", "<<"})
-REDIRECTION = re.compile(r"\d?>|&>")
 CONTINUATIONS = ("\\", "`")
 PLACEHOLDER = re.compile(r"[<>{}\[\]$*…]|\.\.\.|^[A-Z][A-Z0-9_./-]*$")
 # Released sections are not rewritten (the changelog's maintenance policy),
@@ -469,7 +471,7 @@ def split_tokens(code: str) -> list[str]:
 
 def command_end(tokens: Sequence[str], start: int) -> int:
     for index in range(start, len(tokens)):
-        if tokens[index] in OPERATORS or REDIRECTION.match(tokens[index]):
+        if OPERATOR.fullmatch(tokens[index]):
             return index
     return len(tokens)
 

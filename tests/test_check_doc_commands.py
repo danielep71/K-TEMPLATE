@@ -195,6 +195,20 @@ class CommandTests(unittest.TestCase):
         self.assertEqual([finding.split(":")[1] for finding in run_check(guide(text, run=TOOL))],
                          ["2", "7", "12"])
 
+    def test_shell_operators_end_a_command_without_spaces(self) -> None:
+        text = """\
+            ```sh
+            python tools/run.py out --commit abc --check; echo --done
+            python tools/run.py out --commit abc|grep --count x
+            python tools/run.py out --commit abc&&echo --ok
+            python tools/run.py out --commit abc 2>&1 >log.txt
+            python tools/run.py <folder> --commit=<sha> --write>out.txt
+            python tools/run.py out --commit abc --gone;
+            ```
+            """
+        self.assertEqual(run_check(guide(text, run=TOOL)), [
+            "GUIDE.md:7: `python tools/run.py out --commit abc --gone`: unknown option --gone"])
+
     def test_other_languages_prose_and_released_history_are_skipped(self) -> None:
         self.assertEqual(run_check({
             **guide("""\
