@@ -464,9 +464,25 @@ def snippets(text: str) -> Iterator[tuple[int, str]]:
 
 
 def split_tokens(code: str) -> list[str]:
-    code = re.sub(r"(^|\s)#.*", "", code)
-    return [token.replace('"', "").replace("'", "") for token in TOKEN.findall(code)
-            if token not in CONTINUATIONS]
+    """The words and operators of a snippet, without quotes and comments.
+
+    A ``#`` starts a comment only where a word starts, outside quotes; the
+    comment ends with its line.
+    """
+    tokens: list[str] = []
+    comment_end = -1
+    for match in TOKEN.finditer(code):
+        token, start = match.group(), match.start()
+        if start < comment_end:
+            continue
+        if token.startswith("#") and (start == 0 or code[start - 1].isspace()
+                                      or code[start - 1] in "|&;<>"):
+            newline = code.find("\n", start)
+            comment_end = len(code) if newline < 0 else newline
+            continue
+        if token not in CONTINUATIONS:
+            tokens.append(token.replace('"', "").replace("'", ""))
+    return tokens
 
 
 def command_end(tokens: Sequence[str], start: int) -> int:

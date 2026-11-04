@@ -209,6 +209,21 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(run_check(guide(text, run=TOOL)), [
             "GUIDE.md:7: `python tools/run.py out --commit abc --gone`: unknown option --gone"])
 
+    def test_a_hash_is_a_comment_only_where_a_word_starts(self) -> None:
+        text = """\
+            ```sh
+            python tools/run.py "a # b" --commit abc --quoted
+            python tools/run.py 'a # b' --commit abc --single
+            python tools/run.py a#b --commit abc --inside
+            python tools/run.py out --commit abc # --ignored
+            python tools/run.py out --commit abc;# --ignored
+            python tools/run.py out --commit abc --next-line
+            ```
+            """
+        self.assertEqual([finding.split(": ")[-1] for finding in run_check(guide(text, run=TOOL))],
+                         ["unknown option --quoted", "unknown option --single",
+                          "unknown option --inside", "unknown option --next-line"])
+
     def test_other_languages_prose_and_released_history_are_skipped(self) -> None:
         self.assertEqual(run_check({
             **guide("""\
