@@ -43,7 +43,7 @@ Attribute VB_Name = "TEST_Examples"
 '   instead (INSTALLATION.md, Recording an Excel run).
 '
 ' UPDATED
-'   2026-11-03
+'   2026-11-04
 '
 ' AUTHOR
 '   Daniele Penza
@@ -61,8 +61,8 @@ Attribute VB_Name = "TEST_Examples"
 '------------------------------------------------------------------------------
     'A complete run starts every case and evaluates every assertion once.
         Private Const SUITE_NAME              As String = "examples"
-        Private Const EXPECTED_CASES          As Long = 13
-        Private Const EXPECTED_ASSERTIONS     As Long = 30
+        Private Const EXPECTED_CASES          As Long = 14
+        Private Const EXPECTED_ASSERTIONS     As Long = 34
     'Errors of the example procedures, test-only, as literals equal to
     'vbObjectError + n (see TEST_Harness, Module constants).
         Private Const ERR_EXAMPLE_INVALID     As Long = &H80040FF0   'vbObjectError + 4080: Input outside the domain
@@ -98,14 +98,14 @@ Public Sub RunExampleTests( _
 ' PURPOSE
 '   Run the example suite. A passing run ends with
 '   RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE;
-'   cases=13; assertions=30; failures=0; cleanup=PASS; recovery=NONE.
+'   cases=14; assertions=34; failures=0; cleanup=PASS; recovery=NONE.
 '
 ' INPUTS
 '   Fixtures: the full path of tests/fixtures/ in the checkout, without a
 '   trailing separator.
 '
 ' UPDATED
-'   2026-11-03
+'   2026-11-04
 '==============================================================================
 '
         RunSuite "NORMAL", Fixtures
@@ -121,14 +121,14 @@ Public Sub RunExampleTestsWithInjectedFailure( _
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Show the failure path: exact-double expects a wrong value. Expected
-'   end: RESULT=FAIL; ...; operation=FAIL; completeness=COMPLETE; cases=13;
-'   assertions=30; failures=1, then the error ERR_TEST_FAILED.
+'   end: RESULT=FAIL; ...; operation=FAIL; completeness=COMPLETE; cases=14;
+'   assertions=34; failures=1, then the error ERR_TEST_FAILED.
 '
 ' INPUTS
 '   Fixtures: as RunExampleTests.
 '
 ' UPDATED
-'   2026-11-03
+'   2026-11-04
 '==============================================================================
 '
         RunSuite "INJECTED_FAILURE", Fixtures
@@ -145,14 +145,14 @@ Public Sub RunExampleTestsWithSkippedCase( _
 ' PURPOSE
 '   Show that an incomplete run is never a pass: the last case is skipped.
 '   Expected end: RESULT=FAIL; ...; operation=PASS;
-'   completeness=INCOMPLETE; cases=12; assertions=28; failures=1, the
+'   completeness=INCOMPLETE; cases=13; assertions=32; failures=1, the
 '   failure being harness.completeness, then ERR_TEST_FAILED.
 '
 ' INPUTS
 '   Fixtures: as RunExampleTests.
 '
 ' UPDATED
-'   2026-11-03
+'   2026-11-04
 '==============================================================================
 '
         RunSuite "SKIPPED_CASE", Fixtures
@@ -190,12 +190,13 @@ Public Sub CertifyExamples( _
 '   The error that ends each run is recorded, not raised, so that every log
 '   is written. EndCertification raises ERR_TEST_FAILED after writing
 '   certification.log when the certification did not pass. A refused start
-'   raises TEST_Harness.ERR_TEST_DIRTY_START before any run. An error of
-'   SaveLog or SaveResults propagates; run TEST_Harness.ResetTests before
-'   trying again.
+'   raises, before any run, TEST_Harness.ERR_TEST_DIRTY_START when a run is
+'   active or recovery is required, or TEST_Harness.ERR_TEST_USAGE while an
+'   earlier certification is still active. An error of SaveLog or
+'   SaveResults propagates; run TEST_Harness.ResetTests before trying again.
 '
 ' UPDATED
-'   2026-11-03
+'   2026-11-04
 '==============================================================================
 '
         TEST_Harness.BeginCertification SUITE_NAME
@@ -235,7 +236,7 @@ Private Sub RunSuite( _
 '   and re-raises it unchanged. BeginRun's refusal propagates directly.
 '
 ' UPDATED
-'   2026-10-24
+'   2026-11-04
 '==============================================================================
 '
 
@@ -264,6 +265,7 @@ Private Sub RunSuite( _
         CaseCleanupKeepsPrimaryError
         CaseCleanupPartialCapture
         CaseCleanupChangeFailure
+        CaseCleanupPrimaryOnly
         CaseCleanupEachRestorationFailure
         If mMode <> "SKIPPED_CASE" Then
             CaseCleanupOnlyFailure
@@ -733,6 +735,55 @@ Private Sub CaseCleanupChangeFailure()
         TEST_Harness.AssertRaised "change-error", ERR_EXAMPLE_HOST, RaisedError
         TEST_Harness.AssertTrue "calculation-restore-attempted", _
             InStr(Details, "Calculation not restored") > 0, "details='" & Details & "'"
+        TEST_Harness.AssertTrue "screen-updating-restored", _
+            Application.ScreenUpdating = SavedScreen, "ScreenUpdating differs after the operation"
+        Exit Sub
+
+CaseFailed:
+        TEST_Harness.RecordCaseError
+
+End Sub
+
+
+Private Sub CaseCleanupPrimaryOnly()
+'
+'==============================================================================
+'                            CaseCleanupPrimaryOnly
+'------------------------------------------------------------------------------
+' PURPOSE
+'   When only the operation fails and every restoration succeeds, the
+'   caller receives the primary error, no cleanup failure is reported and
+'   both settings are restored: a failed operation stays failed even if its
+'   cleanup succeeded. 4 assertions.
+'
+' UPDATED
+'   2026-11-04
+'==============================================================================
+'
+
+'------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Dim Details            As String           'Cleanup failures reported by the operation
+    Dim RaisedError        As Long             'Err.Number right after the call
+    Dim SavedCalculation   As XlCalculation    'Calculation before the operation
+    Dim SavedScreen        As Boolean          'ScreenUpdating before the operation
+
+'------------------------------------------------------------------------------
+' RUN CASE
+'------------------------------------------------------------------------------
+        On Error GoTo CaseFailed
+        TEST_Harness.BeginCase "cleanup-primary-only"
+        SavedCalculation = Application.Calculation
+        SavedScreen = Application.ScreenUpdating
+        On Error Resume Next
+        RunExampleOperation "work", False, False, Details
+        RaisedError = Err.Number
+        On Error GoTo CaseFailed
+        TEST_Harness.AssertRaised "primary-error", ERR_EXAMPLE_OPERATION, RaisedError
+        TEST_Harness.AssertEqualText "no-cleanup-failure", vbNullString, Details
+        TEST_Harness.AssertTrue "calculation-restored", _
+            Application.Calculation = SavedCalculation, "Calculation differs after the operation"
         TEST_Harness.AssertTrue "screen-updating-restored", _
             Application.ScreenUpdating = SavedScreen, "ScreenUpdating differs after the operation"
         Exit Sub

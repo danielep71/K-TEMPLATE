@@ -51,6 +51,7 @@ KNOWN_FAILURES = frozenset({
     "cleanup-keeps-primary-error/primary-error",
     "cleanup-partial-capture/capture-error",
     "cleanup-change-failure/change-error",
+    "cleanup-primary-only/primary-error",
     "cleanup-each-restoration-failure/calculation-cleanup-error",
     "cleanup-each-restoration-failure/screen-cleanup-error",
     "cleanup-only-failure/cleanup-error",

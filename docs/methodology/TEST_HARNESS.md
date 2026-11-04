@@ -39,10 +39,10 @@ the checkout, from which its results case reads the illustrative test cases:
 
 | Outcome | Values | Meaning |
 | --- | --- | --- |
-| `operation` | `PASS`, `FAIL`, `ERROR` | What ran: every assertion passed, an assertion or a case identifier failed, or an unexpected error occurred |
+| `operation` | `PASS`, `FAIL`, `ERROR`, `NOT_RUN` | What ran: every assertion passed, an assertion or a case identifier failed, or an unexpected error occurred; `NOT_RUN` when the start was refused |
 | `completeness` | `COMPLETE`, `INCOMPLETE` | `COMPLETE` only when both expected counts were met exactly. A skipped case is `INCOMPLETE`, whatever the cases that ran did ([completeness policy](TEST_CASES.md#completeness-policy)) |
-| `cleanup` | `PASS`, `FAIL` | Whether Excel's state is as it was at `BeginRun`: `Calculation`, `DisplayAlerts`, `EnableEvents`, `ScreenUpdating`, the number of open workbooks and the active window |
-| `recovery` | `NONE`, `REQUIRED` | `REQUIRED` when cleanup failed or could not be checked, or when a run was interrupted |
+| `cleanup` | `PASS`, `FAIL`, `NOT_RUN` | Whether Excel's state is as it was at `BeginRun`: `Calculation`, `DisplayAlerts`, `EnableEvents`, `ScreenUpdating`, the number of open workbooks and the active window; `NOT_RUN` when the start was refused |
+| `recovery` | `NONE`, `REQUIRED` | `REQUIRED` when cleanup failed or could not be checked, or when a run was interrupted while the project kept its state (see below) |
 
 `RESULT=PASS` needs `operation=PASS`, `COMPLETE`, cleanup `PASS` and no
 recovery. Any other run raises `ERR_TEST_FAILED`, or the unexpected error that
@@ -51,6 +51,17 @@ escaped the runner, only after its summary is logged.
 A run that starts while another is active, or while recovery is required, is
 refused with `ERR_TEST_DIRTY_START`. Check Excel's state by hand, then type
 `TEST_Harness.ResetTests`; it restores nothing itself.
+
+The harness keeps its state in module variables, which a project reset
+clears. A run stopped with **End** in an error dialog, or with **Run →
+Reset** in the VBE, therefore leaves no active run and no recovery flag: the
+stop is not detected, and the next run starts normally and takes Excel's
+state as it finds it as its baseline. Every runner traps its own errors, so
+a run that stops early has usually been stopped this way. After such a stop,
+check by hand, before the next run, the four settings the cleanup compares
+(`Calculation`, `DisplayAlerts`, `EnableEvents`, `ScreenUpdating`), the open
+workbooks and the active window, and put back anything the stopped run
+changed ([running the harness](../../INSTALLATION.md#running-the-harness)).
 
 ## Modes and certification
 
@@ -252,7 +263,8 @@ follows these conventions; the template ships none:
 ## Log format
 
 One record per line, `KEY=value`, with further fields separated by `; `.
-`RUN` and `ENVIRONMENT` come first; `CASE`, `ASSERT`, `ERROR` and `FAILURE`
+`RUN` and `ENVIRONMENT` come first, except after a refused start (below);
+`CASE`, `ASSERT`, `ERROR` and `FAILURE`
 follow as the run reaches them; the summary records come last, in the order
 of the table:
 
@@ -271,11 +283,15 @@ of the table:
 | `RECOVERY=NONE` or `REQUIRED` | `reason`, `action`, when required |
 | `RESULT=PASS` or `FAIL` | `suite`, `operation`, `completeness`, `cases`, `assertions`, `failures`, `cleanup`, `recovery` |
 
-`RESULT` is always the last record of a run. A refused start writes a
-`RESULT=FAIL` with `operation=NOT_RUN` and a `RECOVERY=REQUIRED` record, and
-`ResetTests` writes `RESET=DONE`. Case identifiers and assertion names are
-fixed in the suite's source, so two logs of the same commit can be compared
-line by line, apart from `started` and `ENVIRONMENT`.
+`RESULT` is always the last record of a run. A start that `BeginRun`
+refuses writes only two records, after those the log already holds: a
+`RECOVERY=REQUIRED` with its `reason` and `action`, then
+`RESULT=FAIL; suite=<suite>; operation=NOT_RUN; completeness=INCOMPLETE; cases=0; assertions=0; failures=0; cleanup=NOT_RUN; recovery=REQUIRED`,
+with no `RUN` or `ENVIRONMENT`. A start that `BeginCertification` refuses
+writes no record. `ResetTests` writes `RESET=DONE`. Case identifiers and
+assertion names are fixed in the suite's source, so two logs of the same
+commit can be compared line by line, apart from `started` and
+`ENVIRONMENT`.
 
 ## Certification log
 

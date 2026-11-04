@@ -187,8 +187,11 @@ integrity** reports its findings as a warning, not a failure.
 
 What they cannot prove:
 
-- they neither compile nor run VBA, and only the call check resolves calls,
-  by name: a call made through a variable or an object is missed;
+- they neither compile nor run VBA, and they resolve calls by name only: a
+  call made through a variable or an object is missed. The identifier check
+  resolves the names of statement-level calls only; only the call check
+  resolves qualified calls and calls inside an expression, and checks
+  arguments;
 - they check the three compilation environments statically, not on a 32-bit
   or 64-bit host;
 - a private procedure name may repeat across modules, as VBA allows; only a

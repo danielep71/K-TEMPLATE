@@ -399,6 +399,25 @@ milestones and their pull requests.
 
 ### Fixed
 
+- The VBA harness guides, module headers and pull request template agree
+  with the code. The example suite has a `cleanup-primary-only` case, in
+  which only the operation fails and every restoration succeeds: the primary
+  error reaches the caller, no cleanup failure is reported and both settings
+  are restored. The suite now has 14 cases and 34 assertions, and the
+  evidence policy, the installation guide and the LibreOffice smoke test
+  follow; the case has not run in Excel. The installation and harness
+  guides say that **End** or **Reset** in the VBE clears the run state, so
+  that stop is not detected, and what to check by hand afterwards, and the
+  harness guide gives the two records of a refused start, with
+  `operation=NOT_RUN` and `cleanup=NOT_RUN`. The host behaviour register has
+  `HB-05`, still `assumed`, for Excel compiling a project written from
+  source when the workbook opens, cited where the guides and tools rely on
+  it; `tools/devbuild/excel_run.py` cites `HB-03` and `HB-04`, and the
+  `HB-02` host records that its channel was not noted. The import steps
+  include `examples/modules/`, the build is said to leave forms out, the
+  house style says what the call and identifier checks each resolve, and the
+  pull request template and guide admit `compile=ON_DEMAND` and ask for the
+  host record's `outcome` of a run that stopped early (#285).
 - The methodology guides agree with their illustrative example and the
   tools. `CALC-01` sums the notional amounts of the whole calculation, as its
   data, cases and derivations do, and the support matrix's *Supported* means

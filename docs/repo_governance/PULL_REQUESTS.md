@@ -42,9 +42,12 @@ or a test case that runs in Excel keeps the template's *Excel run* block, and
 records a run on the exact commit of the pull request:
 
 - the commit, the Excel build and bitness, and the Windows version;
-- whether **Debug → Compile VBAProject** passed;
+- whether **Debug → Compile VBAProject** passed, or `ON_DEMAND` as the
+  one-command run records it;
 - the suite and its mode, and where the log is;
-- the completion state:
+- the completion state, with the `outcome` of the
+  [host record](../methodology/TEST_HARNESS.md#host-record) when the run
+  stopped early:
 
 | State | Meaning |
 | --- | --- |
