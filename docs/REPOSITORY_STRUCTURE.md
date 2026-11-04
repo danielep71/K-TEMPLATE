@@ -14,8 +14,8 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | Location | Holds | In the template |
 | --- | --- | --- |
 | `.github/` | Workflows, issue forms, labels and Dependabot configuration | Present |
-| `docs/` | Governance, setup, structure, style and the API inventory | Present |
-| `docs/methodology/` | Sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format and [workbook contract](methodology/WORKBOOK_CONTRACT.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
+| `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
+| `docs/methodology/` | The [index](methodology/README.md) of the guides: sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format, [workbook contract](methodology/WORKBOOK_CONTRACT.md) and [VBA test harness](methodology/TEST_HARNESS.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
 | `docs/methodology/sources/` | Byte-preserved copies of regulatory sources | Reserved |
 | `docs/methodology/workbook-protection.json` | The [protection matrix](methodology/WORKBOOK_CONTRACT.md#protection) of `src/workbook/Template.xlsx`, added with the template | Reserved |
 | `docs/user-manual/` | Optional manual for workbook recipients, one folder per released version (`docs/user-manual/X.Y.Z/MANUAL.md`), built to the PDF attached to the release ([user manual](../RELEASING.md#user-manual)) | Reserved |

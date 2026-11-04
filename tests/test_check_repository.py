@@ -7,6 +7,7 @@ list, so that the test suite never runs itself.
 from __future__ import annotations
 
 import contextlib
+import importlib.util
 import io
 import json
 import os
@@ -24,6 +25,11 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import check_repository  # noqa: E402
 from check_repository import Check, Context  # noqa: E402
+
+# The checks that read YAML need PyYAML, which CI always installs.
+NEEDS_YAML = unittest.skipIf(
+    importlib.util.find_spec("yaml") is None and not os.environ.get("GITHUB_ACTIONS"),
+    "PyYAML is not installed: python -m pip install -r .github/requirements.txt")
 
 
 @unittest.skipIf(shutil.which("git") is None, "git is not installed")
@@ -98,6 +104,7 @@ class FileCheckTest(RepositoryTest):
                          ["target-branch release/0.9.0 does not exist; set it to the active "
                           "release branch or remove it."])
 
+    @NEEDS_YAML
     def test_codeql_default_branch(self) -> None:
         self.write({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
                     ".github/workflows/codeql.yml":
@@ -221,6 +228,7 @@ class RunTest(RepositoryTest):
         self.assertEqual((out / "summary.md").read_text(encoding="utf-8"),
                          text.removeprefix("before\n"))
 
+    @NEEDS_YAML
     def test_a_check_that_raises_fails_and_the_run_continues(self) -> None:
         self.commit({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
                      ".github/workflows/codeql.yml": "on:\n  push: {}\n  push: {}\n"})
@@ -245,6 +253,27 @@ class RunTest(RepositoryTest):
         code, _, report = self.run_checks(listed, strict=True)
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "fail")
+
+    def test_codeql_default_branch_without_pyyaml_is_skipped_unless_strict(self) -> None:
+        self.commit({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
+                     ".github/workflows/codeql.yml": "on:\n  push:\n    branches: [main]\n"})
+        reason = "PyYAML is not installed (.github/requirements.txt)"
+        # Block PyYAML, and the loader that imports it, as if neither were installed.
+        with mock.patch.dict(sys.modules, {"yaml": None}):
+            sys.modules.pop("strict_yaml", None)
+            listed = [check for check in check_repository.checks(self.context())
+                      if check.name == "codeql-default-branch"]
+            code, printed, report = self.run_checks(listed)
+            self.assertEqual(code, 0, printed)
+            self.assertIn(f"codeql-default-branch: SKIP ({reason})", printed)
+            self.assertEqual(report["checks"][0]["status"], "skip")
+            code, printed, report = self.run_checks(listed, strict=True)
+            self.assertEqual(code, 1, printed)
+            self.assertEqual(report["checks"][0]["status"], "fail")
+            unknown = {check.name: check.missing
+                       for check in check_repository.checks(self.context(default_branch=None))}
+            self.assertEqual(unknown["codeql-default-branch"],
+                             f"the default branch is unknown (--default-branch); {reason}")
 
     def test_ci_fails_a_working_tree_that_differs_from_the_commit(self) -> None:
         self.commit({".gitignore": "/test-results/\n", "README.md": "x\n"})
