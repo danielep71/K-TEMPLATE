@@ -118,6 +118,18 @@ class CommandTests(unittest.TestCase):
             "GUIDE.md:1: `python tools/run.py out --commit abc --require-binding -x`: "
             "unknown option -x",
         ])
+        # A placeholder or variable as the attached value does not hide the option's name.
+        attached = run_check(guide("""\
+            `python tools/run.py out --commit=<commit> --require-bindng=${BINDING}`
+            `python tools/run.py out --commit abc --require-bindng=<binding> -x<value>`
+            `python tools/run.py out --commit=$COMMIT -q -v --check`
+            """, run=TOOL))
+        self.assertEqual([finding.split(": ", 2)[-1] for finding in attached],
+                         ["unknown option --require-bindng", "unknown option --require-bindng",
+                          "unknown option -x<value>"])
+        # Only a name that is itself a placeholder is skipped.
+        self.assertEqual(run_check(guide("`python tools/run.py out --commit a --<option> "
+                                         "<options>`\n", run=TOOL)), [])
         # An abbreviation argparse would accept is reported: it is not the option's name.
         self.assertEqual(len(run_check(guide("`python tools/run.py --comm abc`\n", run=TOOL))), 1)
 

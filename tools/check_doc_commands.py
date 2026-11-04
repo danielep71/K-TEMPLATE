@@ -29,10 +29,14 @@ defined elsewhere, or more than one parser that parses arguments. A script
 that builds no parser accepts only arguments that are not options.
 
 Values, positional arguments and placeholders such as ``<folder>``,
-``X.Y.Z`` or ``OWNER/REPOSITORY`` are not checked; a placeholder where a
-subcommand belongs ends the check of that command. A shell operator (``|``,
-``&&``, ``;``, a redirection) or a ``#`` comment ends a command. The dated
-sections of CHANGELOG.md are skipped: they are not rewritten once released.
+``X.Y.Z`` or ``OWNER/REPOSITORY`` are not checked. An option's name is
+always checked, even when its value is attached as a placeholder
+(``--name=<value>``, ``-x$VALUE``); only a token whose name is itself a
+placeholder, such as ``--<option>`` or ``<options>``, is skipped. A
+placeholder where a subcommand belongs ends the check of that command. A
+shell operator (``|``, ``&&``, ``;``, a redirection) or a ``#`` comment
+ends a command. The dated sections of CHANGELOG.md are skipped: they are
+not rewritten once released.
 """
 
 from __future__ import annotations
@@ -337,6 +341,12 @@ def skip_values(option: Option, tokens: Sequence[str], index: int) -> int:
     return end
 
 
+def option_name(token: str) -> str:
+    """The name an option token is written with, without a value attached to it:
+    --name=VALUE gives --name, and a short -xVALUE gives -x."""
+    return token.split("=", 1)[0] if token.startswith("--") else token[:2]
+
+
 def find_option(parser: Parser, token: str) -> tuple[Option | None, bool]:
     """The option a token names, and whether its value is attached to it."""
     name, attached = token.split("=", 1)[0], "=" in token
@@ -364,7 +374,8 @@ def check_arguments(parser: Parser | None, tokens: Sequence[str]) -> list[str]:
         if tokens[index - 1] == "--":
             break
         if is_option(token):
-            if PLACEHOLDER.search(token):
+            if PLACEHOLDER.search(option_name(token)):
+                # The name itself is a placeholder, such as --<option>.
                 continue
             if parser is None:
                 problems.append(f"{token}: the script defines no argparse option")
