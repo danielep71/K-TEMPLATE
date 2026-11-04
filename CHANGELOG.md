@@ -63,6 +63,18 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY
+  [--milestone N] [--asset FILE=SHA256]` checks a published release through
+  `gh`, read-only, and prints one line per fact: the tag is annotated and
+  points at the commit its `Candidate` line names, **Repository integrity**
+  succeeded on it, the release is published and not a draft, its assets are
+  exactly the source bundle, `SHA256SUMS` and each `--asset`, with the
+  SHA-256 values that `SHA256SUMS` and `--asset` record, `gh attestation
+  verify` passes on the bundle, and the milestone is closed with no open
+  issue. It fails on any of these. `RELEASING.md` step 7, the milestone
+  closeout and the release certification now use it; the download, the
+  unblock and the Excel checks of a published workbook stay manual (#274).
+
 - `tools/initialize_repository.py` adapts a repository created from the
   template in one diff: it deletes the template-only section of `AGENTS.md`,
   points the contact links and the traffic badges at the new repository, or
