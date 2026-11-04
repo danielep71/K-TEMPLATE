@@ -36,7 +36,10 @@ placeholder, such as ``--<option>`` or ``<options>``, is skipped. A
 placeholder where a subcommand belongs ends the check of that command. A
 shell operator (``|``, ``&&``, ``;``, a redirection) or a ``#`` comment
 ends a command. The dated sections of CHANGELOG.md are skipped: they are
-not rewritten once released.
+not rewritten once released. A tool that the setup guide marks **Remove
+once run** is checked while it is tracked; once it is deleted, the commands
+that cite it are skipped, because the guides keep recording how the
+repository was set up.
 """
 
 from __future__ import annotations
@@ -69,6 +72,8 @@ PLACEHOLDER = re.compile(r"[<>{}\[\]$*…]|\.\.\.|^[A-Z][A-Z0-9_./-]*$")
 # so the commands they cite stay as released.
 HISTORY = {"CHANGELOG.md": re.compile(r"^## \[\d", re.M)}
 TOOLS = "tools/"
+# The tools that docs/setup/REPOSITORY_SETUP.md marks **Remove once run**.
+REMOVED_ONCE_RUN = frozenset({"tools/initialize_repository.py"})
 NO_VALUE = frozenset({"store_true", "store_false", "store_const", "append_const", "count",
                       "help", "version"})
 PARSE = frozenset({"parse_args", "parse_known_args", "parse_intermixed_args",
@@ -557,6 +562,8 @@ def check(root: Path = ROOT) -> tuple[list[Finding], int, int]:
         for line, code in snippets(text):
             for command in commands(code):
                 if command[0] == "module" and not module_script(command[1], tracked)[0]:
+                    continue
+                if command[1] in REMOVED_ONCE_RUN and command[1] not in tracked:
                     continue
                 count += 1
                 findings += command_findings(root, tracked, scripts, name, line, command)

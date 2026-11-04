@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -147,6 +148,12 @@ class CommandTests(unittest.TestCase):
         self.assertEqual([finding.message for finding in findings],
                          ["`python tools/run.py --check`: tools/run.py is not a tracked file"])
 
+    def test_a_tool_removed_once_run_is_skipped_only_once_deleted(self) -> None:
+        cited = "`python tools/initialize_repository.py --gone`\n"
+        self.assertEqual(run_check({"GUIDE.md": cited}), [])
+        self.assertEqual(run_check({"GUIDE.md": cited, "tools/initialize_repository.py": TOOL}), [
+            "GUIDE.md:1: `python tools/initialize_repository.py --gone`: unknown option --gone"])
+
     def test_subcommands_and_their_options(self) -> None:
         tools = {"traffic": SUBCOMMANDS}
         self.assertEqual(run_check(guide("""\
@@ -245,6 +252,13 @@ class RepositoryTests(unittest.TestCase):
             code = check_doc_commands.main(["--root", str(ROOT)])
         self.assertEqual(code, 0, output.getvalue())
         self.assertIn("documented-commands: PASS", output.getvalue())
+
+    def test_removed_once_run_matches_the_setup_guide(self) -> None:
+        guide_text = (ROOT / "docs/setup/REPOSITORY_SETUP.md").read_text(encoding="utf-8")
+        rows = [row.split("|")[1] for row in guide_text.splitlines()
+                if row.startswith("|") and "| **Remove once run** |" in row]
+        tools = {name for row in rows for name in re.findall(r"`(tools/[^`]+\.py)`", row)}
+        self.assertEqual(tools, set(check_doc_commands.REMOVED_ONCE_RUN))
 
     def test_every_tool_parser_is_readable(self) -> None:
         for path in sorted((ROOT / "tools").rglob("*.py")):

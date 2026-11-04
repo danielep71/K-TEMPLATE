@@ -71,7 +71,9 @@ milestones and their pull requests.
   importing or running it. It joins continued lines, skips placeholders
   such as `<folder>` and `X.Y.Z`, and reports a parser it cannot read
   instead of passing it. **Repository integrity** runs it, so a renamed
-  option or a removed tool fails until the guides follow (#273).
+  option or a removed tool fails until the guides follow; only the
+  commands of a tool marked **Remove once run**, once it is deleted, are
+  skipped (#273).
 - `tools/initialize_repository.py` adapts a repository created from the
   template in one diff: it deletes the template-only section of `AGENTS.md`,
   points the contact links and the traffic badges at the new repository, or
