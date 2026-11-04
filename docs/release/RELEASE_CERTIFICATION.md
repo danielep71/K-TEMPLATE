@@ -67,6 +67,12 @@ What was checked by hand, by whom, against which independent values. Write
 | `<repository>-X.Y.Z-user-manual.pdf`, or None when the repository keeps no [user manual](../../RELEASING.md#user-manual) | | `docs/user-manual/X.Y.Z/` at the candidate, with the PDF tool and its version |
 | None, or each other file attached to the GitHub Release, such as the production workbook | | Candidate commit |
 
+### Published release
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `tools/release.py verify-published vX.Y.Z --milestone N`, with an `--asset` for each other file of *Artifacts* (RELEASING.md step 7) | `release-verify-published: PASS`, or each `FAIL` line; a `NOTE` on an unattested bundle is a deviation | Its output |
+
 ### Published workbook
 
 The checks of RELEASING.md step 8, after publication. Write

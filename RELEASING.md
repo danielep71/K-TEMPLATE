@@ -219,19 +219,41 @@ Review the draft release that the **Release** workflow created. Title it
 `vX.Y.Z - <milestone title>`, and add the evidence summary to its notes.
 Attach any other artifact the certification record lists, such as the
 production workbook built from the candidate or the
-[user manual](#user-manual) PDF, with its SHA-256. Then publish it. When the bundle is attested,
-check that `gh attestation verify <bundle> --repo OWNER/REPOSITORY` succeeds
-for it. Then check that:
+[user manual](#user-manual) PDF, with its SHA-256. Then publish it, and
+check the published release with `gh` signed in:
 
-- a fresh clone of the tag passes the commands of step 3;
-- the release page names the tag and the candidate SHA;
-- each attached artifact's SHA-256 matches the record.
+```sh
+python tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY \
+  --milestone N --asset FILE=SHA256
+```
+
+Give `--milestone` the number of the release's milestone, and `--asset` once
+for each other attached artifact, with the SHA-256 of the certification
+record. The command only reads, through `gh`: it prints one line per fact
+and ends with `release-verify-published: PASS (vX.Y.Z)` only when:
+
+- the tag is annotated and points at the commit its `Candidate` line names;
+- **Repository integrity** succeeded on that commit;
+- the release is published, not a draft, and its notes name that commit;
+- its assets are exactly `<repository>-X.Y.Z-source.tar.gz`, `SHA256SUMS`
+  and each `--asset`; the bundle's SHA-256 is the one `SHA256SUMS` records,
+  and each `--asset` has its recorded SHA-256;
+- `gh attestation verify` passes on the bundle, as built by the **Release**
+  workflow at the tag. When the notes state that the bundle is not attested,
+  the command prints a `NOTE` instead: record the absence as a deviation;
+- the milestone is closed and has no open issue.
+
+Keep its output with the certification record. Then check that a fresh clone
+of the tag passes the commands of step 3.
 
 ### 8. Verify the published workbook
 
 When the release attaches a workbook, check it as a user gets it, and record
 the results in the *Published workbook* section of the
-[release certification](docs/release/RELEASE_CERTIFICATION.md):
+[release certification](docs/release/RELEASE_CERTIFICATION.md). Give the
+workbook and the manual to `verify-published` in step 7 as `--asset`, so that
+it compares their published bytes with the record. It cannot download them as
+a user does, unblock them or open them in Excel; these checks stay manual:
 
 - **Binding.** The attached workbook is the production build of the
   candidate, as the development workbook is bound in step 4. Its build stamp
@@ -305,6 +327,7 @@ Keep with the release, in its certification issue and the release notes:
 - the Excel run, with the host it names;
 - the distribution review;
 - the tag name and its target;
+- the output of `tools/release.py verify-published`;
 - the checks of the published workbook and the user manual, if attached;
 - every deviation.
 
@@ -337,5 +360,5 @@ Logs and artifacts expire, so copy the decisive lines.
 | 7 | Distribution review recorded and closed | ☐ |
 | 8 | I decided to publish | ☐ |
 | 9 | Annotated tag on the candidate | ☐ |
-| 10 | GitHub Release published from the tag and verified | ☐ |
+| 10 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
 | 11 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |
