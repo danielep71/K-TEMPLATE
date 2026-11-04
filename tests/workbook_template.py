@@ -60,7 +60,8 @@ def default_sheets() -> list[Sheet]:
 
 
 DEFAULT_NAMES = {"build_commit": "Readme!$B$3", "build_time": "Readme!$B$4",
-                 "build_configuration": "Readme!$B$5", "cfg_reporting_date": "Inputs!$C$5"}
+                 "build_configuration": "Readme!$B$5", "cfg_reporting_date": "Inputs!$C$5",
+                 "Inputs_Settings": "Inputs!$B$4"}
 STRINGS = ("Synthetic workbook", "Commit", "Inputs", "Reporting date")
 
 

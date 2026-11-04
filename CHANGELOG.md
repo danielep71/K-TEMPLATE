@@ -396,6 +396,23 @@ milestones and their pull requests.
 
 ### Fixed
 
+- The methodology guides agree with their illustrative example and the
+  tools. `CALC-01` sums the notional amounts of the whole calculation, as its
+  data, cases and derivations do, and the support matrix's *Supported* means
+  in scope, with each rule's status in the traceability table. The workbook
+  contract declares `Inputs_Settings` as a one-cell table anchor, which
+  `tools/devbuild/workbook.json` builds on `Inputs!B4`, and the case-runner
+  skeleton derives the area it captures and restores from that anchor.
+  `Run_Status` and the status lines are declared with the first sheet that
+  code writes. The contract also lists `sheet` among the protection options
+  that default to `false`, as `tools/check_workbook_protection.py` does, keeps
+  the reporting-date label in the example's `output`, names code names `sh`
+  plus the tab name in PascalCase, as the house style now does, and states
+  one failure behaviour: no new result, the result areas cleared and marked
+  `FAILED`. The validation plan names only the `nominal`, `boundary` and
+  `invalid` case categories and leaves failure and repeatability to VBA
+  tests, and the rules for filling in the guides name the guides with a
+  *Decisions* table and the two tables that differ (#286).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).

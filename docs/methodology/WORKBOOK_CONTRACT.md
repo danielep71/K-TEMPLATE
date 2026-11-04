@@ -38,8 +38,9 @@ These defaults hold unless a decision below replaces one:
   or a hard-coded address. Core, classes and the facade never touch a
   workbook object.
 - **No partial results.** An operation validates first, calculates in memory,
-  then clears and writes all of its result areas. On failure it writes none
-  of them and marks them `FAILED` ([status and staleness](#status-and-staleness)).
+  then clears and writes all of its result areas. On failure it writes no
+  new result: it clears its result areas and marks them `FAILED`
+  ([status and staleness](#status-and-staleness)).
 
 ## Sheets
 
@@ -51,8 +52,8 @@ below says why it is hidden.
 | *Illustrative:* 1 | `Readme` | `shReadme` | Reference | Build only | What the workbook is, its limits, and the build stamp |
 | *Illustrative:* 2 | `Inputs` | `shInputs` | Input | No | Reporting date and run settings ([areas](#areas)) |
 
-- **Code name:** `sh` plus the role, as the house style requires. The
-  workbook's own document module is `ThisWorkbook`.
+- **Code name:** `sh` plus the tab name in PascalCase, as the house style
+  requires. The workbook's own document module is `ThisWorkbook`.
 - **Role:**
   - `Reference`: what the workbook is, its limits and its build;
   - `Input`: typed by users;
@@ -88,6 +89,7 @@ State the layout every sheet shares. A common default:
 | *Illustrative:* `build_time` | `shReadme` | The commit's committer time | The build |
 | *Illustrative:* `build_configuration` | `shReadme` | `production` or `development` | The build |
 | *Illustrative:* `cfg_reporting_date` | `shInputs` | The value cell of the reporting date | Users |
+| *Illustrative:* `Inputs_Settings` | `shInputs` | The first header cell of the settings area ([areas](#areas)) | Users, in the rows below it |
 
 - Every name is workbook-scoped and visible, and refers to one cell of this
   workbook by an absolute reference. External and relative references are
@@ -95,18 +97,26 @@ State the layout every sheet shares. A common default:
 - **Settings:** `cfg_<code>`, on the value cell of each setting.
 - **Table anchors:** `<Sheet>_<Table>`, on a table's first header cell. No
   table is named `Status`, so an anchor never collides with a status line.
-- **State:** `Run_Status` and the status line of each sheet that code writes.
+- **State:** the status line `<Sheet>_Status` of each sheet that code writes,
+  and `Run_Status`, the state of the last run, on one of those sheets. The
+  illustrative sheets are written by users or the build only, so they have
+  neither; declare them here with the first sheet that code writes.
 - **Build stamp:** `build_commit`, `build_time` and `build_configuration`, on
   the reference sheet.
-- The build creates every name. Before an operation, the adapter checks that
-  each name it uses exists and refers to the expected sheet; a missing or
-  moved name stops the operation before any calculation.
+- The build creates every name of the table. Before an operation, the
+  adapter checks that each name it uses exists and refers to the expected
+  sheet; a missing or moved name stops the operation before any calculation.
 
 ## Areas
 
 | Area | Sheet | Kind | Written by | Holds |
 | --- | --- | --- | --- | --- |
 | *Illustrative:* `Inputs_Settings` | `shInputs` | Input | Users | One row per setting: code, value, unit and the contract that uses it |
+
+An area is named by its table anchor, which refers to its first header cell
+only ([defined names](#defined-names)). Code that reads, writes or restores
+an area derives it from the anchor: the rows below it, with the columns of
+its header.
 
 - **Input** areas hold what users type: settings, parameters chosen by hand,
   and datasets the data contract places on a sheet. Each cell's type, unit
@@ -214,7 +224,7 @@ the illustrative sheets above, it could read:
     "shInputs": {
       "protection": {"sheet": true, "objects": true, "scenarios": true},
       "input": ["C5"],
-      "output": ["A1:B4"]
+      "output": ["A1:B5"]
     }
   }
 }
@@ -226,7 +236,7 @@ the illustrative sheets above, it could read:
   attributes of the SpreadsheetML `sheetProtection` element. `sheet: true`
   turns protection on; every other option set to `true` blocks its action, or
   protects its part, while the sheet is protected. An option left out takes
-  the standard's default: `false` for `objects`, `scenarios`,
+  the standard's default: `false` for `sheet`, `objects`, `scenarios`,
   `selectLockedCells` and `selectUnlockedCells`, `true` for the others. `{}`
   is an unprotected sheet. Never put a password in the matrix.
 - **`input`:** the cells and ranges, such as `C5` or `C5:D10`, that users
