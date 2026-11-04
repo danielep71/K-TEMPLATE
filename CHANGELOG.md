@@ -413,6 +413,15 @@ milestones and their pull requests.
   `invalid` case categories and leaves failure and repeatability to VBA
   tests, and the rules for filling in the guides name the guides with a
   *Decisions* table and the two tables that differ (#286).
+- Without PyYAML, **Repository integrity** skips `codeql-default-branch`, and
+  `--strict` fails it, instead of failing it with an import error; the unit
+  tests that read YAML are skipped too. The release certification accepts
+  the evidence of a `tools/devbuild/excel_run.py` run for the workbook built
+  from the candidate (`Binding: VERIFIED` by rebuild and the workbook's
+  SHA-256) and for the references (`host.txt`). `SECURITY.md` lists every
+  read of `excel_run.py`, the setup guide lists `tests/test_excel_run.py`
+  with the devbuild tools, and the repository structure names
+  `docs/release/`, `docs/licenses/` and the harness guide (#287).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).
