@@ -95,8 +95,9 @@ never a pass.
 
 An Excel run of the harness keeps the host, who ran it, when and how it
 ended in its [host record](TEST_HARNESS.md#host-record), also when it stopped
-early. `tools/check_excel_run.py` rejects a record that lacks one of them, and
-accepts an outcome other than `PASS` only as evidence of that outcome.
+early. `tools/check_excel_run.py` rejects a record that lacks one of them or
+leaves who ran it, when or how it ended `UNKNOWN`, and accepts an outcome
+other than `PASS` only as evidence of that outcome.
 
 ### What an accuracy contract proves
 

@@ -278,6 +278,26 @@ class ResultsTest(unittest.TestCase):
         self.assertIn("accuracy: FAIL (1 contract(s); measured against the results)",
                       output.getvalue())
 
+    def test_the_results_files_of_several_suites_are_measured_together(self) -> None:
+        with repository(registry(FROZEN)) as root, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            first, second = root / "results.json", root / "project-results.json"
+            first.write_text(json.dumps(results(demo_calibration=100)), "utf-8")
+            second.write_text(json.dumps(results(demo_holdout_1=200, demo_holdout_2=0)),
+                              "utf-8")
+            self.assertEqual(check_accuracy.check(root, [first, second], CANDIDATE)[:2],
+                             ([], 1))
+            self.assertEqual(check_accuracy.main(["--root", str(root), "--results", str(first),
+                                                  "--results", str(second),
+                                                  "--commit", CANDIDATE]), 0)
+            # Each output is computed by one suite: a result in two files is rejected.
+            second.write_text(json.dumps(results(demo_calibration=100, demo_holdout_1=200,
+                                                 demo_holdout_2=0)), "utf-8")
+            found = check_accuracy.check(root, [first, second], CANDIDATE)[0]
+        self.assertIn("accuracy: PASS (1 contract(s); measured against the results)",
+                      output.getvalue())
+        self.assertEqual(found, [f"{second}: demo-calibration {QUANTITY} is also in {first}"])
+
 
 @unittest.skipUnless(shutil.which("git"), "needs Git")
 class WideningTest(unittest.TestCase):
