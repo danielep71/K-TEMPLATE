@@ -242,6 +242,11 @@ def checks(context: Context) -> list[Check]:
     node = shutil.which("node")
     node_missing = None if node else "node is not on PATH"
     no_repository = None if context.repository else "the repository is unknown (--repository)"
+    # The CodeQL check reads its workflow through tests/strict_yaml.py, which needs PyYAML.
+    codeql_missing = "; ".join(reason for found, reason in (
+        (context.default_branch, "the default branch is unknown (--default-branch)"),
+        (importlib.util.find_spec("yaml"), "PyYAML is not installed (.github/requirements.txt)"),
+    ) if not found) or None
     listed: list[Check] = [
         Check("tests", [python, "-m", "unittest", "discover", "-s", "tests", "-v"]),
         Check("ruff", ruff, missing=ruff_missing),
@@ -277,9 +282,7 @@ def checks(context: Context) -> list[Check]:
         Check("markdown-links", [python, "tools/check_links.py"]),
         Check("documented-commands", [python, "tools/check_doc_commands.py"]),
         Check("dependabot-target-branches", function=dependabot_branches),
-        Check("codeql-default-branch", function=codeql_default_branch,
-              missing=None if context.default_branch
-              else "the default branch is unknown (--default-branch)"),
+        Check("codeql-default-branch", function=codeql_default_branch, missing=codeql_missing),
         Check("required-documents", function=required_documents),
     ]
     listed += [Check(name, command) for name, command in whitespace_commands(context.root)]

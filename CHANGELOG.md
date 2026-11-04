@@ -122,9 +122,10 @@ milestones and their pull requests.
   `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE`), beside
   Windows, the references and the compile mode. `excel_run.py` writes it also
   when the run stops early, and reads the macro settings without changing
-  them. `check_excel_run.py` rejects a record that lacks a field, and accepts
-  an outcome other than `PASS` only as evidence of that outcome; a record
-  written by hand in the earlier three-line form now fails (#244).
+  them. `check_excel_run.py` rejects a record that lacks a field or leaves
+  the operator unread (`operator=UNKNOWN`), and accepts an outcome other than
+  `PASS` only as evidence of that outcome; a record written by hand in the
+  earlier three-line form now fails (#244, #284).
 - `tools/check_independent.py`, which **Repository integrity** runs: it runs
   each independent implementation that `tests/independent/adapters.json`
   registers for an `IMPL-` source on the test cases, through an adapter that
@@ -164,9 +165,10 @@ milestones and their pull requests.
   the workbook from a copy of the template, keeping its formats, print areas
   and protection: it sets the code names, writes the stamp and adds the VBA
   project, and two builds stay byte-identical. Without a template it writes
-  blank sheets as before. The protection matrix,
-  `docs/methodology/workbook-protection.json`, states each sheet's protection
-  options and its input (unlocked) and output (locked) ranges;
+  blank sheets as before. A protection matrix, by convention
+  `docs/methodology/workbook-protection.json` and added with the template,
+  states each sheet's protection options and its input (unlocked) and output
+  (locked) ranges;
   `tools/check_workbook_protection.py` fails **Repository integrity** when the
   template differs from it, and passes as inactive while neither exists (#243).
 - A machine-readable data contract, `docs/methodology/data-contract.json`,
@@ -211,11 +213,15 @@ milestones and their pull requests.
   decision. With `--results`, the check measures the results of an Excel run.
   The template's illustrative contract stays a draft (#162). An Excel run now
   writes those results: a suite records them with `TEST_Harness.RecordResult`,
-  and the certification saves them as `results.json`, with the commit of the
-  workbook's build stamp. The example suite records the illustrative cases'
-  totals from `tests/fixtures/`, so its entry points take that folder.
-  `tools/check_excel_run.py` requires the file when the commit holds
-  contracts, and fails the run when they do not hold (#184).
+  and its certification saves them with the commit of the workbook's build
+  stamp, the example suite as `results.json` and a project suite in the
+  `results` file its entry in `.github/excel-evidence-policy.json` names. The
+  example suite records the illustrative cases' totals from `tests/fixtures/`,
+  so its entry points take that folder. `tools/check_excel_run.py` requires
+  every results file when the commit holds contracts, measures them together,
+  rejects a result that two files hold, and fails the run when the contracts
+  do not hold. A workbook imported by hand has no build stamp, so its run
+  fails while contracts exist (#184, #284).
 - A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
   the changelog, `VERSION`, the default branch, the tag message and
   **Repository integrity**. It builds a reproducible source bundle with its
@@ -252,8 +258,8 @@ milestones and their pull requests.
   [harness guide](docs/methodology/TEST_HARNESS.md) and
   [recording an Excel run](INSTALLATION.md#recording-an-excel-run) describe
   them, and the check is a release gate (#79).
-- Six static checks of exported VBA source, which **Repository integrity**
-  runs:
+- Seven static checks of exported VBA source, which **Repository integrity**
+  runs, the call check as advisory:
   - placement, names, encoding, options, layout and storage;
   - `#If` structure and `PtrSafe` in each compilation environment;
   - procedure-local jump targets;
@@ -263,7 +269,9 @@ milestones and their pull requests.
   - identifiers, in each compilation environment: a name a procedure assigns
     that nothing declares, a statement that calls a procedure no module
     provides, or a declaration named like a VBA keyword, such as
-    `Dim Empty()`. A statement it cannot read is a finding (#173).
+    `Dim Empty()`. A statement it cannot read is a finding (#173);
+  - the calls to the project's own procedures, as the
+    `tools/check_vba_calls.py` entry above describes (#249).
 
   The [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what they
   cannot prove (#70).
@@ -391,6 +399,32 @@ milestones and their pull requests.
 
 ### Fixed
 
+- The methodology guides agree with their illustrative example and the
+  tools. `CALC-01` sums the notional amounts of the whole calculation, as its
+  data, cases and derivations do, and the support matrix's *Supported* means
+  in scope, with each rule's status in the traceability table. The workbook
+  contract declares `Inputs_Settings` as a one-cell table anchor, which
+  `tools/devbuild/workbook.json` builds on `Inputs!B4`, and the case-runner
+  skeleton derives the area it captures and restores from that anchor.
+  `Run_Status` and the status lines are declared with the first sheet that
+  code writes. The contract also lists `sheet` among the protection options
+  that default to `false`, as `tools/check_workbook_protection.py` does, keeps
+  the reporting-date label in the example's `output`, names code names `sh`
+  plus the tab name in PascalCase, as the house style now does, and states
+  one failure behaviour: no new result, the result areas cleared and marked
+  `FAILED`. The validation plan names only the `nominal`, `boundary` and
+  `invalid` case categories and leaves failure and repeatability to VBA
+  tests, and the rules for filling in the guides name the guides with a
+  *Decisions* table and the two tables that differ (#286).
+- Without PyYAML, **Repository integrity** skips `codeql-default-branch`, and
+  `--strict` fails it, instead of failing it with an import error; the unit
+  tests that read YAML are skipped too. The release certification accepts
+  the evidence of a `tools/devbuild/excel_run.py` run for the workbook built
+  from the candidate (`Binding: VERIFIED` by rebuild and the workbook's
+  SHA-256) and for the references (`host.txt`). `SECURITY.md` lists every
+  read of `excel_run.py`, the setup guide lists `tests/test_excel_run.py`
+  with the devbuild tools, and the repository structure names
+  `docs/release/`, `docs/licenses/` and the harness guide (#287).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).

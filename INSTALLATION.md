@@ -254,9 +254,13 @@ build, byte for byte once decompressed, the VBA project included. Excel
 compiles the project from source on open, so the code that ran is the
 commit's.
 
-Without Trust access nothing can run **Debug → Compile VBAProject**. VBA then
-compiles on demand only the modules the run calls, and `compile=ON_DEMAND`
-says so; a module the run never calls is not compiled.
+Without Trust access no automated run can compile the whole project. VBA
+then compiles on demand only the modules the run calls, and `compile=ON_DEMAND`
+says so; a module the run never calls is not compiled. `check_excel_run.py`
+accepts `ON_DEMAND` only with identity by rebuild, `--workbook` and no
+`exported\` folder, as this command checks it. A run by hand compiles with
+**Debug → Compile VBAProject**, which needs no Trust access, and records
+`compile=PASS`.
 
 Excel opens visibly while the run lasts. Apart from **Enable Content**, leave
 it alone: a dialog it shows stops the run until you close it, and the command
@@ -268,7 +272,9 @@ its end. That record is evidence of how the run stopped, never of a pass;
 run the command again.
 
 Use the steps below instead when the project has forms, when the build
-fails, or when you need a full compile.
+fails, or when you need a full compile. A workbook you import by hand instead
+of building it has no build stamp, so the check fails while the commit holds
+accuracy contracts, as step 3 says.
 
 ### By hand
 
@@ -282,7 +288,12 @@ fails, or when you need a full compile.
    [building a workbook from source](#building-a-workbook-from-source). Use
    [importing VBA into Excel](#%EF%B8%8F-importing-vba-into-excel) only if the
    project has forms or the build fails. Then only the source identity is
-   checked, not the binding of steps 7 and 9.
+   checked, not the binding of steps 7 and 9. Such a workbook has no
+   `build_commit` stamp, so `SaveResults` writes an empty commit, which the
+   [accuracy check](docs/methodology/TEST_HARNESS.md#results) rejects: while
+   the commit holds `tests/accuracy/contracts.json`, as the template does, the
+   run of a workbook imported by hand ends `excel-run: FAIL` with *commit is
+   not a full lower-case commit SHA*, whatever else it shows.
 4. **Compile** with **Debug → Compile VBAProject**.
 5. **Certify.** In the Immediate window type, with the full path of the
    evidence folder and of `tests\fixtures` in the same checkout, both with no
@@ -304,8 +315,8 @@ fails, or when you need a full compile.
    `CERTIFICATION=PASS`; otherwise it raises *Certification of examples did
    not pass* after writing its log. Then type the certification entry point
    of each project suite that `.github/excel-evidence-policy.json` lists under
-   `suites`, in order, with the same two arguments; each saves its log and its
-   certification log.
+   `suites`, in order, with the same two arguments; each saves its log, its
+   certification log and, when its entry names one, its results file.
 6. **Export the modules back.** In the VBE, right-click each component →
    **Export File**, into `exported\`, under its own name. Export every VBA
    component of the commit, the test modules included; a form exports as its
@@ -353,7 +364,8 @@ fails, or when you need a full compile.
    - `references` lists the boxes ticked in **Tools → References**, separated
      by `; `.
    - Write `compile=PASS` only if step 4 completed with no error; otherwise
-     write what it reported.
+     write what it reported. Never write `ON_DEMAND`: the check accepts it
+     only with identity by rebuild, never with `exported\`.
    - `outcome` is `PASS` when step 5 ended with `CERTIFICATION=PASS` for
      every suite, and `FAIL` when a certification raised. When you stop
      early, write the record anyway, with `IMPORT_FAILED` (step 3),
@@ -372,7 +384,9 @@ fails, or when you need a full compile.
    the commit holds accuracy contracts, an `Accuracy:` line gives each
    contract's worst error over its calibration and its holdout cases. For
    a workbook imported by hand, omit `--workbook` and `--require-binding`:
-   the binding is then `UNVERIFIED`, which a release does not accept.
+   the binding is then `UNVERIFIED`, which a release does not accept, and
+   while the commit holds accuracy contracts the run fails, because its
+   results name no commit (step 3).
 10. **Record.** Copy the report into the issue, the pull request or the
     [release certification](docs/release/RELEASE_CERTIFICATION.md), and add a
     row to the tested environments of the
@@ -392,12 +406,12 @@ fails, or when you need a full compile.
 | The two failure runs do not end as [documented](#running-the-harness), or fail anything but their own failure: the injected run its one designated assertion, with the expected value the suite injects and the same values in each record, the skipped-case run only `harness.completeness` | The failure paths did not behave |
 | `certification.log` is missing, a mode did not end as it must, a failure run did not reach its caller as `ERR_TEST_FAILED`, or it does not end with `CERTIFICATION=PASS` and `COMPLETE` | The certification did not pass |
 | `ENVIRONMENT` lacks a field, differs between the logs, or Office is not 64-bit | The host is unknown or not the supported target |
-| `host.txt` lacks a field or holds a value the [host record](docs/methodology/TEST_HARNESS.md#host-record) does not allow, a time lacks its UTC offset, the run finished before it started, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), `compile` is not `PASS` (or `ON_DEMAND` for a run without export), or `excel` or `bitness` differs from the logs' `ENVIRONMENT` | The host record is incomplete |
+| `host.txt` lacks a field or holds a value the [host record](docs/methodology/TEST_HARNESS.md#host-record) does not allow, a time lacks its UTC offset, the run finished before it started, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), `compile` is not `PASS` (or `ON_DEMAND` with identity by rebuild: `--workbook` and no `exported\` folder, as the one command records it), `operator` is `UNKNOWN`, or `excel` or `bitness` differs from the logs' `ENVIRONMENT` | The host record is incomplete |
 | `outcome` in `host.txt` is not `PASS` | The run stopped early or failed: the record is evidence of that outcome, never of a pass |
 | Without `exported\`, a part of the workbook given with `--workbook` differs from a rebuild of the commit, or a part is missing or extra | It was saved after the build, or not built from that commit (`Binding: FAIL`) |
 | `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |
 | With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
-| The commit holds `tests/accuracy/contracts.json`, and `results.json` is missing, names another commit or a build with local changes, lacks a result, holds a result outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
+| The commit holds `tests/accuracy/contracts.json`, and `results.json` or the results file a project suite names is missing or names another commit, a build with local changes or, for a workbook imported by hand, no commit; or two files hold the same result, the files together lack a result, a result lies outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
 
 It cannot see Excel: the host record, from the operator to the outcome, is
 the runner's own record. A PASS says the evidence is consistent

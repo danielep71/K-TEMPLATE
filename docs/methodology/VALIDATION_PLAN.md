@@ -38,11 +38,19 @@ calculation.
 Cover, for each calculation, with the case categories of the
 [test-case format](TEST_CASES.md#categories):
 
-- typical cases and the boundaries of every rule;
+- typical cases (`nominal`) and the boundaries of every rule (`boundary`);
 - invalid and missing input, which the [data contract](DATA_CONTRACT.md)
-  rejects;
-- failure: earlier outputs are withdrawn;
+  rejects (`invalid`).
+
+Cover with VBA tests, which add no category
+([relation, end-to-end and volume tests](TEST_CASES.md#other-tests)):
+
+- failure: an operation that fails clears its earlier results and marks them
+  `FAILED` ([status and staleness](WORKBOOK_CONTRACT.md#status-and-staleness));
 - repeatability: the same input gives the same output.
+
+A relation test or the end-to-end case runner of the
+[harness guide](TEST_HARNESS.md) can check either.
 
 ## Traceability
 
@@ -95,8 +103,9 @@ never a pass.
 
 An Excel run of the harness keeps the host, who ran it, when and how it
 ended in its [host record](TEST_HARNESS.md#host-record), also when it stopped
-early. `tools/check_excel_run.py` rejects a record that lacks one of them, and
-accepts an outcome other than `PASS` only as evidence of that outcome.
+early. `tools/check_excel_run.py` rejects a record that lacks one of them or
+leaves who ran it, when or how it ended `UNKNOWN`, and accepts an outcome
+other than `PASS` only as evidence of that outcome.
 
 ### What an accuracy contract proves
 

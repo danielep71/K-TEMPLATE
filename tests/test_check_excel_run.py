@@ -56,7 +56,8 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
                     extra: dict[str, bytes] | None = None) -> tuple[Path, str]:
     """A temporary repository whose one commit holds the working tree's modules and
     evidence policy, or ``policy`` in its place, or no policy at all, and with
-    ``with_cases`` the working tree's test cases and accuracy contracts."""
+    ``with_cases`` the working tree's test cases and accuracy contracts. The files
+    of ``extra`` are written last, so they may replace any of these."""
     root = Path(tempfile.mkdtemp(prefix="excel-run-repository-"))
     if with_policy:
         target = root / check_excel_run.POLICY
@@ -67,9 +68,6 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
         target = root / module.relative_to(SOURCE)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(module.read_bytes().replace(b"\r\n", b"\n"))
-    for name, data in [*(FORM.items() if with_form else ()), *(extra or {}).items()]:
-        (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_bytes(data)
     config = root / check_excel_run.BUILD_CONFIG
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_bytes((SOURCE / check_excel_run.BUILD_CONFIG).read_bytes())
@@ -81,6 +79,9 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
             target = root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((SOURCE / name).read_bytes())
+    for name, data in [*(FORM.items() if with_form else ()), *(extra or {}).items()]:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
+        (root / name).write_bytes(data)
     for command in (["init", "-q"], ["add", "-A"],
                     ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                      "-c", "commit.gpgsign=false",
@@ -666,6 +667,17 @@ class EvidenceTest(unittest.TestCase):
         self.assertFinding(edit("host.txt", "vba_project_access=NOT_TRUSTED",
                                 "vba_project_access=UNKNOWN"), "vba_project_access=UNKNOWN, but")
 
+    def test_no_record_leaves_the_operator_unread(self) -> None:
+        unread = "host.txt: operator=UNKNOWN, but every record names who ran it"
+        self.assertFinding(edit("host.txt", "operator=Fixture Operator", "operator=UNKNOWN"),
+                           unread)
+        stopped = HOST.replace("operator=Fixture Operator", "operator=UNKNOWN") \
+            .replace("outcome=PASS", "outcome=UNAVAILABLE")
+        host = dict(line.split("=", 1) for line in stopped.splitlines())
+        found = check_excel_run.host_findings(host, POLICY, {})
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(unread, found[0])
+
     def test_an_outcome_other_than_pass_is_evidence_of_itself_only(self) -> None:
         for outcome in check_excel_run.OUTCOMES[1:]:
             with self.subTest(outcome=outcome):
@@ -872,6 +884,29 @@ PROJECT_ENTRY: dict[str, Any] = {
     "certification_log": "project-certification.log"}
 
 
+# The same suite when it records the output of an accuracy contract of its own.
+PROJECT_RESULTS_ENTRY: dict[str, Any] = dict(PROJECT_ENTRY, results="project-results.json")
+PROJECT_CASE = "project-total"
+
+
+def project_case_files() -> dict[str, bytes]:
+    """The registry with a second contract, ACC-02, whose one case only the project
+    suite computes, and that case's fixture and expected file."""
+    registry = json.loads((SOURCE / check_accuracy.REGISTRY).read_text(encoding="utf-8"))
+    contract = dict(registry["contracts"][0], id="ACC-02", calibration_cases=[PROJECT_CASE],
+                    holdout_cases=[])
+    registry["contracts"].append(contract)
+    fixture = {"schema_version": 1, "kind": "test-fixture", "id": PROJECT_CASE,
+               "calculation": contract["calculation"]}
+    expected = {"schema_version": 1, "kind": "test-expected", "fixture": PROJECT_CASE,
+                "outputs": [{"quantity": contract["quantities"][0], "scope": None, "value": 250,
+                             "tolerance": {"absolute": 0.000001, "relative": 0},
+                             "reference": {"class": "illustrative"}}]}
+    return {check_accuracy.REGISTRY.as_posix(): json.dumps(registry).encode(),
+            f"tests/fixtures/{PROJECT_CASE}.json": json.dumps(fixture).encode(),
+            f"tests/expected/{PROJECT_CASE}.json": json.dumps(expected).encode()}
+
+
 def policy_text(change: Change) -> str:
     data = json.loads((SOURCE / check_excel_run.POLICY).read_text(encoding="utf-8"))
     change(data)
@@ -926,6 +961,12 @@ class PolicyTest(unittest.TestCase):
                 dict(PROJECT_ENTRY, expected_cases=0)),
             "distinct and named": lambda data: data["suites"].append(
                 dict(PROJECT_ENTRY, log="examples.log")),
+            "evidence files must be distinct": lambda data: data["suites"].append(
+                dict(PROJECT_ENTRY, results="results.json")),
+            "must be plain names": lambda data: data["suites"].append(
+                dict(PROJECT_ENTRY, results="../project-results.json")),
+            "evidence files must be distinct and named": lambda data: data["suites"].append(
+                dict(PROJECT_ENTRY, results="")),
             "KeyError": lambda data: data["suites"].append(
                 {key: value for key, value in PROJECT_ENTRY.items() if key != "log"}),
         }
@@ -936,6 +977,11 @@ class PolicyTest(unittest.TestCase):
         accepted = check_excel_run.parse_policy(policy_text(
             lambda data: data["suites"].append(PROJECT_ENTRY)))
         self.assertEqual([item.name for item in accepted.project_suites], ["project"])
+        self.assertIsNone(accepted.project_suites[0].results)
+        saving = check_excel_run.parse_policy(policy_text(
+            lambda data: data["suites"].append(PROJECT_RESULTS_ENTRY)))
+        self.assertEqual(check_excel_run.results_files(saving),
+                         [POLICY.results, "project-results.json"])
         # A version 1 policy, as older commits hold it, is still read.
         old = check_excel_run.parse_policy(policy_text(
             lambda data: (data.update(schema_version=1), data.pop("suites"))))
@@ -978,6 +1024,15 @@ class PolicyTest(unittest.TestCase):
 
 
 
+def project_evidence(folder: Path) -> None:
+    """The two logs the project suite's certification entry point saves."""
+    project = read_suite(PROJECT_SOURCE, "64-bit")
+    (folder / "project.log").write_bytes(
+        ("\r\n".join(run_log("NORMAL", project, "project")) + "\r\n").encode())
+    (folder / "project-certification.log").write_bytes(
+        ("\r\n".join(certification_log("project", ("NORMAL",))) + "\r\n").encode())
+
+
 class ProjectSuiteTest(unittest.TestCase):
     """A project suite beside the example suite: its normal run and its certification."""
 
@@ -995,16 +1050,9 @@ class ProjectSuiteTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         shutil.rmtree(cls.root, ignore_errors=True)
 
-    def project_evidence(self, folder: Path) -> None:
-        project = read_suite(PROJECT_SOURCE, "64-bit")
-        (folder / "project.log").write_bytes(
-            ("\r\n".join(run_log("NORMAL", project, "project")) + "\r\n").encode())
-        (folder / "project-certification.log").write_bytes(
-            ("\r\n".join(certification_log("project", ("NORMAL",))) + "\r\n").encode())
-
     def findings(self, change: Callable[[Path], None] | None = None) -> list[str]:
         def apply(folder: Path) -> None:
-            self.project_evidence(folder)
+            project_evidence(folder)
             if change:
                 change(folder)
         with evidence(apply, self.root, self.commit) as folder:
@@ -1030,6 +1078,10 @@ class ProjectSuiteTest(unittest.TestCase):
         other = self.findings(edit("project.log", "build=17928", "build=17929"))
         self.assertIn("the logs come from different hosts (ENVIRONMENT differs)", other)
 
+    def test_a_suite_that_names_no_results_file_saves_none(self) -> None:
+        self.assertEqual(check_excel_run.results_files(check_excel_run.policy_at(
+            self.root, self.commit)), [POLICY.results])
+
     def test_counts_follow_the_bitness_the_policy_supports(self) -> None:
         wide, narrow = read_suite(PROJECT_SOURCE, "64-bit"), read_suite(PROJECT_SOURCE, "32-bit")
         self.assertEqual((len(wide.cases), len(wide.assertions), wide.expected_cases),
@@ -1041,6 +1093,69 @@ class ProjectSuiteTest(unittest.TestCase):
         self.assertTrue(any("EXPECTED_CASES is 3, but" in item for item in
                             check_excel_run.suite_findings(stated, wide, PROJECT_SOURCE, "x")))
         self.assertEqual(check_excel_run.suite_findings(stated, narrow, PROJECT_SOURCE, "x"), [])
+
+
+class ProjectResultsTest(unittest.TestCase):
+    """A project suite that computes the output of its own accuracy contract saves it
+    in its own results file, which is measured together with the example suite's."""
+
+    root: ClassVar[Path]
+    commit: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        if not shutil.which("git"):
+            raise unittest.SkipTest("needs Git")
+        policy = policy_text(lambda data: data["suites"].append(PROJECT_RESULTS_ENTRY)).encode()
+        cls.root, cls.commit = make_repository(policy, extra={PROJECT: PROJECT_SOURCE,
+                                                              **project_case_files()})
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def checked(self, results: list[dict[str, Any]] | None = None
+                ) -> check_excel_run.Evidence:
+        """The evidence of both suites; the project suite's results file holds
+        ``results``, by default the one output of its case."""
+        project = [{"case": PROJECT_CASE, "variant": None,
+                    "quantity": "illustrative_total_notional_amount", "scope": None,
+                    "value": 250}] if results is None else results
+
+        def apply(folder: Path) -> None:
+            project_evidence(folder)
+            (folder / "project-results.json").write_text(json.dumps(
+                {"schema_version": 1, "kind": "test-results", "commit": self.commit,
+                 "results": project}), encoding="utf-8")
+        with evidence(apply, self.root, self.commit) as folder:
+            return check_excel_run.check(self.root, self.commit, folder)
+
+    def test_the_project_contract_is_measured_alongside_the_example_contract(self) -> None:
+        result = self.checked()
+        self.assertEqual(result.findings, [])
+        self.assertEqual([line.split(":")[0] for line in result.accuracy],
+                         ["ACC-01 calibration", "ACC-01 holdout", "ACC-02 calibration"])
+
+    def test_the_project_results_are_needed(self) -> None:
+        found = self.checked([]).findings
+        self.assertTrue(any(f"no result for {PROJECT_CASE}" in item for item in found), found)
+
+        with evidence(project_evidence, self.root, self.commit) as folder:
+            missing = check_excel_run.check(self.root, self.commit, folder).findings
+        self.assertEqual(len(missing), 1, missing)
+        self.assertIn("project-results.json: missing, but", missing[0])
+
+    def test_a_result_held_by_two_files_is_rejected(self) -> None:
+        repeated = [*results_document(self.commit)["results"][:1],
+                    {"case": PROJECT_CASE, "variant": None,
+                     "quantity": "illustrative_total_notional_amount", "scope": None,
+                     "value": 250}]
+        found = self.checked(repeated).findings
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("results.json, project-results.json: ", found[0])
+        self.assertIn("project-results.json: illustrative-format-example "
+                      "illustrative_total_notional_amount is also in ", found[0])
+        self.assertTrue(found[0].endswith("results.json"), found[0])
 
 
 # A document module as Excel exports it, and a class with the same attributes.

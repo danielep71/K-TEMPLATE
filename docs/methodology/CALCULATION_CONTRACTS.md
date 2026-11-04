@@ -37,13 +37,13 @@ Copy this section for each calculation.
 
 | Step | Rule | Source |
 | --- | --- | --- |
-| 1 | Example: sum the amounts per counterparty | `SRC-01`, Article 1(1) |
+| 1 | Example: sum the notional amounts | `SRC-01`, Article 1(1) |
 
 **Outputs:**
 
 | Output | Unit | Scope | Rounding |
 | --- | --- | --- | --- |
-| Example total | Reporting currency | Per counterparty | None |
+| Example total | Reporting currency | Whole calculation | None |
 
 **Limits and non-goals:** cases the calculation does not cover, and what
 happens if they occur in the input.

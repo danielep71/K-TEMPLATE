@@ -47,7 +47,7 @@ A release has two parts, each decided separately:
 | Part | Steps | Effect |
 | --- | --- | --- |
 | **Preparation** | 1 to 5 | Changes only the repository: the dated changelog section, `VERSION`, the integration into the default branch and the evidence. It can stop at any point and publishes nothing. |
-| **Publication** | 6 to 8 | Creates the tag and the GitHub Release, and checks what a user downloads. A tag that may have been fetched is never moved or deleted. |
+| **Publication** | 6 to 8 | Creates the tag and the GitHub Release, and checks what a user downloads. A pushed tag is never moved or deleted. |
 
 <a id="release-invariants"></a>
 
@@ -157,6 +157,10 @@ consistent with it. This check is a release gate, not a
 **Repository integrity** step, because the evidence exists only for a
 candidate. If a case or the check fails, fix it through a task pull request
 and start again at step 2.
+
+If the repository keeps a [user manual](#user-manual), build its PDF from the
+candidate as that section describes, and record it, with the PDF tool and its
+version, in *Artifacts* of the certification record.
 
 ### 5. Review the distribution
 
@@ -336,8 +340,12 @@ Logs and artifacts expire, so copy the decisive lines.
 ## 🧯 Recovery
 
 - **Before the tag:** fix through a task pull request and repeat from step 2.
-- **After the tag, before the Release:** stop and record the problem. If the
-  tag may have been fetched, prefer a new patch version to deleting it.
+- **After the tag, before the Release:** stop and record the problem. A
+  pushed tag is never moved or deleted: the **Protect release tags** ruleset
+  blocks both and has no bypass. Fix the problem in a new patch version. The
+  rulesets are relaxed only to remove sensitive data from the history, as
+  [handling a finding](docs/repo_governance/DISTRIBUTION.md#-handling-a-finding)
+  describes.
 - **After publication:** never move the tag or replace an asset. Publish a
   corrected patch version and record the problem in the changelog; report a
   vulnerability as [SECURITY.md](SECURITY.md) describes. Leave the released

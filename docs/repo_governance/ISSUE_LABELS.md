@@ -10,7 +10,7 @@ This repository defines 20 issue labels, each with a name, description, and colo
 | --- | --- |
 | Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Refuses to delete a label in use. Verifies the exact live result. |
 | Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. |
-| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, priority, open milestone, target end date or dependency section, a target end date not before the milestone's due date, invalid labels, and inconsistent blocked status. |
+| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, target end date or dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; invalid labels; and inconsistent blocked status. |
 | Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. It never checks out pull-request code. |
 | Dependabot (`.github/dependabot.yml`) | Opens weekly grouped pull requests for the SHA-pinned GitHub Actions, the hash-locked configuration parser, and the hash-locked Python quality tools, labelled `ci` and `P3` and assigned to me. Nothing merges automatically. |
 
@@ -69,7 +69,7 @@ When both are present, that line takes precedence over the form field, so edit t
 
 | Label | Use |
 | --- | --- |
-| `blocked` | A prerequisite named in the dependency section, as an issue link or an `External condition:` line, is unresolved. Remove it once all are resolved; ready issues carry no status label. |
+| `blocked` | A prerequisite named in the dependency section, as an issue link or an `External condition:` line, is unresolved. Remove it once all are resolved; ready issues carry no status label. In the same edit, delete the `External condition:` line of each resolved condition, or replace the section with "None" if nothing else is named: **Issue triage** treats every such line as unresolved. |
 | `question` | I need information or a decision before the work can proceed. |
 | `help wanted` | I welcome outside investigation, implementation, validation, or review. |
 | `good first issue` | Well-scoped task suitable for a first contribution. |

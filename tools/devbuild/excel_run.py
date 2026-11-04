@@ -27,10 +27,12 @@ Excel run, and never needs Trust access to the VBA project object model:
    bitness (from the EXCEL.EXE header), AutomationSecurity as Excel reports
    it (read, never set), the Trust access to the VBA project as the registry
    holds it, the references the build gives the project, compile=ON_DEMAND,
-   because nothing can compile the whole project without Trust access, so VBA
-   compiled the modules the run called, and the outcome. It writes the record
-   also when the run stops early: Excel unavailable, macros not enabled in
-   time, a timeout, or a run that stopped before its end;
+   because no automated run can compile the whole project without Trust
+   access, so VBA compiled only the modules the run called (check_excel_run.py
+   accepts it only with identity by rebuild, as step 5 checks it), and the
+   outcome. It writes the record also when the run stops early: Excel
+   unavailable, macros not enabled in time, a timeout, or a run that stopped
+   before its end;
 5. runs tools/check_excel_run.py with --workbook and --require-binding: with
    no exported folder it proves identity by rebuilding the commit and
    comparing the workbook's parts. It prints the report, and saves it
