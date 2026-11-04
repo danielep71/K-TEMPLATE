@@ -23,7 +23,7 @@ it is `<REGIME>_`, they accept any project prefix that is not a reserved one
 | Public facade module | `<REGIME>_` plus subject | `<REGIME>_Functions` |
 | Host-independent class | `C` plus noun | `CCalculationResult` |
 | Excel adapter module | `M_` plus subject | `M_Run` |
-| Document module | `ThisWorkbook`, or `sh` plus role | `shInputs` |
+| Document module | `ThisWorkbook`, or `sh` plus the tab name in PascalCase | `shInputs` |
 | UserForm | `frm` plus role | `frmRunOptions` |
 | Test module | `TEST_` plus subject | `TEST_Harness` |
 | Example module | `EX_` plus subject | `EX_Inputs` |

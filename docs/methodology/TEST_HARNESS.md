@@ -142,10 +142,12 @@ tolerance, and restores the sheets. It needs the input and result areas of the
 yet, so it ships no runner. The suite's runner calls one procedure per test
 case, `RunCase "<case-id>"`, which follows this skeleton; it uses the
 contract's illustrative `Inputs_Settings` area and `M_Run.RunCalculation`
-entry point:
+entry point, and the constants `SETTING_ROWS` and `SETTING_COLUMNS`, the
+size of that area:
 
 ```vb
 Private Sub RunCase(ByVal CaseId As String)
+    Dim Anchor           As Range      'The first header cell of the area
     Dim Area             As Range      'The input area the case fills
     Dim Saved            As Variant    'Its values before the case
     Dim RestoreDue       As Boolean    'True once Saved holds them
@@ -156,7 +158,8 @@ Private Sub RunCase(ByVal CaseId As String)
 
         On Error GoTo Failed
         TEST_Harness.BeginCase CaseId
-        Set Area = ThisWorkbook.Names("Inputs_Settings").RefersToRange
+        Set Anchor = ThisWorkbook.Names("Inputs_Settings").RefersToRange
+        Set Area = Anchor.Offset(1, 0).Resize(SETTING_ROWS, SETTING_COLUMNS)
         Saved = Area.Value
         RestoreDue = True
         ' Write the case's inputs to Area, then run the entry point:
@@ -194,6 +197,15 @@ End Sub
   [data contract](DATA_CONTRACT.md) reads from a file is never written to a
   sheet: the runner gives the import the case's files instead, the variant
   directory of a [file-based case](TEST_CASES.md#file-based-cases).
+- **The area.** The defined name of an area is its table anchor, which
+  refers to one cell, the area's first header cell
+  ([areas](WORKBOOK_CONTRACT.md#areas)). The runner derives the area from
+  it: the rows below the anchor, sized by constants that the workbook
+  contract fixes, as above, or `Anchor.CurrentRegion` less its header row
+  for an area whose number of rows varies and that blank cells separate
+  from its neighbours. State in the suite which one it uses. Capturing the
+  anchor alone would restore one cell, and `inputs-restored` would pass while
+  the rest of the area kept the case's inputs.
 - **The sheets.** It captures an area before changing it and restores it on
   the success and the error path, through a helper such as `RestoreInputs`
   that contains its own error and returns what failed, as the

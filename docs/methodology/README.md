@@ -27,12 +27,13 @@ The workbook's scope, feature by feature:
 
 | Feature | Status | Calculation or input | Notes |
 | --- | --- | --- | --- |
-| *Illustrative:* Example total per counterparty | Supported | `CALC-01` | Implementation and validation status per rule: [traceability](VALIDATION_PLAN.md#traceability) |
+| *Illustrative:* Example total | Supported | `CALC-01` | Implementation and validation status per rule: [traceability](VALIDATION_PLAN.md#traceability) |
 
-- **Supported:** the workbook calculates it, as the named
-  [calculation contract](CALCULATION_CONTRACTS.md) states. Whether each rule
-  is implemented and validated is in the
-  [traceability table](VALIDATION_PLAN.md#traceability).
+- **Supported:** in scope. The workbook calculates it, as the named
+  [calculation contract](CALCULATION_CONTRACTS.md) states, once that
+  contract's rules are implemented; *Supported* does not say that they are.
+  The [traceability table](VALIDATION_PLAN.md#traceability) gives each rule's
+  status, from *Not implemented* to *Validated*.
 - **Not supported:** out of scope. The contract's *Limits and non-goals* say
   what happens when the input holds it: it is reported as unsupported scope,
   never calculated silently
@@ -44,14 +45,30 @@ The workbook's scope, feature by feature:
 
 ## Filling in the guides
 
-Each table holds one row marked *Illustrative*, and the data contract one
-illustrative dataset with its fields. Replace them with the project's entries,
-keep the columns, and record each decision in the guide's *Decisions* table
-with the issue where it was taken. A guide with only its illustrative entries
-states that nothing has been decided yet. The data contract's datasets and
-fields are edited in its
+The tables of project entries start with entries marked *Illustrative*:
+sources, datasets and their fields, validation rules, calculations, the
+support matrix, the validation matrix and traceability rows, sheets, defined
+names, areas and operations. Replace those entries with the project's own and
+keep the columns. The data contract's datasets and fields are edited in its
 [machine-readable contract](DATA_CONTRACT.md#machine-readable-contract), which
-renders their tables.
+renders their tables. Tables that define a format or a status, such as the
+traceability statuses, describe the method and have no illustrative entry.
+
+Record each decision, with the issue where it was taken, in the *Decisions*
+table of the guide it concerns. [Sources](SOURCES.md), the
+[data contract](DATA_CONTRACT.md), the
+[calculation contracts](CALCULATION_CONTRACTS.md) and the
+[workbook contract](WORKBOOK_CONTRACT.md) have one; while it holds only its
+illustrative row, nothing has been decided in that guide. The numerical test
+cases and the VBA test harness define formats and tools, and have none. Two
+tables of the [validation plan](VALIDATION_PLAN.md) differ:
+
+- **Open decisions** lists the questions the plan leaves open, with their
+  options. Replace its illustrative row with the project's questions, and
+  remove each once the plan states the choice.
+- **Host behaviour** has no illustrative entry: its entries record Excel
+  behaviour that the repository's tools rely on. Keep them, and add the
+  behaviour that the project's code relies on.
 
 Byte-preserved copies of sources go under `docs/methodology/sources/`, whose
 Git and editor rules are already set; [Sources](SOURCES.md) describes the
