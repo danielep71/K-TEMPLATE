@@ -275,6 +275,7 @@ def checks(context: Context) -> list[Check]:
         Check("changelog", changelog),
         Check("generated-docs", [python, "tools/render_docs.py", "--check"]),
         Check("markdown-links", [python, "tools/check_links.py"]),
+        Check("documented-commands", [python, "tools/check_doc_commands.py"]),
         Check("dependabot-target-branches", function=dependabot_branches),
         Check("codeql-default-branch", function=codeql_default_branch,
               missing=None if context.default_branch

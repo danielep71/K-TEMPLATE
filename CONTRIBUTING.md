@@ -134,6 +134,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `changelog` | `python tools/check_changelog.py` |
 | `generated-docs` | `python tools/render_docs.py --check` |
 | `markdown-links` | `python tools/check_links.py` |
+| `documented-commands` | `python tools/check_doc_commands.py` |
 | `dependabot-target-branches` | Built in: Every Dependabot target-branch exists. |
 | `codeql-default-branch` | Built in: codeql.yml lists the default branch, which branch filters cannot name. |
 | `required-documents` | Built in: The documents the repository requires exist and are not empty. |

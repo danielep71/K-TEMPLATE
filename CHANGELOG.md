@@ -63,6 +63,17 @@ milestones and their pull requests.
 
 ### Added
 
+- `tools/check_doc_commands.py` checks the commands that the tracked
+  Markdown cites, in inline code and in shell or unmarked fenced blocks:
+  each `python tools/...` script and each `python -m` module of the
+  repository must be tracked, and each subcommand and option must exist in
+  the script's `argparse` parser, which it reads from the source without
+  importing or running it. It joins continued lines, skips placeholders
+  such as `<folder>` and `X.Y.Z`, and reports a parser it cannot read
+  instead of passing it. **Repository integrity** runs it, so a renamed
+  option or a removed tool fails until the guides follow; only the
+  commands of a tool marked **Remove once run**, once it is deleted, are
+  skipped (#273).
 - **Repository integrity** has a `secret-files` check: it fails on a tracked
   file named as a secret or key file (`.env` and `.env.*` except
   `.env.example`; `.pem`, `.key`, `.p12`, `.pfx`, `.pvk`, `.jks`,
