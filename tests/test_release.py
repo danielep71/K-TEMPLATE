@@ -250,6 +250,11 @@ class FakeGh:
         base = f"repos/{REPOSITORY}/"
         if args[0] == "api":
             path = args[-1]
+            # GitHub resolves an owner and a name in any letter case.
+            if path.lower().startswith(base.lower()):
+                path = base + path[len(base):]
+            if path.lower() == base.rstrip("/").lower():
+                return self.json({"full_name": REPOSITORY, "name": "project"})
             if path == base + "git/ref/tags/v1.2.0":
                 return self.json(self.tag_ref)
             if path == base + "git/tags/" + "d" * 40:
@@ -418,6 +423,20 @@ class VerifyPublishedTest(unittest.TestCase):
                          ["milestone 7 (v1.2.0 - Release) is closed, with 2 open issue(s)"])
         self.assertEqual(self.failures(milestone=8),
                          ["cannot read milestone 8: gh: Not Found (HTTP 404)"])
+
+    def test_the_repository_is_checked_under_its_canonical_name(self) -> None:
+        found = release.verify_published("Owner/Project", "v1.2.0", 7, None, self.gh)
+        self.assertEqual([status for status, _ in found], ["PASS"] * 8, found)
+        self.assertIn(f"exactly the expected assets: {BUNDLE_NAME}, SHA256SUMS",
+                      "\n".join(text for _, text in found))
+        call = next(args for args in self.gh.calls if args[0] == "attestation")
+        self.assertEqual(call[call.index("--repo") + 1], REPOSITORY)
+        self.assertEqual(call[call.index("--signer-workflow") + 1],
+                         f"{REPOSITORY}/.github/workflows/release.yml")
+        self.gh.calls.clear()
+        self.assertEqual(release.verify_published("owner/missing", "v1.2.0", runner=self.gh),
+                         [("FAIL", "cannot read repository owner/missing: "
+                                   "gh: Not Found (HTTP 404)")])
 
     def test_without_a_milestone_none_is_read(self) -> None:
         self.assertEqual(self.failures(milestone=None), [])

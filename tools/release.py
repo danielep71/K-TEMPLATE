@@ -24,7 +24,8 @@ Subcommands, all read-only apart from the files that bundle writes:
   ref, as in a rehearsal.
 - verify-published TAG --repository OWNER/NAME [--milestone N]
   [--asset FILE=SHA256 ...]
-  After publication, prints one line per fact and fails unless:
+  After publication, prints one line per fact and fails unless, with
+  OWNER/NAME read back from GitHub in its canonical letter case:
   - TAG is annotated on GitHub and points at the commit its Candidate line
     names;
   - Repository integrity succeeded on that commit;
@@ -352,6 +353,15 @@ def verify_published(repository: str, tag: str, milestone: int | None = None,
         version_of(tag)
     except ReleaseError as error:
         return [("FAIL", str(error))]
+    # GitHub resolves OWNER/NAME in any letter case, but the asset URLs, the
+    # bundle name and the attestation's signer carry the canonical one.
+    try:
+        canonical = mapping(gh_json(runner, "api", f"repos/{repository}")).get("full_name")
+    except ReleaseError as error:
+        return [("FAIL", f"cannot read repository {repository}: {error}")]
+    if not isinstance(canonical, str) or canonical.lower() != repository.lower():
+        return [("FAIL", f"repository {repository} resolves to {canonical}")]
+    repository = canonical
     fact, commit = published_tag(repository, tag, runner)
     facts = [fact]
     if commit is not None:
