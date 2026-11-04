@@ -60,10 +60,10 @@ SHELL_FENCES = frozenset({"", "sh", "bash", "shell", "zsh", "console", "terminal
                           "batch"})
 BLOCK_START = re.compile(r"\s*$|\s*(#|>|\||[-*+]\s|\d+[.)]\s)")
 CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.+?)(?<!`)\1(?!`)", re.S)
-# A word, quoted parts and placeholders such as ``<folder>`` included, or an
-# unquoted shell operator, which needs no spaces around it (``--check;``,
+# A word, quoted or escaped parts and placeholders such as ``<folder>``
+# included, or an unquoted shell operator, which needs no spaces around it (``--check;``,
 # ``2>&1``).
-TOKEN = re.compile(r"""(?:"[^"]*"|'[^']*'|<[^\s<>|&;]+>|[^\s"'|&;<>])+|[|&;<>]+\d?""")
+TOKEN = re.compile(r"""(?:"[^"]*"|'[^']*'|\\[^\s]|<[^\s<>|&;]+>|[^\s"'|&;<>])+|[|&;<>]+\d?""")
 OPERATOR = re.compile(r"[|&;<>]+\d?")
 INTERPRETER = re.compile(r"(?:python(?:3(?:\.\d+)?)?|py)(?:\.exe)?", re.I)
 # Interpreter options that take a value.

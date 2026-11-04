@@ -206,6 +206,7 @@ class CommandTests(unittest.TestCase):
             python tools/run.py out --commit abc --gone;
             python tools/run.py ";" --commit "&&" --quoted-semicolon
             python tools/run.py '|' --commit '>' --quoted-pipe
+            python tools/run.py \\; --commit abc --escaped
             ```
             """
         self.assertEqual(run_check(guide(text, run=TOOL)), [
@@ -213,7 +214,9 @@ class CommandTests(unittest.TestCase):
             "GUIDE.md:8: `python tools/run.py ; --commit && --quoted-semicolon`: "
             "unknown option --quoted-semicolon",
             "GUIDE.md:9: `python tools/run.py | --commit > --quoted-pipe`: "
-            "unknown option --quoted-pipe"])
+            "unknown option --quoted-pipe",
+            "GUIDE.md:10: `python tools/run.py \\; --commit abc --escaped`: "
+            "unknown option --escaped"])
 
     def test_a_hash_is_a_comment_only_where_a_word_starts(self) -> None:
         text = """\
