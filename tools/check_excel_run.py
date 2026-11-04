@@ -30,6 +30,8 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
 - each project suite the policy lists under "suites": its normal-run log
   holds what the suite writes, passes and is COMPLETE, from the same host,
   and its own certification log records that run and CERTIFICATION=PASS.
+  A suite that records results names its own results file, which its
+  certification entry point saves after its normal run.
   A policy that names a volume benchmark (a TEST_Benchmark module) as the
   harness or a suite is rejected.
   Every suite is read as the policy's Office bitness compiles it, so a case
@@ -39,12 +41,16 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   (AutomationSecurity) and the Trust access to the VBA project as found, the
   references (exactly those of the policy), that Debug > Compile VBAProject
   completed, and the outcome. An outcome other than PASS is evidence of that
-  outcome, never of a pass;
-- results.json, written by TEST_Harness.SaveResults, when the commit holds
-  accuracy contracts (tests/accuracy/contracts.json): tools/check_accuracy.py
-  measures them on it, against the commit's own test cases, so the results
-  must be of the commit, cover every output of the contracts' cases, lie
-  within each output's tolerance and within each contract's threshold;
+  outcome, never of a pass. A run that stopped early may write UNKNOWN for a
+  value it could not read, but no record may leave unread who ran it, when
+  or how it ended;
+- results.json, written by TEST_Harness.SaveResults after the example suite's
+  normal run, and the results file each project suite names, when the commit
+  holds accuracy contracts (tests/accuracy/contracts.json):
+  tools/check_accuracy.py measures them on all these files together, against
+  the commit's own test cases, so the results must be of the commit, held by
+  one file only, cover every output of the contracts' cases, lie within each
+  output's tolerance and within each contract's threshold;
 - with --workbook, the binding of the export to the workbook it came from:
   export-manifest.json (tools/devbuild/export_manifest.py) records the
   SHA-256 of the workbook and of every exported file, and the workbook's
@@ -60,9 +66,11 @@ byte once decompressed (binding VERIFIED, or FAIL). The parts, not the
 compressed package, are compared, because another platform's zlib may pack
 the same parts into other bytes.
 Excel compiles the project from source on open, so the code that ran is the
-commit's. Such a run, as tools/devbuild/excel_run.py records it without Trust
-access to the VBA project, may record compile=ON_DEMAND: only the modules the
-run called were compiled.
+commit's. Only a run checked this way may record compile=ON_DEMAND, as
+tools/devbuild/excel_run.py records it: no automated run can compile the
+whole project without Trust access to the VBA project, so VBA compiled only
+the modules the run called. Any other run must record compile=PASS from Debug >
+Compile VBAProject, which a person can run without Trust access.
 
 It proves only that this evidence is consistent with the commit. It does not
 run Excel, and a PASS validates a calculation only as far as the commit's
@@ -172,7 +180,8 @@ class PolicyError(Exception):
 @dataclass(frozen=True)
 class ProjectSuite:
     """A project suite: run once in NORMAL mode by its own certification entry point,
-    which saves its log and its certification log in the evidence folder."""
+    which saves its log, its certification log and, when it names one, its results
+    file in the evidence folder."""
 
     name: str
     source: str
@@ -181,6 +190,7 @@ class ProjectSuite:
     expected_assertions: int
     log: str
     certification: str
+    results: str | None = None
 
 
 @dataclass(frozen=True)
@@ -224,7 +234,8 @@ def parse_policy(text: str) -> Policy:
             tuple(ProjectSuite(str(item["name"]), str(item["source"]),
                                str(item["certification_entry_point"]), item["expected_cases"],
                                item["expected_assertions"], str(item["log"]),
-                               str(item["certification_log"]))
+                               str(item["certification_log"]),
+                               str(item["results"]) if "results" in item else None)
                   for item in data.get("suites", [])))
     except (ValueError, KeyError, TypeError) as error:
         raise PolicyError(f"{POLICY}: {error!r}") from error
@@ -249,7 +260,8 @@ def policy_problems(data: dict[str, Any], modes: list[tuple[str, str, Any]],
         problems.append("only NORMAL must pass; must_pass is true or false")
     files = [*policy.logs.values(), policy.certification, policy.host, policy.manifest,
              policy.results, policy.exported,
-             *(name for item in policy.project_suites for name in (item.log, item.certification))]
+             *(name for item in policy.project_suites
+               for name in (item.log, item.certification, item.results) if name is not None)]
     if len(set(files)) != len(files) or not all(files):
         problems.append("the logs and evidence files must be distinct and named")
     if any("/" in name or "\\" in name or name in (".", "..") for name in files):
@@ -766,9 +778,12 @@ def host_findings(host: dict[str, str], policy: Policy,
                   environment: dict[str, str]) -> list[str]:
     """What is wrong with the values of a host record, whatever its outcome. A run
     that stopped early may write UNKNOWN for what it could not read, apart from
-    who ran it, when and how it ended."""
+    who ran it, when and how it ended: no record leaves those unread."""
     outcome = host.get("outcome", "")
     findings = time_findings(host, policy)
+    if host.get("operator") == UNKNOWN:
+        findings.append(f"{policy.host}: operator={UNKNOWN}, but every record names who ran "
+                        "it, also that of a run that stopped early")
     expected = {"outcome": ", ".join(OUTCOMES), "bitness": ", ".join(OFFICE_BITNESS),
                 "automation_security": ", ".join(AUTOMATION_SECURITY),
                 "vba_project_access": ", ".join(VBA_PROJECT_ACCESS)}
@@ -1056,26 +1071,35 @@ def copy_cases(root: Path, commit: str, target: Path) -> None:
         destination.write_bytes(git(root, "show", f"{commit}:{name}"))
 
 
+def results_files(policy: Policy) -> list[str]:
+    """The results files of a run: the example suite's, then that of each project
+    suite that names one. BeginRun clears the results, so each suite saves its own."""
+    return [policy.results,
+            *(item.results for item in policy.project_suites if item.results is not None)]
+
+
 def check_results(root: Path, commit: str, folder: Path, evidence: Evidence,
                   policy: Policy) -> None:
-    """Measure the commit's accuracy contracts on the run's results file."""
+    """Measure the commit's accuracy contracts on the run's results files together."""
     registry = check_accuracy.REGISTRY.as_posix()
     try:
         git(root, "cat-file", "-e", f"{commit}:{registry}")
     except RuntimeError:
         evidence.accuracy.append(f"not measured: commit {commit[:12]} has no {registry}")
         return
-    path = folder / policy.results
-    if not path.is_file():
-        evidence.findings.append(f"{policy.results}: missing, but {registry} at {commit[:12]} "
-                                 "holds the accuracy contracts it must measure")
+    names = results_files(policy)
+    missing = [name for name in names if not (folder / name).is_file()]
+    evidence.findings += [f"{name}: missing, but {registry} at {commit[:12]} holds the "
+                          "accuracy contracts it must measure" for name in missing]
+    if missing:
         return
     with tempfile.TemporaryDirectory(prefix="excel-run-cases-") as temporary:
         cases = Path(temporary)
         copy_cases(root, commit, cases)
-        found, _, lines = check_accuracy.check(cases, path, commit, widening=False)
+        found, _, lines = check_accuracy.check(cases, [folder / name for name in names],
+                                               commit, widening=False)
     evidence.accuracy += lines
-    evidence.findings += [f"{policy.results}: {item}" for item in found]
+    evidence.findings += [f"{', '.join(names)}: {item}" for item in found]
 
 
 def suite_findings(policy: Policy | ProjectSuite, suite: Suite, source: bytes,

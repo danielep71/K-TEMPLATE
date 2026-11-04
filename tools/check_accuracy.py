@@ -20,9 +20,11 @@ Without a results file, the check reads the registry against the cases:
   calculation, regime and metric, a threshold no larger, and every quantity
   and case it had.
 
-With --results, a results file of an Excel run, it also fails:
+With --results, a results file of an Excel run, it also fails; repeated, it
+measures the results files of several suites together:
 - results of another revision: their commit is the full SHA of the candidate,
   --commit when given, HEAD otherwise;
+- a result that two results files both hold;
 - an output with no result;
 - a result outside its expected output's own tolerance;
 - a contract whose worst error, among its calibration or among its holdout
@@ -398,6 +400,27 @@ def read_results(path: Path, root: Path, candidate: str | None,
     return results
 
 
+def merged_results(paths: Sequence[Path], root: Path, candidate: str | None,
+                   report: Report) -> dict[Key, float] | None:
+    """The results of every file together; None when one is unusable. A result that
+    two files both hold is a finding: each output is computed by one suite."""
+    merged: dict[Key, float] = {}
+    origin: dict[Key, Path] = {}
+    usable = True
+    for path in paths:
+        results = read_results(path, root, candidate, report)
+        if results is None:
+            usable = False
+            continue
+        for key, value in results.items():
+            if key in origin:
+                report.add(str(path), f"{label(key)} is also in {origin[key]}")
+                continue
+            origin[key] = path
+            merged[key] = value
+    return merged if usable else None
+
+
 def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Mapping[Key, float],
             report: Report, where: str) -> list[str]:
     """Each output against its own tolerance and the contract; one summary line per split."""
@@ -423,14 +446,18 @@ def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Map
     return lines
 
 
-def check(root: Path, results_path: Path | None = None, commit: str | None = None,
+def check(root: Path, results_path: Path | Sequence[Path] | None = None,
+          commit: str | None = None,
           widening: bool = True) -> tuple[list[str], int, list[str]]:
     """The findings, the number of contracts and the measurement lines.
 
-    ``commit`` is the candidate the results must be of; HEAD when None.
+    ``results_path`` is one results file, or the files of several suites,
+    measured together. ``commit`` is the candidate the results must be of;
+    HEAD when None.
     ``widening`` False skips the comparison with the newest release tag, for a
     copy of a commit's cases without its Git history."""
     report = Report()
+    paths = [results_path] if isinstance(results_path, Path) else list(results_path or ())
     where = REGISTRY.as_posix()
     present = (root / REGISTRY).is_file()
     registry = read_registry(root, None, report, where)
@@ -439,13 +466,12 @@ def check(root: Path, results_path: Path | None = None, commit: str | None = Non
             # A deleted registry still may not drop a released frozen contract.
             for problem in widening_problems(root, Registry(), report):
                 report.add(where, problem)
-        if results_path is not None and not present:
+        if paths and not present:
             report.add(where, "is missing, so there is nothing to measure")
         return report.findings, 0, []
     calculations = read_methodology(root, Report()).calculations
     candidate = commit or (git(root, "rev-parse", "HEAD") or "").strip() or None
-    results = read_results(results_path, root, candidate, report) \
-        if results_path is not None else None
+    results = merged_results(paths, root, candidate, report) if paths else None
     lines: list[str] = []
     for contract in registry.contracts:
         at = f"{where}: {contract.id}"
@@ -463,12 +489,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--root", type=Path, default=ROOT,
                         help="repository root (default: this checkout)")
-    parser.add_argument("--results", type=Path,
-                        help="results file of an Excel run, to measure the contracts")
+    parser.add_argument("--results", type=Path, action="append",
+                        help="results file of an Excel run, to measure the contracts; "
+                             "repeat it for the results file of each suite")
     parser.add_argument("--commit",
                         help="full SHA of the candidate the results must be of (default: HEAD)")
     args = parser.parse_args(argv)
-    findings, contracts, lines = check(args.root.resolve(), args.results, args.commit)
+    findings, contracts, lines = check(args.root.resolve(), args.results or (), args.commit)
     for line in lines:
         print(line)
     for finding in findings:

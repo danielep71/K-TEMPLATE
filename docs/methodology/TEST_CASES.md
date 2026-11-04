@@ -388,9 +388,12 @@ release may publish as the calculation's accuracy.
 - **Measured on the workbook.** The contracts measure the workbook's results,
   which exist only after an Excel run. `python tools/check_accuracy.py`, which
   **Repository integrity** runs, checks the registry against the cases. With
-  `--results <file>`, the results file of an Excel run, it also fails on:
+  `--results <file>`, the results file of an Excel run, it also fails on the
+  items below. Repeat `--results` to measure the results files of several
+  suites together:
   - results of another revision: their `commit` must be the full SHA of the
     candidate, given with `--commit`, or HEAD by default;
+  - a result that two results files both hold;
   - an output without a result;
   - a result outside its own tolerance;
   - a worst error above the threshold, which it computes separately for the
@@ -410,12 +413,15 @@ release may publish as the calculation's accuracy.
 
 A result names its case, its variant (`null` for a JSON fixture), its
 quantity and its scope as in the expected file. In an Excel run, a suite
-records each result with `TEST_Harness.RecordResult`, and the certification
-saves them with `TEST_Harness.SaveResults` as `results.json` in the evidence
-folder, with the commit of the workbook's build stamp
-([harness guide](TEST_HARNESS.md#results)). `tools/check_excel_run.py` then
-measures the commit's contracts on that file, and fails the run when they do
-not hold.
+records each result with `TEST_Harness.RecordResult`, and its certification
+saves them with `TEST_Harness.SaveResults` in the evidence folder, with the
+commit of the workbook's build stamp
+([harness guide](TEST_HARNESS.md#results)): the example suite as
+`results.json`, a project suite in the file its entry in the
+[evidence policy](TEST_HARNESS.md#evidence-policy) names.
+`tools/check_excel_run.py` then measures the commit's contracts on all these
+files together, and fails the run when they do not hold. A contract whose
+outputs a project suite computes is therefore measured on that suite's file.
 
 <a id="categories"></a>
 

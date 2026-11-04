@@ -122,9 +122,10 @@ milestones and their pull requests.
   `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE`), beside
   Windows, the references and the compile mode. `excel_run.py` writes it also
   when the run stops early, and reads the macro settings without changing
-  them. `check_excel_run.py` rejects a record that lacks a field, and accepts
-  an outcome other than `PASS` only as evidence of that outcome; a record
-  written by hand in the earlier three-line form now fails (#244).
+  them. `check_excel_run.py` rejects a record that lacks a field or leaves
+  the operator unread (`operator=UNKNOWN`), and accepts an outcome other than
+  `PASS` only as evidence of that outcome; a record written by hand in the
+  earlier three-line form now fails (#244, #284).
 - `tools/check_independent.py`, which **Repository integrity** runs: it runs
   each independent implementation that `tests/independent/adapters.json`
   registers for an `IMPL-` source on the test cases, through an adapter that
@@ -211,11 +212,15 @@ milestones and their pull requests.
   decision. With `--results`, the check measures the results of an Excel run.
   The template's illustrative contract stays a draft (#162). An Excel run now
   writes those results: a suite records them with `TEST_Harness.RecordResult`,
-  and the certification saves them as `results.json`, with the commit of the
-  workbook's build stamp. The example suite records the illustrative cases'
-  totals from `tests/fixtures/`, so its entry points take that folder.
-  `tools/check_excel_run.py` requires the file when the commit holds
-  contracts, and fails the run when they do not hold (#184).
+  and its certification saves them with the commit of the workbook's build
+  stamp, the example suite as `results.json` and a project suite in the
+  `results` file its entry in `.github/excel-evidence-policy.json` names. The
+  example suite records the illustrative cases' totals from `tests/fixtures/`,
+  so its entry points take that folder. `tools/check_excel_run.py` requires
+  every results file when the commit holds contracts, measures them together,
+  rejects a result that two files hold, and fails the run when the contracts
+  do not hold. A workbook imported by hand has no build stamp, so its run
+  fails while contracts exist (#184, #284).
 - A **Release** workflow: on a pushed `vX.Y.Z` tag it verifies the tag against
   the changelog, `VERSION`, the default branch, the tag message and
   **Repository integrity**. It builds a reproducible source bundle with its

@@ -26,7 +26,8 @@ and `EndRun`; and the expected case and assertion counts as constants. The
 expected values of a numerical case come from its
 [test case](TEST_CASES.md), with the tolerance that the case states. A case
 that computes an output of an accuracy contract also records it with
-`RecordResult`.
+`RecordResult`, and the suite's certification entry point saves those
+results in the suite's own results file.
 
 The example suite's entry points take the full path of `tests/fixtures/` in
 the checkout, from which its results case reads the illustrative test cases:
@@ -85,15 +86,20 @@ Public Sub CertifyProject(ByVal Folder As String, ByVal Fixtures As String)
         ' Run the suite in NORMAL mode, capturing its error as CertifyMode does,
         TEST_Harness.SaveLog Folder & "\project.log"
         TEST_Harness.CertifyRun "NORMAL", True, RunErrorNumber, RunErrorDescription
+        TEST_Harness.SaveResults Folder & "\project-results.json"
         TEST_Harness.EndCertification Folder & "\project-certification.log"
 End Sub
 ```
 
 List the suite under `suites` in the [evidence policy](#evidence-policy), with
-the names of its two logs. Each suite declares its counts for the Office
-bitness the policy supports: a case or assertion inside `#If Win64` counts
-only where that branch is compiled, and the check reads the suite the same
-way.
+the names of its two logs and, when it records results, of its results file.
+Each suite saves its results in a file of its own: `BeginRun` clears the
+results, so `SaveResults` writes only those of its own suite's run, and a
+project suite writing `results.json` would replace the example suite's file.
+A suite that records no result calls no `SaveResults` and names no results
+file. Each suite declares its counts for the Office bitness the policy
+supports: a case or assertion inside `#If Win64` counts only where that
+branch is compiled, and the check reads the suite the same way.
 
 ## Relation tests
 
@@ -290,14 +296,20 @@ empty commit, and a build with local changes writes its marked stamp; the
 accuracy check rejects both. This is the only part of a workbook the harness
 reads, and it writes none.
 
+Each certification saves the results of its own normal run: the example
+suite as `results.json`, a project suite in the file its `suites` entry names.
+`check_excel_run.py` measures the accuracy contracts on all these files
+together, and rejects a result that two of them hold: each output is computed
+by one suite.
+
 ## Evidence folder
 
 | File | Written by |
 | --- | --- |
 | `examples.log`, `injected.log`, `skipped.log` | `CertifyExamples`, one per mode |
-| `results.json` | `SaveResults`, after the normal run |
+| `results.json` | `SaveResults`, after the example suite's normal run |
 | `certification.log` | `EndCertification` |
-| A log and a certification log per project suite, as `suites` names them | Its certification entry point |
+| A log and a certification log per project suite, and its results file when it names one, as `suites` names them | Its certification entry point |
 | `exported/` | By hand only: every VBA component exported back from the workbook after the run, each form with its `.frx`. Without it, `check_excel_run.py --workbook` proves identity by rebuilding the commit |
 | `host.txt` | You, or `tools/devbuild/excel_run.py`: the [host record](#host-record), also for a run that stopped early |
 | `export-manifest.json` | By hand only: `tools/devbuild/export_manifest.py`, the SHA-256 of the workbook and of every exported file, which binds the export to the workbook |
@@ -318,7 +330,7 @@ reads, and it writes none.
 | `automation_security` | `Application.AutomationSecurity` as found: `Low`, `ByUI` or `ForceDisable` (1, 2 or 3). It is read, never set |
 | `vba_project_access` | *Trust access to the VBA project object model* as found: `TRUSTED` or `NOT_TRUSTED` |
 | `references` | The ticked references, separated by `; ` |
-| `compile` | `PASS` when **Debug → Compile VBAProject** completed, `ON_DEMAND` for a run without Trust access, or what the compile reported |
+| `compile` | `PASS` when **Debug → Compile VBAProject** completed, or what the compile reported. `ON_DEMAND` when VBA compiled only the modules the run called, as `tools/devbuild/excel_run.py` records it: no automated run can compile the whole project without Trust access. The check accepts `ON_DEMAND` only with identity by rebuild (`--workbook` and no `exported/` folder). A person compiles with **Debug → Compile VBAProject**, which needs no Trust access, and writes `PASS` |
 | `outcome` | How the run ended: `PASS`, `FAIL`, `IMPORT_FAILED`, `COMPILE_FAILED`, `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE` |
 
 `PASS` means every certification entry point returned, and `FAIL` that one
@@ -328,11 +340,16 @@ the run stopped before its end, the macros were not enabled, or Excel could
 not be started. A value that could not be read, such as a registry value whose
 read was denied, is `UNKNOWN`, never a default or a setting of lower
 precedence. Only the record of a run that stopped early may hold it; the check
-rejects it in the record of a `PASS`.
+rejects it in the record of a `PASS`. No record may leave unread who ran it,
+when or how it ended: the check rejects `UNKNOWN` in `operator`, `started`,
+`finished` and `outcome` whatever the outcome.
 
 `check_excel_run.py` rejects a record that lacks a field or holds a value
 outside this table, a time without its UTC offset, a finish before the start,
-or, for a `PASS`, an `excel` or `bitness` other than the logs' `ENVIRONMENT`.
+or, for a `PASS`, references other than exactly those of the
+[evidence policy](#evidence-policy), a `compile` other than `PASS` (or
+`ON_DEMAND` with identity by rebuild), or an `excel` or `bitness` other than
+the logs' `ENVIRONMENT`.
 It accepts any other outcome only as evidence of that outcome: the check then
 fails, whatever the rest of the folder holds.
 
@@ -345,8 +362,9 @@ holds what an Excel run must leave as evidence:
   module and certification entry point, and the case and assertion counts it
   declares as `EXPECTED_CASES` and `EXPECTED_ASSERTIONS`;
 - `suites`: the project suites, each with its name, source module,
-  certification entry point, counts, `log` and `certification_log`, run in
-  `NORMAL` mode after the example suite; empty in the template, and never a
+  certification entry point, counts, `log` and `certification_log`, and
+  `results` when it records results, run in `NORMAL` mode after the example
+  suite; empty in the template, and never a
   [volume benchmark](#volume-benchmarks);
 - `modes`: the three modes in run order, the log each one saves and whether
   it must pass (only `NORMAL`);
@@ -387,6 +405,6 @@ Without Excel, `tests/test_vba_harness.py` checks what the source can show:
   relation case asserts both `holds` and `detects-corruption`.
 
 `check_excel_run.py` proves that an evidence folder is consistent with a
-commit, and measures the commit's accuracy contracts on its results file. It
+commit, and measures the commit's accuracy contracts on its results files. It
 cannot see Excel: the host record, from the operator to the outcome, is the
 runner's own record.
