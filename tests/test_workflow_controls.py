@@ -535,9 +535,9 @@ class WorkflowControlTests(unittest.TestCase):
                 self.assertTrue({'day', 'time', 'timezone'} <= set(schedule), schedule)
                 self.assertIsInstance(update.get('open-pull-requests-limit'), int)
                 self.assertTrue(update.get('commit-message', {}).get('prefix'))
-                # A version update waits after its release, so a package that is
-                # withdrawn within days is never proposed.
-                self.assertGreaterEqual(update.get('cooldown', {}).get('default-days', 0), 7)
+                # A version update waits at least 14 days after its release, so a
+                # package that is withdrawn within days is never proposed.
+                self.assertGreaterEqual(update.get('cooldown', {}).get('default-days', 0), 14)
                 # A catch-all group keeps related pins, such as CodeQL's init
                 # and analyze steps, in a single pull request.
                 self.assertTrue(any('*' in group.get('patterns', [])
