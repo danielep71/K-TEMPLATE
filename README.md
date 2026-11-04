@@ -36,13 +36,29 @@ workbooks, such as SA-CCR, SFT, FRTB, LCR, and NSFR. It provides:
 GitHub copies files from a template, not its settings. In order:
 
 1. Create the repository with **Use this template**.
-2. Delete the template-only section of `AGENTS.md`, with its markers, point
-   the two contact links in `.github/ISSUE_TEMPLATE/config.yml` and the
-   traffic badges at the top of this README to the new repository, or remove
-   the badges, set `target-branch` in `.github/dependabot.yml` to its
-   release branch or remove it, and replace the entries and the link
-   references of `CHANGELOG.md` with the new repository's. **Repository
-   integrity** fails until you do.
+2. Adapt the files to the new repository, in a clean clone of it. The first
+   command lists the changes and writes nothing; `--apply` makes them. Neither
+   changes anything on GitHub. `PREFIX` is the project's short name, such as
+   `LCR`:
+
+   ```sh
+   python tools/initialize_repository.py --repository OWNER/NEW-REPO --regime PREFIX
+   python tools/initialize_repository.py --repository OWNER/NEW-REPO --regime PREFIX --apply
+   ```
+
+   It deletes the template-only section of `AGENTS.md`, with its markers,
+   points the two contact links in `.github/ISSUE_TEMPLATE/config.yml` and
+   the traffic badges at the top of this README to the new repository,
+   removes `target-branch` from `.github/dependabot.yml`, replaces the
+   entries and the link references of `CHANGELOG.md` with an empty
+   `[Unreleased]` section of the new repository, and replaces `<REGIME>` in
+   the naming table of `docs/VBA_HOUSE_STYLE.md`. Add
+   `--release-branch BRANCH` to point Dependabot at an existing release
+   branch instead, and `--remove-traffic-badges` to remove the badges. Review
+   the diff and commit it. You can then delete `tools/initialize_repository.py`
+   and `tests/test_initialize_repository.py`: nothing else uses them. Without
+   the initializer, make the same edits by hand. **Repository integrity**
+   fails until they are made.
 3. Enable Actions and let **Repository integrity** pass on the default branch.
 4. Apply and verify the settings baseline, as the
    [repository setup guide](docs/setup/REPOSITORY_SETUP.md) describes. It
