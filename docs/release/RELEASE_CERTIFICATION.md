@@ -31,7 +31,7 @@ empty or marked `NOT RUN` is never a pass.
 | Excel | Product, version and build, from **File → Account → About Excel** |
 | Bitness | 64-bit or 32-bit |
 | Windows | Edition, version and build, from `winver` |
-| References | The boxes ticked in **Tools → References** |
+| References | The boxes ticked in **Tools → References** for a run by hand, or the `references` line of `host.txt` for a run of `tools/devbuild/excel_run.py` |
 | Python, Git | Versions used for the repository checks |
 
 ### Static gates
@@ -48,7 +48,7 @@ empty or marked `NOT RUN` is never a pass.
 | --- | --- | --- |
 | Debug → Compile VBAProject | PASS, the error reported, or `ON_DEMAND`, which the check accepts only with identity by rebuild (`--workbook` and no `exported/` folder), as `tools/devbuild/excel_run.py` records it: VBA compiles only the modules the run calls, so list the modules it did not call as a limit | Host record |
 | Harness certification ([recording an Excel run](../../INSTALLATION.md#recording-an-excel-run)) | `CERTIFICATION=PASS` or `FAIL`, `COMPLETE` or `INCOMPLETE` | `certification.log` |
-| Workbook built from the candidate (`tools/devbuild/build_workbook.py`) | Its `build_commit` stamp, which must be the candidate without *NOT evidence-grade* | The workbook's SHA-256 in `export-manifest.json` |
+| Workbook built from the candidate (`tools/devbuild/build_workbook.py`) | Its `build_commit` stamp, which must be the candidate without *NOT evidence-grade* | For a run by hand, the workbook's SHA-256 in `export-manifest.json`; for a run of `tools/devbuild/excel_run.py`, `Binding: VERIFIED` by rebuild in the check report, with the SHA-256 of `test-results/build/Workbook-development.xlsm` |
 | `tools/check_excel_run.py --workbook … --require-binding` against the candidate | `Binding: VERIFIED` and `excel-run: PASS`, or each `FAIL` line | Its report, with the Git blob id of every component |
 | Accuracy contracts, measured on `results.json` and the results file of each project suite that names one | Each contract's worst calibration and holdout error against its threshold, from the report's `Accuracy:` lines; `frozen` or `draft` | The report and those results files |
 | Regression cases (validation plan) | Number run, passed, failed | Log or evidence folder |
