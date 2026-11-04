@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import subprocess
 import sys
 import tempfile
 import unittest
 import unittest.mock
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -80,6 +82,22 @@ class CheckTests(unittest.TestCase):
             "README.md: unsupported URL scheme: ftp://example.com",
         ])
 
+    def test_plain_http_links_are_errors_outside_code(self) -> None:
+        errors, external, _ = run_check({
+            "README.md": "[a](http://a.example/x) <http://b.example> [c](HTTP://c.example)\n"
+                         "[d]: http://d.example/\n<a href=\"http://e.example\">e</a>\n"
+                         "`[f](http://f.example)` and `<http://g.example>` are code\n\n"
+                         "```text\n[h](http://h.example)\n```\n[ok](https://ok.example)\n",
+        })
+        self.assertEqual(errors, [
+            "README.md: plain HTTP link, use https: http://a.example/x",
+            "README.md: plain HTTP link, use https: HTTP://c.example",
+            "README.md: plain HTTP link, use https: http://b.example",
+            "README.md: plain HTTP link, use https: http://d.example/",
+            "README.md: plain HTTP link, use https: http://e.example",
+        ])
+        self.assertEqual(external, {"https://ok.example"})
+
     def test_tracked_file_missing_from_the_working_tree_is_reported(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -125,10 +143,120 @@ class ExternalTests(unittest.TestCase):
 
         for code, returncode, status in (("200", 0, "PASS"), ("404", 0, "ERROR"),
                                          ("429", 0, "WARN"), ("503", 0, "WARN"),
-                                         ("", 6, "WARN")):
+                                         ("", 6, "WARN"), ("301", 1, "ERROR")):
             with self.subTest(code=code), unittest.mock.patch(
                     "check_links.subprocess.run", return_value=curl(code, returncode)):
                 self.assertEqual(check_links.check_external("https://x.example/")[0], status)
+
+    def test_requests_use_https_only(self) -> None:
+        with unittest.mock.patch("check_links.subprocess.run",
+                                 return_value=unittest.mock.Mock(stdout="200", returncode=0)) as run:
+            check_links.check_external("https://x.example/")
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("--proto") + 1], "=https")
+        self.assertEqual(command[command.index("--proto-redir") + 1], "=https")
+
+
+def write_exceptions(root: Path, data: object) -> None:
+    path = root / check_links.EXCEPTIONS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
+
+
+def exceptions_file(*entries: object) -> dict[str, object]:
+    return {"schema_version": 1, "exceptions": list(entries)}
+
+
+ENTRY: dict[str, object] = {"url": "https://slow.example/page",
+                            "reason": "Answers 403 to automated requests",
+                            "expires": "2027-01-31"}
+
+
+class ExceptionTests(unittest.TestCase):
+    def test_absent_file_means_no_exceptions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(check_links.load_exceptions(Path(directory)), ({}, []))
+
+    def test_valid_file_is_loaded_and_its_urls_must_be_linked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_exceptions(root, exceptions_file(ENTRY, {**ENTRY, "url": "https://gone.example/"}))
+            (root / "README.md").write_text("[slow](https://slow.example/page#part)\n",
+                                            encoding="utf-8")
+            exceptions, problems = check_links.load_exceptions(root)
+            errors, _, _ = check_links.check(root)
+        self.assertEqual(problems, [])
+        self.assertEqual(exceptions["https://slow.example/page"], check_links.LinkException(
+            "Answers 403 to automated requests", date(2027, 1, 31)))
+        self.assertEqual(errors, [".github/link-exceptions.json: https://gone.example/ is not "
+                                  "linked from any Markdown file; remove its exception"])
+
+    def test_malformed_files_fail(self) -> None:
+        name = ".github/link-exceptions.json"
+        cases: list[tuple[object, str]] = [
+            ("{", f"{name}: not valid UTF-8 JSON"),
+            ({"exceptions": []}, f"{name}: needs exactly schema_version 1 and an exceptions list"),
+            ({"schema_version": True, "exceptions": []}, f"{name}: needs exactly schema_version 1"),
+            ({"schema_version": 1, "exceptions": {}}, f"{name}: needs exactly schema_version 1"),
+            ({**exceptions_file(), "extra": 1}, f"{name}: needs exactly schema_version 1"),
+            (exceptions_file("x"), f"{name}: exception 1: needs exactly url, reason and expires"),
+            (exceptions_file({**ENTRY, "note": ""}), f"{name}: exception 1: needs exactly url"),
+            (exceptions_file({**ENTRY, "url": "http://slow.example/page"}),
+             f"{name}: exception 1: url must be an https URL without a fragment"),
+            (exceptions_file({**ENTRY, "url": "https://slow.example/page#x"}),
+             f"{name}: exception 1: url must be an https URL without a fragment"),
+            (exceptions_file(ENTRY, ENTRY),
+             f"{name}: exception 2: https://slow.example/page is listed twice"),
+            (exceptions_file({**ENTRY, "reason": " "}),
+             f"{name}: exception 1: https://slow.example/page needs a reason"),
+            (exceptions_file({**ENTRY, "expires": "31/01/2027"}),
+             f"{name}: exception 1: https://slow.example/page needs expires as YYYY-MM-DD"),
+            (exceptions_file({**ENTRY, "expires": 20270131}),
+             f"{name}: exception 1: https://slow.example/page needs expires as YYYY-MM-DD"),
+            (exceptions_file({**ENTRY, "expires": "2027-02-30"}),
+             f"{name}: exception 1: https://slow.example/page has an expires date that does not "
+             "exist"),
+        ]
+        for data, expected in cases:
+            with self.subTest(data=data), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                write_exceptions(root, data)
+                (root / "README.md").write_text("[slow](https://slow.example/page)\n",
+                                                encoding="utf-8")
+                errors, _, _ = check_links.check(root)
+                self.assertEqual(len(errors), 1, errors)
+                self.assertTrue(errors[0].startswith(expected), errors[0])
+
+    def test_tolerated_answer_fails_once_its_exception_expires(self) -> None:
+        exception = check_links.LinkException("Answers 403", date(2027, 1, 31))
+        url = "https://slow.example/page"
+        warn = ("WARN", f"{url}: unavailable for verification (HTTP 403)")
+        for today, listed, expected in ((date(2027, 1, 30), True, []),
+                                        (date(2027, 1, 31), True, []),
+                                        (date(2027, 2, 1), True, [
+                                            f"{url}: unavailable for verification (HTTP 403); its "
+                                            "exception in .github/link-exceptions.json expired "
+                                            "on 2027-01-31 (Answers 403)"]),
+                                        (date(2099, 1, 1), False, [])):
+            output = io.StringIO()
+            with self.subTest(today=today, listed=listed), unittest.mock.patch.object(
+                    check_links, "check_external", return_value=warn), \
+                    contextlib.redirect_stdout(output):
+                errors = check_links.external_errors(
+                    [url], "", {url: exception} if listed else {}, today)
+                self.assertEqual(errors, expected)
+                if listed and not expected:
+                    self.assertIn("tolerated until 2027-01-31 (Answers 403)", output.getvalue())
+
+    def test_exception_does_not_hide_an_error(self) -> None:
+        url = "https://gone.example/"
+        with unittest.mock.patch.object(check_links, "check_external",
+                                        return_value=("ERROR", f"{url}: HTTP 404")), \
+                contextlib.redirect_stdout(io.StringIO()):
+            errors = check_links.external_errors(
+                [url], "", {url: check_links.LinkException("Gone", date(2099, 1, 1))},
+                date(2027, 1, 1))
+        self.assertEqual(errors, [f"{url}: HTTP 404"])
 
 
 if __name__ == "__main__":

@@ -16,7 +16,8 @@ workbooks, such as SA-CCR, SFT, FRTB, LCR, and NSFR. It provides:
   and verified by a script that also writes a dated evidence record;
 - quality gates: Ruff, strict mypy and actionlint, plus tests that hold the
   workflows to pinned actions, explicit permissions and the required check, and
-  link checks: relative links and anchors on every change, external links weekly;
+  link checks: relative links, anchors and HTTPS on every change, external
+  links weekly;
 - static checks of exported VBA source and a layout formatter, run on every
   change;
 - a VBA test harness with a certification entry point, and an offline check
