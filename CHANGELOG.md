@@ -165,9 +165,10 @@ milestones and their pull requests.
   the workbook from a copy of the template, keeping its formats, print areas
   and protection: it sets the code names, writes the stamp and adds the VBA
   project, and two builds stay byte-identical. Without a template it writes
-  blank sheets as before. The protection matrix,
-  `docs/methodology/workbook-protection.json`, states each sheet's protection
-  options and its input (unlocked) and output (locked) ranges;
+  blank sheets as before. A protection matrix, by convention
+  `docs/methodology/workbook-protection.json` and added with the template,
+  states each sheet's protection options and its input (unlocked) and output
+  (locked) ranges;
   `tools/check_workbook_protection.py` fails **Repository integrity** when the
   template differs from it, and passes as inactive while neither exists (#243).
 - A machine-readable data contract, `docs/methodology/data-contract.json`,
@@ -257,8 +258,8 @@ milestones and their pull requests.
   [harness guide](docs/methodology/TEST_HARNESS.md) and
   [recording an Excel run](INSTALLATION.md#recording-an-excel-run) describe
   them, and the check is a release gate (#79).
-- Six static checks of exported VBA source, which **Repository integrity**
-  runs:
+- Seven static checks of exported VBA source, which **Repository integrity**
+  runs, the call check as advisory:
   - placement, names, encoding, options, layout and storage;
   - `#If` structure and `PtrSafe` in each compilation environment;
   - procedure-local jump targets;
@@ -268,7 +269,9 @@ milestones and their pull requests.
   - identifiers, in each compilation environment: a name a procedure assigns
     that nothing declares, a statement that calls a procedure no module
     provides, or a declaration named like a VBA keyword, such as
-    `Dim Empty()`. A statement it cannot read is a finding (#173).
+    `Dim Empty()`. A statement it cannot read is a finding (#173);
+  - the calls to the project's own procedures, as the
+    `tools/check_vba_calls.py` entry above describes (#249).
 
   The [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what they
   cannot prove (#70).

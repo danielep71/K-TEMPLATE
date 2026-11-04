@@ -58,7 +58,11 @@ GitHub copies files from a template, not its settings. In order:
    the diff and commit it. You can then delete `tools/initialize_repository.py`
    and `tests/test_initialize_repository.py`: nothing else uses them. Without
    the initializer, make the same edits by hand. **Repository integrity**
-   fails until they are made.
+   fails while the `AGENTS.md` section remains, a contact link or traffic
+   badge names another repository, `target-branch` names a branch that does
+   not exist, or a link reference of `CHANGELOG.md` points to another
+   repository. It does not check the changelog's entries or `<REGIME>`:
+   replacing them is a manual step, which the initializer makes for you.
 3. Enable Actions and let **Repository integrity** pass on the default branch.
 4. Apply and verify the settings baseline, as the
    [repository setup guide](docs/setup/REPOSITORY_SETUP.md) describes. It
