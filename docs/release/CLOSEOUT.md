@@ -2,9 +2,14 @@
 
 The record for closing a milestone: what was delivered, what evidence shows
 it, and what closing it does and does not mean. Copy the template below into
-an issue for the milestone, and close the milestone only when every row links
-its evidence or records a deviation. Closing a milestone publishes nothing;
-a release follows [RELEASING.md](../../RELEASING.md) separately.
+an issue filed under the next milestone, not the one it closes, so that the
+milestone can close while the record stays open
+([release records](../../RELEASING.md#release-records)). Close the milestone
+only when every checklist row links its evidence or records a deviation; for
+a released milestone that is step 7 of RELEASING.md, before publication.
+Close this issue after the last step of its sequence. Closing a milestone
+publishes nothing; a release follows [RELEASING.md](../../RELEASING.md)
+separately.
 
 When the milestone is released, check the published release as
 [RELEASING.md step 7](../../RELEASING.md#7-publish-and-verify) describes:
@@ -32,7 +37,7 @@ and the Excel checks of an attached workbook stay manual
 | 2 | Step 1 | The file audit below |
 | 3 | Step 2 | The candidate record, the evidence index and the scope statement |
 | 4 | Step 3, if I decide to release | RELEASING.md, preparation steps |
-| 5 | Step 4, after publication | The output of `tools/release.py verify-published --milestone N`, added to this issue |
+| 5 | Step 4, after the milestone is closed and the release published | The output of `tools/release.py verify-published --repository OWNER/REPOSITORY --milestone N`, added to this issue |
 
 ### Checklist
 

@@ -19,7 +19,10 @@ neither a commit log nor release evidence. **No version has been released.**
   that describes a change to unreleased work: an entry describes what the
   release contains.
 - Entries move into a dated section only when a release is prepared, as
-  [RELEASING.md](RELEASING.md) describes. A published section is not
+  [RELEASING.md](RELEASING.md) describes. After that, until the tag exists,
+  a fix for a release gate that failed on the candidate records its change in
+  the dated section being released
+  ([step 2](RELEASING.md#2-integrate-and-freeze-the-candidate)). A published section is not
   rewritten; a demonstrable error is corrected in review, with a line
   `Corrected after release on YYYY-MM-DD: <reason>` in that section.
 
@@ -127,8 +130,9 @@ milestones and their pull requests.
   `PASS` only as evidence of that outcome; a record written by hand in the
   earlier three-line form now fails (#244, #284).
 - `tools/check_independent.py`, which **Repository integrity** runs: it runs
-  each independent implementation that `tests/independent/adapters.json`
-  registers for an `IMPL-` source on the test cases, through an adapter that
+  each independent implementation registered for an `IMPL-` source in
+  `tests/independent/adapters.json`, a file a project creates when it adds
+  one, on the test cases, through an adapter that
   translates each case into the implementation's input, and compares the
   results with the expected values within their tolerance. It lists the cases
   an implementation cannot represent, with the reason, and skips an adapter
@@ -406,6 +410,20 @@ milestones and their pull requests.
 
 ### Fixed
 
+- The release closeout can finish: the release certification, the
+  distribution review and the milestone closeout are issues of the next
+  milestone, and milestone N is closed in step 7, before publication, so
+  `tools/release.py verify-published --milestone N` can pass and **Issue
+  triage** still finds an open milestone for those issues; the checklist has
+  that gate, and every `verify-published` command names `--repository`. The
+  manual cleanup lists every edit the initializer makes, deleting `VERSION`
+  and resetting *Current status* included, and the initializer's
+  `--default-branch` help says what the link shows. The setup guide lists
+  `tests/test_check_issues.py` and `tests/test_repository_consistency.py`,
+  the changelog policy, the contributing guide and the pull request template
+  say where a release-gate fix records its change, the label guide matches
+  the workflows' write-permission list, and `tests/independent/adapters.json`
+  is described as a file to create (#302).
 - The methodology guides agree with each other, the illustrative data and
   the repository's configuration. The validation plan gives "independent" the
   test-case format's meaning: values the project computes by hand, in a

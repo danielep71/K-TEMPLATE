@@ -51,8 +51,10 @@ GitHub copies files from a template, not its settings. In order:
    the traffic badges at the top of this README to the new repository,
    removes `target-branch` from `.github/dependabot.yml`, replaces the
    entries and the link references of `CHANGELOG.md` with an empty
-   `[Unreleased]` section of the new repository, and replaces `<REGIME>` in
-   the naming table of `docs/VBA_HOUSE_STYLE.md`. Add
+   `[Unreleased]` section of the new repository, deletes `VERSION` and sets
+   the release rows of *Current status* in `RELEASING.md` to say that nothing
+   is released yet, since both describe the template's releases, and
+   replaces `<REGIME>` in the naming table of `docs/VBA_HOUSE_STYLE.md`. Add
    `--release-branch BRANCH` to point Dependabot at an existing release
    branch instead, and `--remove-traffic-badges` to remove the badges. Review
    the diff and commit it. You can then delete `tools/initialize_repository.py`
@@ -61,8 +63,9 @@ GitHub copies files from a template, not its settings. In order:
    fails while the `AGENTS.md` section remains, a contact link or traffic
    badge names another repository, `target-branch` names a branch that does
    not exist, or a link reference of `CHANGELOG.md` points to another
-   repository. It does not check the changelog's entries or `<REGIME>`:
-   replacing them is a manual step, which the initializer makes for you.
+   repository. It does not check the changelog's entries, `VERSION`,
+   *Current status* or `<REGIME>`: those are manual steps, which the
+   initializer makes for you.
 3. Enable Actions and let **Repository integrity** pass on the default branch.
 4. Apply and verify the settings baseline, as the
    [repository setup guide](docs/setup/REPOSITORY_SETUP.md) describes. It
