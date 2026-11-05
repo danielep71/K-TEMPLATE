@@ -166,7 +166,8 @@ repository the workflow needs GitHub Code Security and the repository variable
 The OpenSSF Scorecard workflow (`.github/workflows/scorecard.yml`) scores the
 default branch's supply-chain posture weekly and on each push to it. It
 publishes the results to the Scorecard service and to code scanning, and it is
-skipped on a private repository. A low check there, such as branch protection
+skipped on a private repository; it reads the visibility from the API, because
+a scheduled run carries no repository in its event. A low check there, such as branch protection
 or signed releases, points to a setting of this baseline or of the release
 process; it is not a required check.
 The **Release** workflow (`.github/workflows/release.yml`) attests the build

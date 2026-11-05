@@ -159,8 +159,11 @@ the failure in an issue.
 **Early warning in LibreOffice (optional).** Where LibreOffice and its
 Python UNO bridge are installed, `python3 tools/devbuild/lo_smoke.py` builds
 the development workbook and runs the harness certification in headless
-LibreOffice. It reports only failures that LibreOffice is not known to
-cause. LibreOffice is not a supported host, and this is never Excel
+LibreOffice; `python3 tools/devbuild/lo_smoke.py WORKBOOK` runs a workbook
+you built. It reports only failures that LibreOffice is not known to cause,
+and exits 0 when there is none, 1 on such a failure or when LibreOffice cannot
+run the workbook, and 2 for an unknown option, a missing workbook, or a
+missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
 evidence.
 
 <a id="running-the-harness"></a>

@@ -137,6 +137,27 @@ class ExternalTests(unittest.TestCase):
         self.assertEqual(errors, ["https://c.example/: HTTP 404"])
         self.assertEqual(sorted(call.args[0] for call in fake.call_args_list), sorted(results))
 
+    def test_a_local_run_skips_the_origin_repository(self) -> None:
+        # Without --repository or GITHUB_REPOSITORY, the origin remote names it.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "README.md").write_text(
+                "[own](https://github.com/Owner/Repo/blob/HEAD/x.md) [other](https://a.example/)\n",
+                encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "remote", "add", "origin",
+                            "git@github.com:owner/repo.git"], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "README.md"], check=True)
+            self.assertEqual(check_links.detect_repository(root), "owner/repo")
+            with unittest.mock.patch.dict("os.environ", {"GITHUB_REPOSITORY": ""}), \
+                    unittest.mock.patch.object(check_links, "check_external",
+                                               return_value=("PASS", "ok")) as fake, \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(check_links.main(["--root", str(root), "--external"]), 0)
+        self.assertEqual([call.args[0] for call in fake.call_args_list], ["https://a.example/"])
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(check_links.detect_repository(Path(directory)), "")
+
     def test_http_codes_are_classified(self) -> None:
         def curl(code: str, returncode: int = 0) -> unittest.mock.Mock:
             return unittest.mock.Mock(stdout=code, returncode=returncode)
