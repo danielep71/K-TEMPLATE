@@ -406,6 +406,21 @@ milestones and their pull requests.
 
 ### Fixed
 
+- The methodology guides agree with each other, the illustrative data and
+  the repository's configuration. The validation plan gives "independent" the
+  test-case format's meaning: values the project computes by hand, in a
+  spreadsheet or with its own script are `illustrative` cross-checks, and a
+  rule is validated only by `published` or `independent` values; the
+  validation matrix uses the traceability statuses. The data contract's file
+  format states the fixed rules its validator applies. `.gitattributes`,
+  `.editorconfig` and the guides name the source register in `SOURCES.md`.
+  The illustrative settings area is typed only in its value column `C5`, with
+  its size in the contract, and the protection example and the case-runner
+  skeleton follow it. The illustrative expected values cite rule
+  `CALC-01.1`, the *Outputs* template names each output's quantity, default
+  tolerances go in the calculation contracts' common rules, a fixture
+  record's `id` carries the dataset's identifier field, and the protection
+  check is described as it compares options (#301).
 - A project suite can be certified with a runner of its own: its `suites`
   entry may name it as `runner` (`RunSuite` by default), and the harness
   guide states the shape `tools/check_excel_run.py` reads, so the relation

@@ -246,10 +246,10 @@ VERSION         text eol=lf
 #------------------------------------------------------------------------------
 # REGULATORY SOURCE COPIES
 #------------------------------------------------------------------------------
-# Reserve this directory for byte-preserved source copies. Record their
-# SHA-256 hashes in its README when adding source material.
-# Never normalized, so the checked-out bytes keep the registered hash; the
-# README itself is ordinary documentation.
+# Reserve this directory for byte-preserved source copies. Record each
+# copy's SHA-256 in the register of docs/methodology/SOURCES.md.
+# Never normalized, so the checked-out bytes keep the registered hash. A
+# README in the directory, by convention, is ordinary documentation.
 docs/methodology/sources/**             -text
 docs/methodology/sources/README.md      text eol=lf
 

@@ -71,7 +71,7 @@ the methodology guides; remove them when you replace those.
 | Envelope | `schema_version` (1), `kind` (`test-fixture`), `id`, `synthetic` (`true`), `description`, `category`, `calculation`, `reporting_date`, `reporting_currency_code` and `datasets` are required, and no other key is allowed. An `invalid` case relaxes this for the calculation inputs ([invalid inputs](#invalid-inputs)) |
 | Calculation | A `CALC-` ID declared by a heading of the [calculation contracts](CALCULATION_CONTRACTS.md) |
 | Datasets | A non-empty object whose keys are `DS-` IDs declared in the *Datasets* table of the [data contract](DATA_CONTRACT.md); each holds a non-empty list of records |
-| Records | Each record has an `id`, unique in the fixture, and an `inputs` object |
+| Records | Each record has an `id`, unique in the fixture, and an `inputs` object. The `id` is the value of the dataset's identifier field, such as the illustrative `position_id`, so `inputs` leaves that field out; it holds every other field the case needs |
 | Inputs | Keys are lower snake case and end in a unit suffix (below). The field tables of the data contract decide which fields exist; a key is the field's name with the suffix of its unit, unless the name already ends in one, so the illustrative `notional` and `currency` are `notional_amount` and `currency_code`. Input files of a [file-based case](#file-based-cases) keep the field names of the data contract |
 | Currencies | `reporting_currency_code` is the currency of results. A record whose `inputs` hold an `_amount` key also holds `currency_code`, the currency of all its amounts, so a currency mismatch is always visible |
 | Illustrative entries | A `CALC-` or `DS-` ID marked *Illustrative* in its guide may be used only by an `illustrative-` case |
@@ -161,7 +161,7 @@ variant, so an `invalid` case needs a `_status` text output in each variant.
     {
       "quantity": "illustrative_total_notional_amount",
       "scope": null,
-      "rule": null,
+      "rule": "CALC-01.1",
       "value": 1000000,
       "unit": "EUR",
       "tolerance": {"absolute": 0.000001, "relative": 0.000000001},
@@ -184,7 +184,7 @@ variant, so an `invalid` case needs a `_status` text output in each variant.
 | --- | --- |
 | Envelope | `schema_version` (1), `kind` (`test-expected`), `fixture` (the case ID) and a non-empty `outputs` list are required |
 | Scope | `null` for a result of the whole calculation, or `{"dataset": "DS-NN", "record": "<id>"}` for a result of one record of the fixture |
-| Quantity | Lower snake case, named as the calculation contract's outputs. Only an `illustrative-` case may use a name starting with `illustrative_` |
+| Quantity | Lower snake case, the *Quantity* of one of the calculation contract's *Outputs*. Only an `illustrative-` case may use a name starting with `illustrative_` |
 | Number | `value`, `unit` and `tolerance`. `unit` is a currency code for an amount, `1` for a rate, weight or factor, or `years` |
 | Text | `text`, compared exactly, with no `unit` or `tolerance`. A rejection is a text output whose quantity ends in `_status` |
 | Rule | A step of the case's calculation, `CALC-NN.<step>`, such as `CALC-01.2` for step 2 of its *Rules* table. It may be `null` only for an `illustrative` value |
@@ -316,8 +316,10 @@ An actual result `a` matches the expected value `e` when
 
 Both bounds are stated on every numeric output, as finite numbers of at least
 0; there is no hidden default. Both 0 means an exact comparison. Record the
-project's default bounds here once they are decided, with the issue that
-decided them. A common starting point:
+project's default bounds in the *Common rules* of the
+[calculation contracts](CALCULATION_CONTRACTS.md#common-rules) once they are
+decided, with the decision in that guide's *Decisions* table. A common
+starting point:
 
 | Reference | `absolute` | `relative` |
 | --- | --- | --- |

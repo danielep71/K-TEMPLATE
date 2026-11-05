@@ -165,8 +165,8 @@ tolerance, and restores the sheets. It needs the input and result areas of the
 yet, so it ships no runner. The suite's runner calls one procedure per test
 case, `RunCase "<case-id>"`, which follows this skeleton; it uses the
 contract's illustrative `Inputs_Settings` area and `M_Run.RunCalculation`
-entry point, and the constants `SETTING_ROWS` and `SETTING_COLUMNS`, the
-size of that area:
+entry point, and the constant `SETTING_ROWS`, the number of rows the
+contract fixes for that area (one):
 
 ```vb
 Private Sub RunCase(ByVal CaseId As String)
@@ -182,7 +182,7 @@ Private Sub RunCase(ByVal CaseId As String)
         On Error GoTo Failed
         TEST_Harness.BeginCase CaseId
         Set Anchor = ThisWorkbook.Names("Inputs_Settings").RefersToRange
-        Set Area = Anchor.Offset(1, 0).Resize(SETTING_ROWS, SETTING_COLUMNS)
+        Set Area = Anchor.Offset(1, 1).Resize(SETTING_ROWS, 1)
         Saved = Area.Value
         RestoreDue = True
         ' Write the case's inputs to Area, then run the entry point:
@@ -229,11 +229,13 @@ End Sub
   directory of a [file-based case](TEST_CASES.md#file-based-cases).
 - **The area.** The defined name of an area is its table anchor, which
   refers to one cell, the area's first header cell
-  ([areas](WORKBOOK_CONTRACT.md#areas)). The runner derives the area from
-  it: the rows below the anchor, sized by constants that the workbook
-  contract fixes, as above, or `Anchor.CurrentRegion` less its header row
-  for an area whose number of rows varies and that blank cells separate
-  from its neighbours. State in the suite which one it uses. Capturing the
+  ([areas](WORKBOOK_CONTRACT.md#areas)). The runner derives the cells it
+  writes from it: in a settings area, only the value column of the rows
+  below the anchor, which users type and the sheet leaves unlocked, sized by
+  the rows the workbook contract fixes, as above; in an area whose number of
+  rows varies and that blank cells separate from its neighbours,
+  `Anchor.CurrentRegion` less its header row, limited to its input columns.
+  State in the suite which one it uses. Capturing the
   anchor alone would restore one cell, and `inputs-restored` would pass while
   the rest of the area kept the case's inputs.
 - **The sheets.** It captures an area before changing it and restores it on

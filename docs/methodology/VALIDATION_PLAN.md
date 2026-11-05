@@ -11,29 +11,42 @@ Code review and passing repository checks are necessary, but they are not
 evidence that a figure is right: the static checks never run Excel or a
 calculation.
 
-## Independent reference values
+## Reference values
 
-An expected result is computed outside the workbook: by hand, in a separate
-spreadsheet that shares no formulas with it, or by a script, for example in
-Python or R. Record how each value was derived and who derived it. A
-reference script is a test tool, never a runtime dependency of the workbook.
+An expected result is never taken from the workbook. Two kinds of value
+validate a rule:
+
+- **Published:** printed in a registered [source](SOURCES.md), such as a
+  worked example of the regulation.
+- **Independent:** computed by an external implementation by another author,
+  registered in the source register with an `IMPL-` ID.
+
+A value the project computes itself, by hand, in a separate spreadsheet that
+shares no formulas with the workbook, or with a script under
+`tests/derivations/`, for example in Python or R, is an `illustrative`
+cross-check: it catches defects, but it validates no rule. Record how each
+value was derived and who derived it. A reference script is a test tool,
+never a runtime dependency of the workbook.
 
 Each comparison has an absolute and a relative tolerance, with the reason for
 them: the source's own rounding, or the precision of `Double` arithmetic.
 
 The [numerical test cases](TEST_CASES.md) record each expected value with its
 reference class (`published`, `independent` or `illustrative`), its source,
-its derivation and its tolerance. Only `published` and `independent` values
-validate a rule.
+its derivation and its tolerance
+([reference classes](TEST_CASES.md#reference-classes)). Only `published` and
+`independent` values validate a rule: a rule reaches *Validated* in the
+[traceability table](#traceability) only through one of them.
 
 ## Validation matrix
 
-| Calculation | Independent checks | Evidence | Status |
+| Calculation | Reference values | Evidence | Status |
 | --- | --- | --- | --- |
-| *Illustrative:* `CALC-01` | Hand-computed totals for a synthetic portfolio; empty input; invalid input rejected | Evidence record per release candidate | Not started |
+| *Illustrative:* `CALC-01` | `illustrative` cross-checks only: hand-computed totals for a synthetic portfolio, empty input, invalid input rejected; no `published` or `independent` value yet | Evidence record per release candidate | Not implemented |
 
-The [traceability table](#traceability) gives the status of each rule of a
-calculation.
+The *Status* of a calculation is the least advanced
+[traceability](#traceability) status of its rules: *Validated* only when every
+rule is.
 
 Cover, for each calculation, with the case categories of the
 [test-case format](TEST_CASES.md#categories):
@@ -157,4 +170,4 @@ measured.
 
 | Decision | Options | Issue |
 | --- | --- | --- |
-| *Illustrative:* which tool produces the reference values | By hand, separate spreadsheet, script | Link |
+| *Illustrative:* where the reference values that validate `CALC-01` come from | A worked example of a registered source (`published`); an external implementation by another author (`independent`, `IMPL-`) | Link |

@@ -24,13 +24,19 @@ in this encoding.
 
 ## File format
 
-State, for each file the workbook imports:
+State, for each delimited text file the workbook imports, its encoding,
+delimiter and decimal separator in `data-contract.json`. The rest of the
+format is fixed, so that the [reference validator](#reference-validator) and
+the workbook read a file the same way:
 
-- the encoding, delimiter, decimal separator and quoting;
-- the date format, ISO 8601 (`YYYY-MM-DD`) unless the provider imposes
-  another;
-- whether a header row is required, and whether column order matters;
-- how a missing value is written, kept distinct from zero.
+- dates are ISO 8601, `YYYY-MM-DD`;
+- the first row is a header that names each column by its field name, and
+  the columns may come in any order;
+- a missing value is an empty cell, kept distinct from zero;
+- a cell may be quoted with double quotes.
+
+A provider file in another format is converted before it reaches the
+workbook, and the conversion is recorded as a *Decision* below.
 
 ## Fields
 
@@ -167,4 +173,4 @@ made.
 
 | Date | Decision | Reason | Issue |
 | --- | --- | --- | --- |
-| *Illustrative* | How a missing value is written in a file | Why | Link |
+| *Illustrative* | How a provider file with another date format is converted to ISO 8601 before import | Why | Link |
