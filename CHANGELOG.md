@@ -313,6 +313,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The **Traffic alert** job reads the `traffic-history` commit that its
+  collection pushed, or merged onto when nothing changed, which the collect
+  job outputs as `history-sha`, not the branch's current tip; it stops when
+  that output is missing, and a workflow control test keeps the binding
+  (#304).
 - External links must use HTTPS: `tools/check_links.py` fails a plain
   `http://` link in a Markdown link, a reference definition, an autolink or an
   HTML attribute, outside code, in **Repository integrity**, and the weekly
@@ -356,8 +361,10 @@ milestones and their pull requests.
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
   open or closed, still carries: with `prune: true`, it checks every label it
-  would delete and stops before any change. A name with a comma is refused,
-  because its use cannot be queried (#188).
+  would delete and stops before any change. A name with a comma, which the
+  API's label filter cannot query, is checked against the labels of every
+  issue and pull request, up to 10,000; a malformed response or the limit
+  stops it (#188, #305).
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may
@@ -444,6 +451,11 @@ milestones and their pull requests.
   read of `excel_run.py`, the setup guide lists `tests/test_excel_run.py`
   with the devbuild tools, and the repository structure names
   `docs/release/`, `docs/licenses/` and the harness guide (#287).
+- **Repository integrity** passes in a repository that retired the setup
+  tooling: the test that compares the guide's *Remove once run* rows with
+  `tools/check_doc_commands.py` is skipped once
+  `docs/setup/REPOSITORY_SETUP.md` is deleted, and the retirement steps say
+  so and name `tools/check_doc_commands.py` with the link check (#298).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).
