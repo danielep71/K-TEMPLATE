@@ -7,7 +7,7 @@ component lives and which may call which; the
 repository and Excel. The template holds only the
 [VBA test harness](methodology/TEST_HARNESS.md), its example suite and the
 illustrative relation tests in `tests/modules/`, so the examples below name
-no existing component.
+no existing component other than those test modules.
 
 ## Naming and visibility
 
@@ -35,7 +35,8 @@ it is `<REGIME>_`, they accept any project prefix that is not a reserved one
 - A component's name equals its exported `Attribute VB_Name` and its file
   name stem.
 - VBA names are case-insensitive, and the VBE re-cases every use of a name to
-  its latest spelling. Review case changes in a diff before accepting them.
+  its latest spelling ([HB-01](methodology/VALIDATION_PLAN.md#host-behaviour)).
+  Review case changes in a diff before accepting them.
 - Single-letter names are for loop counters only.
 - There are no mutable public variables.
 
@@ -202,7 +203,7 @@ What they cannot prove:
   a worksheet, which a document module may name. Its built-in callees, such as
   `MsgBox` and `DoEvents`, are listed in `BUILTIN_CALLS`, a form's or document
   module's own methods, such as `Hide` or `Protect`, in `HOST_CALLS`, and the
-  host properties assignable without a declaration in `HOST_TARGETS`:
+  host properties assignable without a declaration in `HOST_TARGETS`, such as
   `Range`, `Cells` and `Selection` anywhere, a UserForm's `Caption` or
   `Width` in a form, a workbook's `Saved` or a worksheet's `Visible` in a
   document module. Extend the list when code calls or assigns a built-in it

@@ -406,6 +406,20 @@ milestones and their pull requests.
 
 ### Fixed
 
+- A project suite can be certified with a runner of its own: its `suites`
+  entry may name it as `runner` (`RunSuite` by default), and the harness
+  guide states the shape `tools/check_excel_run.py` reads, so the relation
+  tests can be certified with `"runner": "RunRelationTests"`; a `RunCase`
+  runner is not certifiable as it stands. The Excel evidence documents agree
+  with the code: `SECURITY.md` lists the harness's read of `build_commit`,
+  `UNKNOWN` is allowed in any record that did not pass but never in
+  `operator`, `started`, `finished` or `outcome`, a one-command run records
+  the build's references, and the installation guide's rejection table
+  covers the project suites. The host behaviour register has `HB-06` (End
+  or Reset clears the harness's state) and `HB-07` (the Immediate window
+  keeps 200 lines), both `assumed`, and the guides cite them and `HB-01`;
+  `HOST_TARGETS` and the house style's examples are described consistently
+  (#300).
 - `tools/release.py notes` and `bundle` report a failure on a FAIL line
   instead of a traceback, and `verify` reports a missing tag as a finding.
   `tools/check_links.py --external` skips the repository's own links locally

@@ -15,6 +15,7 @@ run.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import io
 import json
 import re
@@ -667,6 +668,17 @@ class EvidenceTest(unittest.TestCase):
         self.assertFinding(edit("host.txt", "vba_project_access=NOT_TRUSTED",
                                 "vba_project_access=UNKNOWN"), "vba_project_access=UNKNOWN, but")
 
+    def test_a_record_that_did_not_pass_may_leave_a_host_value_unread(self) -> None:
+        # FAIL is not PASS: its record may hold UNKNOWN as a stopped run's may,
+        # but never for who ran it, when or how it ended.
+        failed = HOST.replace("windows=Windows 11 Pro 24H2, OS build 26100.4061",
+                              "windows=UNKNOWN").replace("outcome=PASS", "outcome=FAIL")
+        host = dict(line.split("=", 1) for line in failed.splitlines())
+        self.assertEqual(check_excel_run.host_findings(host, POLICY, {}), [])
+        unread = dict(host, started="UNKNOWN")
+        self.assertTrue(any("started" in item
+                            for item in check_excel_run.host_findings(unread, POLICY, {})))
+
     def test_no_record_leaves_the_operator_unread(self) -> None:
         unread = "host.txt: operator=UNKNOWN, but every record names who ran it"
         self.assertFinding(edit("host.txt", "operator=Fixture Operator", "operator=UNKNOWN"),
@@ -969,6 +981,8 @@ class PolicyTest(unittest.TestCase):
                 dict(PROJECT_ENTRY, results="")),
             "KeyError": lambda data: data["suites"].append(
                 {key: value for key, value in PROJECT_ENTRY.items() if key != "log"}),
+            "name of a VBA procedure": lambda data: data["suites"].append(
+                dict(PROJECT_ENTRY, runner="Run Suite")),
         }
         for text, change in cases.items():
             with self.subTest(text=text), self.assertRaises(check_excel_run.PolicyError) as raised:
@@ -978,6 +992,29 @@ class PolicyTest(unittest.TestCase):
             lambda data: data["suites"].append(PROJECT_ENTRY)))
         self.assertEqual([item.name for item in accepted.project_suites], ["project"])
         self.assertIsNone(accepted.project_suites[0].results)
+        self.assertEqual(accepted.project_suites[0].runner, "RunSuite")
+        named = check_excel_run.parse_policy(policy_text(
+            lambda data: data["suites"].append(dict(PROJECT_ENTRY, runner="RunRelationTests"))))
+        self.assertEqual(named.project_suites[0].runner, "RunRelationTests")
+
+    def test_a_suite_is_read_through_the_runner_its_entry_names(self) -> None:
+        # The relation tests, as the harness guide says to certify them: their
+        # runner is RunRelationTests, not RunSuite.
+        source = (SOURCE / "tests/modules/TEST_Relations.bas").read_bytes()
+        suite = read_suite(source, "64-bit", "RunRelationTests")
+        self.assertEqual(suite.cases, ["zero-input", "additivity", "symmetry", "monotonicity"])
+        self.assertEqual((len(suite.assertions), suite.expected_cases,
+                          suite.expected_assertions), (8, 4, 8))
+        self.assertIn("additivity/detects-corruption", suite.assertions)
+        entry = check_excel_run.ProjectSuite(
+            "relations", "tests/modules/TEST_Relations.bas", "RunRelationTests", 4, 8,
+            "relations.log", "relations-certification.log", runner="RunRelationTests")
+        self.assertEqual(check_excel_run.suite_findings(entry, suite, source, "x"), [])
+        unread = check_excel_run.suite_findings(
+            dataclasses.replace(entry, runner="RunSuite"), read_suite(source, "64-bit"), source, "x")
+        self.assertEqual(len(unread), 1)
+        self.assertIn("no suite in tests/modules/TEST_Relations.bas at x: RunSuite calls no "
+                      "Case procedure", unread[0])
         saving = check_excel_run.parse_policy(policy_text(
             lambda data: data["suites"].append(PROJECT_RESULTS_ENTRY)))
         self.assertEqual(check_excel_run.results_files(saving),
