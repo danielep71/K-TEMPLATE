@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+SETUP_GUIDE = ROOT / "docs/setup/REPOSITORY_SETUP.md"
 sys.path.insert(0, str(ROOT / "tools"))
 
 import check_doc_commands  # noqa: E402
@@ -291,12 +292,30 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(code, 0, output.getvalue())
         self.assertIn("documented-commands: PASS", output.getvalue())
 
+    # A generated repository may retire the setup guide (its *Optional: retire
+    # the setup tooling* steps); the list has nothing to match then.
+    @unittest.skipUnless(SETUP_GUIDE.is_file(), f"{SETUP_GUIDE.relative_to(ROOT)} is retired")
     def test_removed_once_run_matches_the_setup_guide(self) -> None:
-        guide_text = (ROOT / "docs/setup/REPOSITORY_SETUP.md").read_text(encoding="utf-8")
+        guide_text = SETUP_GUIDE.read_text(encoding="utf-8")
         rows = [row.split("|")[1] for row in guide_text.splitlines()
                 if row.startswith("|") and "| **Remove once run** |" in row]
         tools = {name for row in rows for name in re.findall(r"`(tools/[^`]+\.py)`", row)}
         self.assertEqual(tools, set(check_doc_commands.REMOVED_ONCE_RUN))
+
+    def test_a_retired_setup_guide_skips_the_comparison(self) -> None:
+        # Run this module in a copy without the guide, as after the retirement steps.
+        name = "test_removed_once_run_matches_the_setup_guide"
+        with tempfile.TemporaryDirectory() as directory:
+            copy = Path(directory)
+            for path in ("tests/test_check_doc_commands.py", "tools/check_doc_commands.py"):
+                (copy / path).parent.mkdir(parents=True, exist_ok=True)
+                (copy / path).write_bytes((ROOT / path).read_bytes())
+            result = subprocess.run(
+                [sys.executable, "-m", "unittest", "-v", f"tests.test_check_doc_commands.RepositoryTests.{name}"],
+                cwd=copy, capture_output=True, text=True, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"{name} (", result.stderr)
+        self.assertIn("skipped 'docs/setup/REPOSITORY_SETUP.md is retired'", result.stderr)
 
     def test_every_tool_parser_is_readable(self) -> None:
         for path in sorted((ROOT / "tools").rglob("*.py")):

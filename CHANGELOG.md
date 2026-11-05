@@ -451,6 +451,11 @@ milestones and their pull requests.
   read of `excel_run.py`, the setup guide lists `tests/test_excel_run.py`
   with the devbuild tools, and the repository structure names
   `docs/release/`, `docs/licenses/` and the harness guide (#287).
+- **Repository integrity** passes in a repository that retired the setup
+  tooling: the test that compares the guide's *Remove once run* rows with
+  `tools/check_doc_commands.py` is skipped once
+  `docs/setup/REPOSITORY_SETUP.md` is deleted, and the retirement steps say
+  so and name `tools/check_doc_commands.py` with the link check (#298).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).

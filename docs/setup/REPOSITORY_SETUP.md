@@ -202,7 +202,9 @@ utilities. Keep them in the source template so future repositories receive them.
    `.github/workflows/scorecard.yml`: they are not part of the setup tooling.
    Every test in `tests/` other than `tests/test_setup_repository.py` stays
    after the setup tests are removed; without those setup and install steps,
-   the issue triage, workflow control and quality-gate tests fail.
+   the issue triage, workflow control and quality-gate tests fail. The test
+   that compares the *Remove once run* rows of this guide with
+   `tools/check_doc_commands.py` is skipped once the guide is deleted.
 4. Remove only the retired setup files, together:
 
    ```text
@@ -220,7 +222,8 @@ utilities. Keep them in the source template so future repositories receive them.
    commands of *Maintain the baseline* below. In `docs/release/CLOSEOUT.md`,
    replace criterion 5, which runs the setup script, with the way you now
    verify the settings. `python tools/check_links.py` lists any link left
-   behind.
+   behind, and `python tools/check_doc_commands.py` any command of a deleted
+   tool.
 6. Verify that the cleanup PR reports a passing **`Repository integrity`** check
    with the intended project checks, then merge it through the protected PR process.
 
