@@ -162,8 +162,8 @@ the development workbook and runs the harness certification in headless
 LibreOffice; `python3 tools/devbuild/lo_smoke.py WORKBOOK` runs a workbook
 you built. It reports only failures that LibreOffice is not known to cause,
 and exits 0 when there is none, 1 on such a failure or when LibreOffice cannot
-run the workbook, and 2 for an unknown option, a missing workbook, or a
-missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
+run the workbook, and 2 for an unknown option, a missing workbook, a missing
+or malformed evidence policy, or a missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
 evidence.
 
 <a id="running-the-harness"></a>

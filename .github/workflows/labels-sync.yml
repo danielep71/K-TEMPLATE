@@ -67,6 +67,9 @@ jobs:
     permissions:
       contents: read
       issues: write
+      # Without it the issues API omits pull requests, and pruning would
+      # delete a label that only pull requests carry.
+      pull-requests: read
 
     steps:
       - name: Check out the exact SHA to apply
