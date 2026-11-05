@@ -412,22 +412,27 @@ milestones and their pull requests.
 
 - The release closeout can finish: the release certification, the
   distribution review and the milestone closeout are issues of the next
-  milestone, and milestone N is closed in step 7, before publication, so
-  `tools/release.py verify-published --milestone N` can pass and **Issue
-  triage** still finds an open milestone for those issues; the checklist has
-  that gate, and every `verify-published` command names `--repository`. The
-  manual cleanup lists every edit the initializer makes, restoring the
-  changelog's "No version has been released" sentence, deleting `VERSION`
-  if it exists and resetting *Current status* included, and says which of
-  them **Repository integrity** checks; the initializer's `--default-branch`
-  help says what the link shows. The setup guide's handover table covers
-  every tracked file, names both traffic tests and describes each test of
-  `tests/test_repository_consistency.py`; the structure guide covers the
-  root files, the reserved `VERSION` and all of `.github/`; the changelog
-  policy, the contributing guide and the pull request template
-  say where a release-gate fix records its change, the label guide matches
-  the workflows' write-permission list, and `tests/independent/adapters.json`
-  is described as a file to create (#302, #318).
+  milestone, as `DISTRIBUTION.md` also says, and milestone N is closed in
+  step 7, before the GitHub Release is published, so `tools/release.py
+  verify-published --milestone N` can pass and **Issue triage** still finds
+  an open milestone for those issues. `RELEASING.md` and the closeout state
+  one rule: milestone N closes once the closeout checklist is complete for
+  the release candidate, which the closeout records and checks after step 2
+  freezes it, so that it names the tagged commit; the release checklist has
+  that gate, and every `verify-published` command names the tag and
+  `--repository`. The manual cleanup lists every edit the initializer makes,
+  restoring the changelog's "No version has been released" sentence,
+  deleting `VERSION` if it exists and resetting *Current status* included,
+  and says which of them **Repository integrity** checks; the initializer's
+  `--default-branch` help says what the link shows. The setup guide's
+  handover table covers every tracked file, names both traffic tests and
+  describes each test of `tests/test_repository_consistency.py`; the
+  structure guide covers the root files, the reserved `VERSION` and all of
+  `.github/`; the changelog policy, the contributing guide and the pull
+  request template say where a release-gate fix records its change, the
+  label guide matches the workflows' write-permission list, and
+  `tests/independent/adapters.json` is described as a file to create (#302,
+  #317, #318).
 - The methodology guides agree with each other, the illustrative data and
   the repository's configuration. The validation plan gives "independent" the
   test-case format's meaning: values the project computes by hand, in a

@@ -58,7 +58,9 @@ the next open milestone, the one after milestone N, never of N itself.
 no open issue, and **Issue triage** rejects an open issue in a closed
 milestone; records filed under N could then never be completed or closed.
 Open the next milestone first if there is none. Milestone N closes in step 7,
-before publication, once all of its own issues are closed.
+before the GitHub Release is published, once its closeout checklist is
+complete for the candidate; the checklist's first criterion is that every
+issue of N is closed.
 
 <a id="release-invariants"></a>
 
@@ -137,6 +139,10 @@ and `test-results/integrity/report.json` must name
 certification record. Confirm that **Repository
 integrity** is green on the same SHA on the default branch, and review the
 open alerts under **Security → Code scanning**.
+
+Complete the [milestone closeout](docs/release/CLOSEOUT.md) for this
+candidate: its candidate record, file audit and settings check, and the rest
+of its checklist. Records made on an earlier commit do not count.
 
 ### 4. Certify the workbook
 
@@ -231,8 +237,10 @@ attestation and no release.
 
 ### 7. Publish and verify
 
-Close milestone N on GitHub: every one of its issues is closed, as the
-closeout's first criterion requires, and the
+Close milestone N on GitHub once the
+[milestone closeout](docs/release/CLOSEOUT.md) checklist is complete for the
+candidate: every one of its issues is closed, as its first criterion
+requires, every other row links its evidence or records a deviation, and the
 [release records](#release-records) are in the next milestone. Then review
 the draft release that the **Release** workflow created. Title it
 `vX.Y.Z - <milestone title>`, and add the evidence summary to its notes.
@@ -383,6 +391,6 @@ Logs and artifacts expire, so copy the decisive lines.
 | 7 | Distribution review recorded and closed | ☐ |
 | 8 | I decided to publish | ☐ |
 | 9 | Annotated tag on the candidate | ☐ |
-| 10 | Milestone N closed with no open issue; the release records are in the next milestone | ☐ |
+| 10 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
 | 11 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
 | 12 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |
