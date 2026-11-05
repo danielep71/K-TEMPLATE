@@ -320,8 +320,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--release-branch", metavar="BRANCH",
                         help="Dependabot's target-branch (default: none, so the default branch)")
     parser.add_argument("--default-branch", default="main",
-                        help="the branch the changelog's [Unreleased] link compares (default: "
-                             "main)")
+                        help="the branch whose commits the changelog's [Unreleased] link shows "
+                             "(default: main)")
     parser.add_argument("--remove-traffic-badges", action="store_true",
                         help="remove the README's traffic badges instead of repointing them")
     parser.add_argument("--apply", action="store_true", help="write the changes")
