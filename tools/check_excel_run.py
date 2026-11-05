@@ -172,7 +172,8 @@ PROCEDURE = re.compile(r"^(?:Public|Private) Sub (\w+)\(.*?^End Sub$", re.M | re
 BEGIN_CASE = re.compile(r'TEST_Harness\.BeginCase "([^"]+)"')
 ASSERTION = re.compile(r'TEST_Harness\.Assert\w+ "([^"]+)"')
 CALL = re.compile(r"^\s+(Case\w+)$", re.M)
-IDENTIFIER = re.compile(r"[A-Za-z]\w*")
+# A VBA procedure name, as a project suite's runner gives it.
+PROCEDURE_NAME = re.compile(r"[A-Za-z]\w*")
 INJECTED_VALUE = re.compile(r'If mMode = "INJECTED_FAILURE" Then\s+\w+ = ([-+.\dE]+)\s')
 
 
@@ -295,7 +296,7 @@ def policy_problems(data: dict[str, Any], modes: list[tuple[str, str, Any]],
 def suite_problems(policy: Policy) -> list[str]:
     """What is wrong with the counts and runners the policy states for its suites."""
     problems = []
-    if any(not IDENTIFIER.fullmatch(item.runner) for item in policy.project_suites):
+    if any(not PROCEDURE_NAME.fullmatch(item.runner) for item in policy.project_suites):
         problems.append("a suite's runner must be the name of a VBA procedure")
     for suite in (policy, *policy.project_suites):
         for name in ("expected_cases", "expected_assertions"):

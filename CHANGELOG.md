@@ -251,7 +251,9 @@ milestones and their pull requests.
   `check_excel_run.py --workbook` bind an export to the workbook it came from
   (`VERIFIED`, `FAIL` or `UNVERIFIED`), and a release requires `VERIFIED`. An
   optional LibreOffice smoke test runs the harness certification as an early
-  warning, never as evidence (#100).
+  warning, never as evidence; it reads the example suite's entry point and
+  the names of its logs and results file from the evidence policy (#100,
+  #316).
 - A VBA test harness and an example suite in `tests/modules/`, with a
   certification entry point. It refuses state left by an earlier run,
   reports completeness apart from the verdict, and checks that Excel's state,
@@ -346,14 +348,15 @@ milestones and their pull requests.
   attributes Excel writes itself, such as `VB_Base`; `VB_Name`, string
   literals, comments and any other difference still fail (#245).
 - `SECURITY.md` describes the runtime risk surface: what the test harness,
-  the example suite and `tools/devbuild/excel_run.py` read, write and delete,
+  the example suite, `tools/devbuild/excel_run.py` and
+  `tools/devbuild/lo_smoke.py` read, write and delete,
   the Excel settings they need (enabled macros, no Trust access, no change to
   a macro setting), which access the dependency rules forbid in core and
   classes, and what a generated repository states for its own entry points.
   It adds a data-and-secrets section (what a workbook can hide, and that a
   leaked secret is revoked or rotated before it is reported) and a safe
   harbor for good-faith research. The setup guide tells a generated
-  repository to adapt the runtime section (#242).
+  repository to adapt the runtime section (#242, #316).
 - The pull request template asks for the calculation impact of a change: the
   source of each changed rule and the class of the expected values that test
   it, or "No calculation change". Its checklist asks for the `[Unreleased]`
@@ -368,7 +371,8 @@ milestones and their pull requests.
   would delete and stops before any change. A name with a comma, which the
   API's label filter cannot query, is checked against the labels of every
   issue and pull request, up to 10,000; a malformed response or the limit
-  stops it (#188, #305).
+  stops it. The reconcile job has `pull-requests: read`, without which the
+  issues API would omit pull requests from that check (#188, #305, #316).
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may
@@ -467,11 +471,12 @@ milestones and their pull requests.
   `tools/check_links.py --external` skips the repository's own links locally
   as in CI, reading the repository from the `origin` remote when
   `GITHUB_REPOSITORY` is unset. `tools/devbuild/lo_smoke.py` exits 2 for an
-  unknown option or a missing workbook before it starts LibreOffice, and 1
-  without a traceback when LibreOffice cannot run the workbook. The weekly
-  **OpenSSF Scorecard** run is no longer skipped: a scheduled event carries
-  no repository in its payload, so the job exempts it from the branch test
-  and reads the visibility from the API (#299).
+  unknown option, a missing workbook or a missing or malformed evidence
+  policy before it starts LibreOffice, and 1 without a traceback when
+  LibreOffice cannot run the workbook. The weekly **OpenSSF Scorecard** run
+  is no longer skipped: a scheduled event carries no repository in its
+  payload, so the job exempts it from the branch test and reads the
+  visibility from the API (#299, #316).
 - The VBA harness guides, module headers and pull request template agree
   with the code. The example suite has a `cleanup-primary-only` case, in
   which only the operation fails and every restoration succeeds: the primary

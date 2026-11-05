@@ -323,6 +323,12 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertIn("github.event_name != 'pull_request'", condition)
         self.assertIn('github.event.repository.default_branch', condition)
 
+    def test_label_pruning_sees_pull_requests(self):
+        # Without pull-requests: read the issues API omits pull requests, so a
+        # label only they carry would look unused and be deleted.
+        permissions = workflows()['labels-sync.yml']['jobs']['reconcile']['permissions']
+        self.assertEqual(permissions.get('pull-requests'), 'read')
+
     def test_traffic_app_credentials_stay_in_their_steps(self):
         jobs = workflows()['traffic-history.yml']['jobs']
         steps = jobs['collect']['steps']
