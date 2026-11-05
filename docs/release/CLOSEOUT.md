@@ -4,12 +4,19 @@ The record for closing a milestone: what was delivered, what evidence shows
 it, and what closing it does and does not mean. Copy the template below into
 an issue filed under the next milestone, not the one it closes, so that the
 milestone can close while the record stays open
-([release records](../../RELEASING.md#release-records)). Close the milestone
-only when every checklist row links its evidence or records a deviation; for
-a released milestone that is step 7 of RELEASING.md, before publication.
-Close this issue after the last step of its sequence. Closing a milestone
-publishes nothing; a release follows [RELEASING.md](../../RELEASING.md)
-separately.
+([release records](../../RELEASING.md#release-records)).
+
+Every check of the record runs on one candidate commit. For a released
+milestone, that is the candidate that
+[RELEASING.md step 2](../../RELEASING.md#2-integrate-and-freeze-the-candidate)
+freezes, the commit the tag names; if a release-gate fix replaces it, run the
+checks again on the new one. Close the milestone only when the checklist is
+complete for the candidate: every row links its evidence or records a
+deviation. For a released milestone that is
+[RELEASING.md step 7](../../RELEASING.md#7-publish-and-verify), before the
+GitHub Release is published. Close this issue after the last step of its
+sequence. Closing a milestone publishes nothing; a release follows
+[RELEASING.md](../../RELEASING.md) separately.
 
 When the milestone is released, check the published release as
 [RELEASING.md step 7](../../RELEASING.md#7-publish-and-verify) describes:
@@ -34,10 +41,11 @@ and the Excel checks of an attached workbook stay manual
 | Step | Needs | Produces |
 | ---: | --- | --- |
 | 1 | The milestone's remaining issues | Their changes merged and integrated into the default branch |
-| 2 | Step 1 | The file audit below |
-| 3 | Step 2 | The candidate record, the evidence index and the scope statement |
-| 4 | Step 3, if I decide to release | RELEASING.md, preparation steps |
-| 5 | Step 4, after the milestone is closed and the release published | The output of `tools/release.py verify-published --repository OWNER/REPOSITORY --milestone N`, added to this issue |
+| 2 | Step 1; if I decide to release, RELEASING.md steps 1 and 2 | The candidate: the integration merge commit, or for a release the candidate of RELEASING.md step 2, in the candidate record |
+| 3 | Step 2 | The file audit below, at the candidate |
+| 4 | Step 3; for a release, RELEASING.md step 3 | The rest of the candidate record, the evidence index and the scope statement, at the candidate; every checklist row done |
+| 5 | Step 4 | The milestone closed; for a release, in RELEASING.md step 7, before the GitHub Release is published |
+| 6 | Step 5, for a release, once it is published | The output of `tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY --milestone N`, added to this issue |
 
 ### Checklist
 
@@ -47,7 +55,7 @@ and the Excel checks of an attached workbook stay manual
 | 2 | The documented setup reproduces from a fresh checkout of the candidate | Candidate record | ☐ |
 | 3 | Repository integrity is green on the candidate | Run link | ☐ |
 | 4 | Live labels match the catalogue, and Issue triage passes | Live label drift and Issue triage run links | ☐ |
-| 5 | Repository settings match the baseline: `setup_repository.py --check` | Dated evidence record | ☐ |
+| 5 | Repository settings match the baseline when the candidate is checked: `setup_repository.py --check` | Dated evidence record | ☐ |
 | 6 | The file audit covers every tracked file at the candidate | File audit | ☐ |
 | 7 | The scope statement is recorded | This issue | ☐ |
 
@@ -55,7 +63,7 @@ and the Excel checks of an attached workbook stay manual
 
 | Item | Value |
 | --- | --- |
-| Candidate commit | Full 40-character SHA on the default branch |
+| Candidate commit | Full 40-character SHA on the default branch; for a release, the candidate of RELEASING.md step 2 |
 | Integration and sync pull requests | #N, #N |
 | Fresh checkout | `git status --short` printed nothing: yes or no |
 | Repository checks | Commands run and their results |
