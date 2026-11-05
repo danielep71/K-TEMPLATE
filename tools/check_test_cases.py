@@ -8,8 +8,8 @@ methodology guides: the calculation contracts (CALC- IDs), the data contract
 IDs). It never computes or compares a value.
 
 It also checks the Traceability table of docs/methodology/VALIDATION_PLAN.md:
-each row's source is in the register, its rule is a step of a declared
-calculation, every VBA procedure it names exists in a component under src/,
+each row's source is in the register, its rule is a step that the *Rules* table
+of a declared calculation lists, every VBA procedure it names exists in a component under src/,
 every test case it names exists and tests that calculation, and its status is
 one of the four the plan defines and consistent with what the row names.
 
@@ -57,7 +57,11 @@ DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CALCULATION_ID = re.compile(r"^CALC-\d+$")
 DATASET_ID = re.compile(r"^DS-\d+$")
 # A rule is a step of the case's calculation contract: CALC-01.2 is step 2.
-RULE = re.compile(r"^(CALC-\d+)\.\d+$")
+RULE = re.compile(r"^(CALC-\d+)\.(\d+)$")
+# A calculation contract's *Rules* table, under its ### heading, lists its steps.
+RULES_LABEL = "**Rules:**"
+STEP_COLUMN = "Step"
+CONTRACT_BOUNDARY = re.compile(r"^#{1,3}\s")
 # A declaration is a table row, or for contracts a heading, whose first cell
 # is the ID in a code span; "*Illustrative:*" before it marks an example entry.
 ROW = re.compile(r"^\|\s*(\*Illustrative:\*\s*)?`([A-Z]+-\d+)`\s*\|")
@@ -110,6 +114,8 @@ class Methodology:
     calculations: dict[str, bool]
     datasets: dict[str, bool]
     sources: dict[str, bool]
+    # The step numbers each calculation's *Rules* table lists; empty without one.
+    steps: dict[str, set[int]] = field(default_factory=dict)
     # The files each dataset is read from, with their encodings (Datasets table).
     files: dict[str, dict[str, str]] = field(default_factory=dict)
     # The datasets of the machine-readable contract by file or sheet, read only
@@ -242,6 +248,56 @@ def cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
+def calculation_steps(root: Path) -> dict[str, set[int]]:
+    """The step numbers that each calculation contract's *Rules* table lists.
+
+    A contract starts at its ### heading, which names its CALC- ID, and ends at
+    the next heading of level 1 to 3. Its *Rules* table is the table after the **Rules:** label;
+    the cells of its Step column that are whole numbers are the steps.
+    """
+    path = root / METHODOLOGY / "CALCULATION_CONTRACTS.md"
+    if not path.is_file():
+        return {}  # Reported by declared().
+    steps: dict[str, set[int]] = {}
+    calculation: str | None = None
+    rules = False
+    header: list[str] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        text = line.strip()
+        if CONTRACT_BOUNDARY.match(text):
+            match = HEADING.match(text)
+            calculation = match.group(2) if match else None
+            if calculation is not None:
+                steps.setdefault(calculation, set())
+            rules, header = False, []
+        elif calculation is None:
+            continue
+        elif text.startswith("**"):
+            rules, header = text.startswith(RULES_LABEL), []
+        elif rules and text.startswith("|"):
+            row = cells(text)
+            if not header:
+                header = row
+            elif STEP_COLUMN in header and len(row) > header.index(STEP_COLUMN):
+                step = row[header.index(STEP_COLUMN)]
+                if step.isdigit():
+                    steps[calculation].add(int(step))
+        elif rules and header and text:
+            rules = False  # The table has ended.
+    return steps
+
+
+def step_problem(rule: str, method: Methodology) -> str | None:
+    """Why a rule such as CALC-01.2 is not a step its calculation contract lists."""
+    match = RULE.match(rule)
+    if match is None or match.group(1) not in method.steps:
+        return None  # Not a step, or not a declared calculation: reported elsewhere.
+    if int(match.group(2)) not in method.steps[match.group(1)]:
+        return (f"rule {rule} is not a step that the Rules table of {match.group(1)} lists in "
+                "CALCULATION_CONTRACTS.md")
+    return None
+
+
 def dataset_files(root: Path, report: Report) -> dict[str, dict[str, str]]:
     """Map each dataset of the data contract to its file names and their encoding.
 
@@ -294,6 +350,7 @@ def read_contract(root: Path, report: Report) -> dict[str, check_data_contract.D
 def read_methodology(root: Path, report: Report, file_based: bool = False) -> Methodology:
     return Methodology(
         calculations=declared(root, "CALCULATION_CONTRACTS.md", None, HEADING, report),
+        steps=calculation_steps(root),
         datasets=declared(root, "DATA_CONTRACT.md", "Datasets", ROW, report),
         sources=declared(root, "SOURCES.md", "Register", ROW, report),
         files=dataset_files(root, report),
@@ -636,7 +693,7 @@ def scope_problems(scope: object, case: Case) -> list[str]:
     return []
 
 
-def rule_problem(rule: object, kind: object, case: Case) -> str | None:
+def rule_problem(rule: object, kind: object, case: Case, method: Methodology) -> str | None:
     if rule is None:
         return None if kind == "illustrative" else "only an illustrative value may have no rule"
     match = RULE.match(rule) if isinstance(rule, str) else None
@@ -644,7 +701,7 @@ def rule_problem(rule: object, kind: object, case: Case) -> str | None:
         return f"rule {rule!r} is not a calculation step such as CALC-01.1"
     if case.calculation is not None and match.group(1) != case.calculation:
         return f"rule {rule} is not a step of the case's calculation {case.calculation}"
-    return None
+    return step_problem(match.group(0), method)
 
 
 def check_output(output: object, case_id: str, case: Case, method: Methodology,
@@ -662,7 +719,7 @@ def check_output(output: object, case_id: str, case: Case, method: Methodology,
     problems.extend(scope_problems(output["scope"], case))
     reference = output["reference"]
     kind = reference.get("class") if isinstance(reference, dict) else None
-    if problem := rule_problem(output["rule"], kind, case):
+    if problem := rule_problem(output["rule"], kind, case, method):
         problems.append(problem)
     problems.extend(reference_problems(reference, method.sources, root))
     if isinstance(kind, str):
@@ -809,6 +866,8 @@ def guide_problems(row: TraceRow, method: Methodology) -> tuple[list[str], str |
     if calculation is None or calculation not in method.calculations:
         problems.append(f"calculation step {row.cells['Calculation step']!r} is not a step "
                         "of a declared calculation, such as `CALC-01.1`")
+    elif problem := step_problem(step[0], method):
+        problems.append(problem)
     return problems, calculation
 
 

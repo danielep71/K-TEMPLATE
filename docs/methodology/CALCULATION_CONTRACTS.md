@@ -42,6 +42,10 @@ Copy this section for each calculation.
 | --- | --- | --- |
 | 1 | Example: sum the notional amounts | `SRC-01`, Article 1(1) |
 
+- **Step:** a whole number, once per step. A test case's `rule` and a
+  traceability row name step 2 as `CALC-NN.2`, and
+  `tools/check_test_cases.py` rejects a step that this table does not list.
+
 **Outputs:**
 
 | Output | Quantity | Unit | Scope | Rounding |
@@ -50,12 +54,17 @@ Copy this section for each calculation.
 
 - **Quantity:** the lower snake case name that the test cases' expected
   files and the accuracy contracts use for the output
-  ([expected-result format](TEST_CASES.md#expected-format)).
+  ([expected-result format](TEST_CASES.md#expected-format)). A `_status`
+  quantity, which reports a rejection, is not listed here: it belongs to
+  *Failure behaviour*.
 
 **Limits and non-goals:** cases the calculation does not cover, and what
 happens if they occur in the input.
 
-**Failure behaviour:** which conditions stop it, and what it reports.
+**Failure behaviour:** which conditions stop it, and what it reports: each
+`_status` quantity, in lower snake case ending in `_status`, with the exact
+texts it can hold, which the `invalid` test cases expect
+([invalid inputs](TEST_CASES.md#invalid-inputs)).
 
 **Validation:** the checks in the [validation plan](VALIDATION_PLAN.md) that
 cover it, and the rows of its steps in its

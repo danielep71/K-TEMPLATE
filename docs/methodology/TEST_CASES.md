@@ -71,7 +71,7 @@ the methodology guides; remove them when you replace those.
 | Envelope | `schema_version` (1), `kind` (`test-fixture`), `id`, `synthetic` (`true`), `description`, `category`, `calculation`, `reporting_date`, `reporting_currency_code` and `datasets` are required, and no other key is allowed. An `invalid` case relaxes this for the calculation inputs ([invalid inputs](#invalid-inputs)) |
 | Calculation | A `CALC-` ID declared by a heading of the [calculation contracts](CALCULATION_CONTRACTS.md) |
 | Datasets | A non-empty object whose keys are `DS-` IDs declared in the *Datasets* table of the [data contract](DATA_CONTRACT.md); each holds a non-empty list of records |
-| Records | Each record has an `id`, unique in the fixture, and an `inputs` object. The `id` is the value of the dataset's identifier field, such as the illustrative `position_id`, so `inputs` leaves that field out; it holds every other field the case needs |
+| Records | Each record has an `id`, unique in the fixture, and an `inputs` object. The `id` is the value of the dataset's identifier field, its required `text` field whose name ends in `_id`, such as the illustrative `position_id` ([fields](DATA_CONTRACT.md#fields)), so `inputs` leaves that field out; it holds every other field the case needs |
 | Inputs | Keys are lower snake case and end in a unit suffix (below). The field tables of the data contract decide which fields exist; a key is the field's name with the suffix of its unit, unless the name already ends in one, so the illustrative `notional` and `currency` are `notional_amount` and `currency_code`. Input files of a [file-based case](#file-based-cases) keep the field names of the data contract |
 | Currencies | `reporting_currency_code` is the currency of results. A record whose `inputs` hold an `_amount` key also holds `currency_code`, the currency of all its amounts, so a currency mismatch is always visible |
 | Illustrative entries | A `CALC-` or `DS-` ID marked *Illustrative* in its guide may be used only by an `illustrative-` case |
@@ -184,9 +184,9 @@ variant, so an `invalid` case needs a `_status` text output in each variant.
 | --- | --- |
 | Envelope | `schema_version` (1), `kind` (`test-expected`), `fixture` (the case ID) and a non-empty `outputs` list are required |
 | Scope | `null` for a result of the whole calculation, or `{"dataset": "DS-NN", "record": "<id>"}` for a result of one record of the fixture |
-| Quantity | Lower snake case, the *Quantity* of one of the calculation contract's *Outputs*. Only an `illustrative-` case may use a name starting with `illustrative_` |
+| Quantity | Lower snake case, the *Quantity* of one of the calculation contract's *Outputs*, or a `_status` quantity that its *Failure behaviour* lists. Only an `illustrative-` case may use a name starting with `illustrative_` |
 | Number | `value`, `unit` and `tolerance`. `unit` is a currency code for an amount, `1` for a rate, weight or factor, or `years` |
-| Text | `text`, compared exactly, with no `unit` or `tolerance`. A rejection is a text output whose quantity ends in `_status` |
+| Text | `text`, compared exactly, with no `unit` or `tolerance`. A rejection is a text output whose quantity ends in `_status`, with one of the texts the contract's *Failure behaviour* lists for it |
 | Rule | A step of the case's calculation, `CALC-NN.<step>`, such as `CALC-01.2` for step 2 of its *Rules* table. It may be `null` only for an `illustrative` value |
 | Reference | One per output; see [reference classes](#reference-classes) |
 
@@ -453,8 +453,9 @@ Each fixture declares one `category`:
     `reporting_currency_code` and `datasets`, with their records, keys, unit
     suffixes and values.
   - The `description` names the input rule the case breaks.
-- The status texts are fixed by the calculation contract. A rejection never
-  substitutes a default value.
+- The `_status` quantities and their texts are fixed by the calculation
+  contract, under its *Failure behaviour*. A rejection never substitutes a
+  default value.
 - Inputs that JSON cannot express, such as non-finite numbers or wrong VBA
   types, are tested in a VBA test module instead of a fixture.
 
@@ -520,14 +521,16 @@ It checks:
 - its outputs:
   - their scope against the fixture;
   - their form, unit and tolerance;
-  - their rule, against the case's calculation;
+  - their rule, against the case's calculation and the steps that its
+    *Rules* table lists;
 - the reference class, its source against the register, and its script;
 - the `illustrative` naming rules, and a `_status` text output in every
   `invalid` case;
 - the [traceability table](VALIDATION_PLAN.md#traceability) of the validation
-  plan: each row's source, calculation step, VBA procedures and cases exist,
-  each case tests the row's calculation, and the status agrees with what the
-  row names.
+  plan: each row's source, VBA procedures and cases exist, its calculation
+  step is one that the *Rules* table of its calculation contract lists, each
+  case tests the row's calculation, and the status agrees with what the row
+  names.
 
 It does not check:
 

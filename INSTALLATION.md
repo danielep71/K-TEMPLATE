@@ -202,10 +202,12 @@ Two more entry points show the failure paths and are expected to fail:
   keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`
   after it, with a folder outside the checkout or the ignored
   `test-results/` directory.
-- **Recovery.** A run that stopped half way, or that left Excel's state
-  changed, leaves `recovery=REQUIRED`, and the next run is refused. Check
-  **File → Options → Formulas** (calculation), the open workbooks and the
-  other settings the log names, then type `TEST_Harness.ResetTests`.
+- **Recovery.** A run that left Excel's state changed, or that stopped half
+  way while the project kept its state, leaves `recovery=REQUIRED`, and the
+  next run is refused. Check **File → Options → Formulas** (calculation), the
+  open workbooks and the other settings the log names, then type
+  `TEST_Harness.ResetTests`. A run stopped with **End** or **Reset** leaves
+  no flag: see the next item.
 - **End or Reset.** **End** in an error dialog, or **Run → Reset** in the
   VBE, clears the harness's state with the rest of the project's
   ([HB-06](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the
