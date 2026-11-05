@@ -10,6 +10,8 @@ const DEFAULT_MANIFEST = ".github/labels.json";
 const API_VERSION = "2022-11-28";
 const LABELS_PER_PAGE = 100;
 const MAX_LABEL_PAGES = 100;
+const ISSUES_PER_PAGE = 100;
+const MAX_ISSUE_PAGES = 100;
 const MAX_RATE_LIMIT_RETRIES = 2;
 export const MAX_RETRY_DELAY_MS = 5000;
 
@@ -270,42 +272,52 @@ export async function listLiveLabels(repository, token) {
 }
 
 // The issues endpoint covers pull requests; state=all adds closed items.
-async function labelInUse(repository, token, name) {
-  const batch = await githubRequest(
-    repository,
-    token,
-    "GET",
-    `/issues?state=all&per_page=1&labels=${encodeURIComponent(name)}`
-  );
-  if (!Array.isArray(batch)) throw new Error("GitHub issues response is not an array");
-  return batch.length > 0;
+export async function labelInUse(repository, token, name, request = githubRequest) {
+  if (!name.includes(",")) {
+    const batch = await request(
+      repository,
+      token,
+      "GET",
+      `/issues?state=all&per_page=1&labels=${encodeURIComponent(name)}`
+    );
+    if (!Array.isArray(batch)) throw new Error("GitHub issues response is not an array");
+    return batch.length > 0;
+  }
+  // The labels filter is a comma-separated list, so it cannot query this name:
+  // read the labels of every issue and pull request instead. A malformed page
+  // or more pages than the limit throws, so nothing is deleted on a guess.
+  const wanted = name.toLowerCase();
+  for (let page = 1; page <= MAX_ISSUE_PAGES; page += 1) {
+    const batch = await request(
+      repository,
+      token,
+      "GET",
+      `/issues?state=all&per_page=${ISSUES_PER_PAGE}&page=${page}`
+    );
+    if (!Array.isArray(batch)) throw new Error("GitHub issues response is not an array");
+    for (const item of batch) {
+      if (!Array.isArray(item?.labels) || item.labels.some(label => typeof label?.name !== "string")) {
+        throw new Error("GitHub issues response has malformed labels");
+      }
+      if (item.labels.some(label => label.name.toLowerCase() === wanted)) return true;
+    }
+    if (batch.length < ISSUES_PER_PAGE) return false;
+  }
+  throw new Error(`GitHub issue pagination exceeded ${MAX_ISSUE_PAGES} pages while checking ${JSON.stringify(name)}`);
 }
 
 // Deleting a label removes it from every issue and pull request, closed ones
 // included, and cannot be undone: refuse before any change is applied.
 export async function assertSafeDeletions(changes, isInUse) {
-  const ambiguous = [];
   const inUse = [];
   for (const change of changes) {
     if (change.action !== "delete") continue;
-    // The labels filter is a comma-separated list, so such a name cannot be queried.
-    if (change.currentName.includes(",")) {
-      ambiguous.push(change.currentName);
-    } else if (await isInUse(change.currentName)) {
-      inUse.push(change.currentName);
-    }
+    if (await isInUse(change.currentName)) inUse.push(change.currentName);
   }
-  const problems = [];
   if (inUse.length > 0) {
-    problems.push(`still used by an issue or pull request: ${inUse.map(name => JSON.stringify(name)).join(", ")}`);
-  }
-  if (ambiguous.length > 0) {
-    problems.push(`named with a comma, so their use cannot be checked: ${ambiguous.map(name => JSON.stringify(name)).join(", ")}`);
-  }
-  if (problems.length > 0) {
     throw new Error(
-      `Refusing to prune labels ${problems.join("; ")}. No change was applied. `
-      + "Remove each label from its issues and pull requests, or add it to the manifest."
+      `Refusing to prune labels still used by an issue or pull request: ${inUse.map(name => JSON.stringify(name)).join(", ")}. `
+      + "No change was applied. Remove each label from its issues and pull requests, or add it to the manifest."
     );
   }
 }
@@ -553,7 +565,7 @@ async function runSelfTest(manifestPath) {
   assert.ok(errorSummary.includes("``HTTP 422: {\"message\":\"`bad`\"} next line``"), errorSummary);
   assert.doesNotMatch(errorSummary, /\r/);
 
-  // Pruning refuses labels in use, and names it cannot query, before any change.
+  // Pruning refuses labels in use before any change; comma names are checked too.
   const asked = [];
   const usage = used => async name => {
     asked.push(name);
@@ -563,12 +575,43 @@ async function runSelfTest(manifestPath) {
     { name: "unused", color: "ABCDEF", description: "d" },
     { name: "in-use", color: "ABCDEF", description: "d" },
     { name: "a,b", color: "ABCDEF", description: "d" }]);
-  await assert.rejects(assertSafeDeletions(pruned, usage(["in-use"])),
-    error => /still used by an issue or pull request: "in-use"/.test(error.message)
-      && /named with a comma, so their use cannot be checked: "a,b"/.test(error.message)
-      && /No change was applied/.test(error.message));
-  assert.deepEqual(asked, ["in-use", "unused"], "a comma name is never queried");
+  await assert.rejects(assertSafeDeletions(pruned, usage(["in-use", "a,b"])),
+    error => /still used by an issue or pull request: "a,b", "in-use"\. No change was applied/.test(error.message));
+  assert.deepEqual(asked, ["a,b", "in-use", "unused"]);
   asked.length = 0;
+  await assertSafeDeletions(pruned, usage([]));
+  assert.deepEqual(asked, ["a,b", "in-use", "unused"], "an unused comma name can be pruned");
+  asked.length = 0;
+
+  // A comma name is not passed to the labels filter: every issue and pull
+  // request, open and closed, is read page by page and its real labels compared.
+  const paths = [];
+  const pages = responses => {
+    let next = 0;
+    return async (_repository, _token, method, suffix) => {
+      assert.equal(method, "GET");
+      paths.push(suffix);
+      return responses[next++];
+    };
+  };
+  const full = Array.from({ length: 100 }, () => ({ labels: [{ name: "a" }, { name: "b" }] }));
+  assert.equal(await labelInUse("o/r", "t", "a,b", pages([full, [{ labels: [{ name: "A,B" }] }]])), true);
+  assert.deepEqual(paths, ["/issues?state=all&per_page=100&page=1", "/issues?state=all&per_page=100&page=2"]);
+  paths.length = 0;
+  assert.equal(await labelInUse("o/r", "t", "a,b", pages([full, [{ labels: [] }]])), false);
+  assert.equal(paths.length, 2);
+  paths.length = 0;
+  assert.equal(await labelInUse("o/r", "t", "plain", pages([[{ labels: [{ name: "plain" }] }]])), true);
+  assert.deepEqual(paths, ["/issues?state=all&per_page=1&labels=plain"]);
+  paths.length = 0;
+  // Anything it cannot read stops synchronization before a change.
+  await assert.rejects(labelInUse("o/r", "t", "a,b", pages([[{ labels: null }]])), /malformed labels/);
+  await assert.rejects(labelInUse("o/r", "t", "a,b", pages([[{ labels: [{ name: 1 }] }]])), /malformed labels/);
+  await assert.rejects(labelInUse("o/r", "t", "a,b", pages([{}])), /not an array/);
+  await assert.rejects(labelInUse("o/r", "t", "a,b", async () => full), /exceeded 100 pages while checking "a,b"/);
+  const failing = pages([[], [], {}]);
+  await assert.rejects(assertSafeDeletions(pruned, name => labelInUse("o/r", "t", name, failing)),
+    /not an array/);
   await assertSafeDeletions(planChanges(desired, [...structuredClone(desired),
     { name: "unused", color: "ABCDEF", description: "d" }]), usage([]));
   assert.deepEqual(asked, ["unused"]);
