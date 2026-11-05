@@ -21,8 +21,10 @@ with the commit that added it.
 ## ✅ The review
 
 Open an issue for the review, triaged like any other, with the `release` and
-`security` labels. Copy this checklist into it, and record for each item what
-you checked and what you found:
+`security` labels. For a release, file it under the milestone after the
+released one, as [release records](../../RELEASING.md#release-records)
+describes. Copy this checklist into it, and record for each item what you
+checked and what you found:
 
 ```markdown
 ## Distribution review

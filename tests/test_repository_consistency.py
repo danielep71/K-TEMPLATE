@@ -122,16 +122,18 @@ class MarkdownTests(unittest.TestCase):
                 problems.append((relative.as_posix(), opened))
         self.assertEqual(problems, [])
 
-    def test_every_verify_published_command_names_the_repository(self):
-        # --repository is required; a shorthand without the python prefix
-        # escapes tools/check_doc_commands.py, so it is checked here.
+    def test_every_verify_published_command_names_the_tag_and_repository(self):
+        # The tag is a required positional argument and --repository a
+        # required option; a shorthand without the python prefix escapes
+        # tools/check_doc_commands.py, so both are checked here.
         command = re.compile(r'release\.py verify-published (?:v|--)[^`\n|]*(?:\\\n[^`\n|]*)?')
+        tag = re.compile(r'release\.py verify-published v(?:X\.Y\.Z|\d+\.\d+\.\d+)\s')
         problems = []
         for path in tracked('*.md'):
             if path.name == 'CHANGELOG.md':
                 continue
             for found in command.finditer(path.read_text(encoding='utf-8')):
-                if '--repository' not in found.group(0):
+                if '--repository' not in found.group(0) or not tag.match(found.group(0)):
                     problems.append(f'{path.relative_to(ROOT).as_posix()}: {found.group(0)}')
         self.assertEqual(problems, [])
 
