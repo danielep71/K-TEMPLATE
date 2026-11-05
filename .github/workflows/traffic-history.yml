@@ -60,6 +60,10 @@ jobs:
     environment: analytics
     permissions:
       contents: write
+    outputs:
+      # The traffic-history commit this collection wrote, or merged onto when
+      # nothing changed: the alert job reads exactly that commit.
+      history-sha: ${{ steps.push.outputs.sha }}
     env:
       PYTHONUTF8: "1"
       PYTHONDONTWRITEBYTECODE: "1"
@@ -138,6 +142,7 @@ jobs:
           --summary "$GITHUB_STEP_SUMMARY"
 
       - name: Commit and push the history
+        id: push
         working-directory: history
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -150,6 +155,11 @@ jobs:
           echo "::add-mask::$basic"
           auth="AUTHORIZATION: basic $basic"
           git_auth() { git -c "http.https://github.com/.extraheader=$auth" "$@"; }
+          # Every successful exit records the commit the history now stands at.
+          recorded() {
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
 
           # set -e does not apply inside a function called from a || list, so
           # each git command checks its own status. 3 means "nothing to commit".
@@ -165,7 +175,7 @@ jobs:
             status=0
             commit || status=$?
             if [ "$status" -eq 3 ]; then
-              exit 0
+              recorded
             elif [ "$status" -ne 0 ]; then
               echo "::error::Could not commit the history"
               exit "$status"
@@ -175,7 +185,7 @@ jobs:
           record
           for attempt in 1 2 3; do
             if git_auth push origin HEAD:traffic-history; then
-              exit 0
+              recorded
             fi
             if [ "$attempt" -eq 3 ]; then
               break
@@ -212,10 +222,22 @@ jobs:
           path: source
           persist-credentials: false
 
-      - name: Check out traffic-history
+      # An empty ref would check out the default branch instead of the history.
+      - name: Check the collected history commit
+        env:
+          HISTORY_SHA: ${{ needs.collect.outputs.history-sha }}
+        run: |
+          if ! [[ "$HISTORY_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The collect job reported no traffic-history commit"
+            exit 1
+          fi
+
+      # The commit the collect job wrote, not the branch, which may have moved
+      # since: a re-run of this job reads the same data as the first run.
+      - name: Check out the collected traffic-history commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: traffic-history
+          ref: ${{ needs.collect.outputs.history-sha }}
           path: history
           persist-credentials: false
 
