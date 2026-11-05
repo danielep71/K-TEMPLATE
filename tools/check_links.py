@@ -10,7 +10,9 @@ autolink or an HTML attribute; text in code spans and fenced blocks is not a lin
 With --external, each https link is also requested once, over HTTPS only and
 without following a redirect to another protocol, except absolute links into
 this repository itself: a private repository answers 404 to anonymous requests,
-so they are not checked at all. Write links to this repository's files as
+so they are not checked at all. The repository is --repository, else
+GITHUB_REPOSITORY, else the GitHub repository of the origin remote, so a local
+run skips the same links as the workflow. Write links to this repository's files as
 relative links, which the offline check covers. A 403, 429 or 5xx answer, or no
 answer at all, is a warning, not an error, because the site may only be busy or
 refuse automated requests. To record that such a link is known and still
@@ -46,6 +48,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+GITHUB_REMOTE = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$")
 FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
 ATTRIBUTE = r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"""
 EXCEPTIONS = Path(".github/link-exceptions.json")
@@ -268,6 +271,14 @@ def check(root: Path = ROOT) -> tuple[list[str], set[str], int]:
     return errors, external, count
 
 
+def detect_repository(root: Path) -> str:
+    """owner/name of the origin remote on GitHub, or "" when there is none."""
+    result = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"],
+                            capture_output=True, text=True, check=False)
+    match = GITHUB_REMOTE.search(result.stdout.strip()) if result.returncode == 0 else None
+    return match.group(1) if match else ""
+
+
 def own_repository(url: str, repository: str) -> bool:
     """Whether a URL points into this repository; such URLs are not requested."""
     if not repository:
@@ -330,12 +341,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--external", action="store_true",
                         help="also request every external https link")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""),
-                        help="owner/name whose own URLs are skipped (default: GITHUB_REPOSITORY)")
+                        help="owner/name whose own URLs are skipped (default: GITHUB_REPOSITORY, "
+                             "else the origin remote)")
     args = parser.parse_args(argv)
     root = args.root.resolve()
     errors, external, count = check(root)
     if args.external:
-        errors += external_errors(external, args.repository, load_exceptions(root)[0])
+        repository = args.repository or detect_repository(root)
+        errors += external_errors(external, repository, load_exceptions(root)[0])
     for error in errors:
         print(f"ERROR: {error}")
     print(f"Checked {count} link(s) in Markdown; {len(errors)} error(s).")

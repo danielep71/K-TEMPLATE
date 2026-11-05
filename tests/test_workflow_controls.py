@@ -386,9 +386,18 @@ class WorkflowControlTests(unittest.TestCase):
         document = workflows()['scorecard.yml']
         self.assertNotIn('pull_request', document['on'])
         self.assertIn('schedule', document['on'])
+        # Scheduled events carry no repository in their payload: the weekly
+        # run must be exempt from the branch test, and the visibility is read
+        # from the API in a job of its own.
+        gate = document['jobs']['visibility']
+        self.assertIn("github.event_name == 'schedule' ||", gate['if'])
+        self.assertIn('github.ref_name == github.event.repository.default_branch', gate['if'])
+        self.assertNotIn('github.event.repository.private', str(document))
+        self.assertIn('.visibility', gate['steps'][0]['run'])
+        self.assertEqual(gate['permissions'], {'contents': 'read'})
         job = document['jobs']['analysis']
-        self.assertIn('github.event.repository.private == false', job['if'])
-        self.assertIn('github.ref_name == github.event.repository.default_branch', job['if'])
+        self.assertEqual(job['needs'], 'visibility')
+        self.assertEqual(job['if'], "needs.visibility.outputs.public == 'true'")
         # The Scorecard service accepts published results only from a job made
         # of approved actions, with no run steps.
         self.assertTrue(all('uses' in step and 'run' not in step for step in job['steps']))

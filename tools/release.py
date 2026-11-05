@@ -112,9 +112,12 @@ def verify(root: Path, tag: str, default_branch: str) -> list[str]:
     except ReleaseError as error:
         return [str(error)]
     problems = []
-    kind = git(root, "cat-file", "-t", f"refs/tags/{tag}").strip()
+    try:
+        kind = git(root, "cat-file", "-t", f"refs/tags/{tag}").strip()
+    except ReleaseError:
+        return [f"tag {tag} is missing"]
     if kind != "tag":
-        problems.append(f"tag {tag} is {kind or 'missing'}, not an annotated tag")
+        problems.append(f"tag {tag} is {kind}, not an annotated tag")
     commit = git(root, "rev-parse", f"{tag}^{{commit}}").strip()
     try:
         changelog = git(root, "show", f"{commit}:{CHANGELOG}")
@@ -444,7 +447,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         problems = [str(error)]
     for problem in problems:
         print(f"FAIL: {problem}")
-    label = args.tag if args.command == "verify" else args.sha[:12]
+    # Each subcommand is named by its own argument: only integrity has --sha.
+    label = (args.sha[:12] if args.command == "integrity"
+             else args.ref if args.command == "bundle" else args.tag)
     print(f"release-{args.command}: {'FAIL' if problems else 'PASS'} ({label})")
     return 1 if problems else 0
 

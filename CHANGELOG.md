@@ -406,6 +406,16 @@ milestones and their pull requests.
 
 ### Fixed
 
+- `tools/release.py notes` and `bundle` report a failure on a FAIL line
+  instead of a traceback, and `verify` reports a missing tag as a finding.
+  `tools/check_links.py --external` skips the repository's own links locally
+  as in CI, reading the repository from the `origin` remote when
+  `GITHUB_REPOSITORY` is unset. `tools/devbuild/lo_smoke.py` exits 2 for an
+  unknown option or a missing workbook before it starts LibreOffice, and 1
+  without a traceback when LibreOffice cannot run the workbook. The weekly
+  **OpenSSF Scorecard** run is no longer skipped: a scheduled event carries
+  no repository in its payload, so the job exempts it from the branch test
+  and reads the visibility from the API (#299).
 - The VBA harness guides, module headers and pull request template agree
   with the code. The example suite has a `cleanup-primary-only` case, in
   which only the operation fails and every restoration succeeds: the primary

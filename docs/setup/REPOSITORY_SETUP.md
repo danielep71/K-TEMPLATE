@@ -315,6 +315,8 @@ workflow does:
 python tools/check_links.py --external
 ```
 
+Links into this repository itself are skipped, locally as in the workflow: the
+repository is read from `GITHUB_REPOSITORY`, else from the `origin` remote.
 A 403, 429 or 5xx answer, or no answer, is a warning, because the site may
 only be busy or refuse automated requests. To keep such a link while you
 review it again later, list it in `.github/link-exceptions.json`, which the
