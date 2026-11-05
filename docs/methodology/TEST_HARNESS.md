@@ -22,7 +22,18 @@ workbook's external surface. A production workbook contains none of them.
 A project suite follows the example suite: one `Case` procedure per case,
 each starting with `BeginCase` and ending in an error handler that calls
 `RecordCaseError`; a runner that calls every case once, between `BeginRun`
-and `EndRun`; and the expected case and assertion counts as constants. The
+and `EndRun`; and the expected case and assertion counts as constants. To be
+certified, it keeps the shape that `tools/check_excel_run.py` reads from the
+source, because it compares every case and assertion of the log with it:
+
+- the runner, `RunSuite` unless the suite's `suites` entry names another as
+  `runner`, calls each case procedure by its bare name, `Case<Name>`, alone
+  on its line;
+- each case calls `TEST_Harness.BeginCase "<case-id>"` with a literal id,
+  and each assertion has a literal name, such as
+  `TEST_Harness.AssertNear "holds", ...`;
+- the counts are `Private Const EXPECTED_CASES As Long = <n>` and
+  `Private Const EXPECTED_ASSERTIONS As Long = <n>`. The
 expected values of a numerical case come from its
 [test case](TEST_CASES.md), with the tolerance that the case states. A case
 that computes an output of an accuracy contract also records it with
@@ -53,7 +64,7 @@ refused with `ERR_TEST_DIRTY_START`. Check Excel's state by hand, then type
 `TEST_Harness.ResetTests`; it restores nothing itself.
 
 The harness keeps its state in module variables, which a project reset
-clears. A run stopped with **End** in an error dialog, or with **Run →
+clears ([HB-06](VALIDATION_PLAN.md#host-behaviour)). A run stopped with **End** in an error dialog, or with **Run →
 Reset** in the VBE, therefore leaves no active run and no recovery flag: the
 stop is not detected, and the next run starts normally and takes Excel's
 state as it finds it as its baseline. Every runner traps its own errors, so
@@ -139,7 +150,8 @@ call to its core procedure and the relations with those its
 contract and never from the code under test. Run the suite
 with `TEST_Relations.RunRelationTests`. It is not listed in the evidence
 policy, so an Excel run does not certify it; to certify it, give it a
-certification entry point and a `suites` entry as above. A relation that holds
+certification entry point and a `suites` entry as above, with
+`"runner": "RunRelationTests"`: it already has the shape the check reads. A relation that holds
 validates no figure: only a `published` or `independent` case does
 ([completeness policy](TEST_CASES.md#completeness-policy)).
 
@@ -202,6 +214,13 @@ CaseFailed:
 End Sub
 ```
 
+- **Certification.** A runner that calls `RunCase "<case-id>"` for every
+  case does not have the shape the check reads: the case id and the outputs'
+  assertions are not literals of a case procedure. To certify the suite,
+  give each test case its own `Case<Name>` procedure that calls
+  `TEST_Harness.BeginCase "<case-id>"` and names its assertions, one per
+  output of its expected file, and keep the shared steps, such as filling
+  and restoring the area, in procedures that the cases call.
 - **The inputs.** The runner stands in for the user, in a development build
   only. It writes only `Input` areas, which code otherwise never writes, and
   finds each by its defined name. A dataset that the
@@ -357,7 +376,7 @@ by one suite.
 | `bitness` | `64-bit` or `32-bit`: the bitness of Excel |
 | `automation_security` | `Application.AutomationSecurity` as found: `Low`, `ByUI` or `ForceDisable` (1, 2 or 3). It is read, never set |
 | `vba_project_access` | *Trust access to the VBA project object model* as found: `TRUSTED` or `NOT_TRUSTED` |
-| `references` | The ticked references, separated by `; ` |
+| `references` | The ticked references, separated by `; `. A run of `tools/devbuild/excel_run.py` records the references the build gives the project instead, which it does not read back in Excel |
 | `compile` | `PASS` when **Debug → Compile VBAProject** completed, or what the compile reported. `ON_DEMAND` when VBA compiled only the modules the run called, as `tools/devbuild/excel_run.py` records it: no automated run can compile the whole project without Trust access. The check accepts `ON_DEMAND` only with identity by rebuild (`--workbook` and no `exported/` folder). A person compiles with **Debug → Compile VBAProject**, which needs no Trust access, and writes `PASS` |
 | `outcome` | How the run ended: `PASS`, `FAIL`, `IMPORT_FAILED`, `COMPILE_FAILED`, `EXECUTION_TIMEOUT`, `INCOMPLETE`, `NOT_ENABLED` or `UNAVAILABLE` |
 
@@ -367,8 +386,8 @@ not be imported, the project did not compile, Excel did not finish in time,
 the run stopped before its end, the macros were not enabled, or Excel could
 not be started. A value that could not be read, such as a registry value whose
 read was denied, is `UNKNOWN`, never a default or a setting of lower
-precedence. Only the record of a run that stopped early may hold it; the check
-rejects it in the record of a `PASS`. No record may leave unread who ran it,
+precedence. Only the record of a run that did not pass may hold it, whether it
+ended `FAIL` or stopped early; the check rejects it in the record of a `PASS`. No record may leave unread who ran it,
 when or how it ended: the check rejects `UNKNOWN` in `operator`, `started`,
 `finished` and `outcome` whatever the outcome.
 
@@ -390,8 +409,9 @@ holds what an Excel run must leave as evidence:
   module and certification entry point, and the case and assertion counts it
   declares as `EXPECTED_CASES` and `EXPECTED_ASSERTIONS`;
 - `suites`: the project suites, each with its name, source module,
-  certification entry point, counts, `log` and `certification_log`, and
-  `results` when it records results, run in `NORMAL` mode after the example
+  certification entry point, counts, `log` and `certification_log`,
+  `results` when it records results, and `runner` when its runner is not
+  `RunSuite`, run in `NORMAL` mode after the example
   suite; empty in the template, and never a
   [volume benchmark](#volume-benchmarks);
 - `modes`: the three modes in run order, the log each one saves and whether
