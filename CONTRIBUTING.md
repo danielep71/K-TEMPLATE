@@ -84,7 +84,8 @@ none of these is not a contract change.
 ## 🧪 Local checks
 
 Run these before opening a pull request. The tests need Node.js for the label
-scripts and the pinned configuration parser for the workflow control tests.
+scripts. The tests that read YAML and the `codeql-default-branch` check need the
+pinned configuration parser; without it they are skipped locally.
 The quality checks need Ruff and mypy, whose hashes cover CPython 3.13 on
 Linux x86_64, and actionlint:
 

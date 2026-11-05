@@ -25,7 +25,14 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import check_test_cases  # noqa: E402
 
-CONTRACTS = "# Contracts\n\n### `CALC-02` Real calculation\n\n### *Illustrative:* `CALC-01` Example\n"
+RULES = "**Rules:**\n\n| Step | Rule | Source |\n| --- | --- | --- |\n"
+# Steps 3 and 4 are cells of other tables, and step 5 is outside any contract.
+CONTRACTS = ("# Contracts\n\n### `CALC-02` Real calculation\n\n**Inputs:**\n\n"
+             "| Input | Step |\n| --- | --- |\n| Amount | 3 |\n\n" + RULES
+             + "| 1 | Sum | `SRC-02` |\n| 2 | Average | `SRC-02` |\n\n**Outputs:**\n\n"
+             "| Output | Step |\n| --- | --- |\n| Total | 4 |\n\n"
+             "### *Illustrative:* `CALC-01` Example\n\n" + RULES + "| 1 | Sum | `SRC-01` |\n"
+             "\n### `CALC-03` Not written yet\n\n## Decisions\n\n" + RULES + "| 5 | x | y |\n")
 DATA = ("# Data\n\n## Datasets\n\n| ID | Description |\n| --- | --- |\n"
         "| `DS-02` | Real positions |\n| *Illustrative:* `DS-01` | Example |\n\n"
         "## Fields\n\n| `DS-09` | Not in the Datasets section |\n")
@@ -267,10 +274,24 @@ class ExpectedTest(FindingTest):
             (lambda f, e: output(e).update(rule=None), "only an illustrative value may have"),
             (lambda f, e: output(e).update(rule="CALC-02"), "is not a calculation step"),
             (lambda f, e: output(e).update(rule="CALC-01.1"), "not a step of the case's"),
+            (lambda f, e: output(e).update(rule="CALC-02.3"),
+             "rule CALC-02.3 is not a step that the Rules table of CALC-02 lists"),
+            (lambda f, e: output(e).update(rule="CALC-02.4"), "is not a step that the Rules"),
+            (lambda f, e: output(e).update(rule="CALC-02.5"), "is not a step that the Rules"),
         ]
         for edit, text in cases:
             with self.subTest(text=text):
                 self.assertFinding(run(edit), text)
+
+    def test_a_rule_is_a_step_its_contract_lists(self) -> None:
+        self.assertEqual(run(lambda f, e: output(e).update(rule="CALC-02.2")), [])
+        # A contract without a Rules table lists no step.
+        def no_rules(f: dict[str, Any], e: dict[str, Any]) -> None:
+            f["category"] = "invalid"
+            e["outputs"] = [{"quantity": "run_status", "text": "REJECTED", "scope": None,
+                             "rule": "CALC-03.1", "reference": OUTPUT["reference"]}]
+        self.assertFinding(run(no_rules),
+                           "rule CALC-03.1 is not a step that the Rules table of CALC-03 lists")
 
     def test_reference(self) -> None:
         def ref(**values: object) -> Edit:
@@ -375,6 +396,8 @@ class TraceabilityTest(FindingTest):
                 ("Paragraph", "", "names no paragraph"),
                 ("Calculation step", "`CALC-09.1`", "is not a step of a declared calculation"),
                 ("Calculation step", "`CALC-02`", "is not a step of a declared calculation"),
+                ("Calculation step", "`CALC-02.9`",
+                 "rule CALC-02.9 is not a step that the Rules table of CALC-02 lists"),
                 ("Calculation step", "`CALC-01.1`", "test case 'case-one' tests CALC-02, not "
                                                     "CALC-01")):
             with self.subTest(column=column, value=value):

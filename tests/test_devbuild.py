@@ -759,6 +759,52 @@ class LibreOfficeSmoke(unittest.TestCase):
                       "RuntimeError: cannot load)", output.getvalue())
         popen.return_value.wait.assert_called_once_with(timeout=60)
 
+    def test_the_entry_point_logs_and_results_file_come_from_the_evidence_policy(self) -> None:
+        data = json.loads((ROOT / check_excel_run.POLICY).read_text(encoding="utf-8"))
+        data["suite"]["source"] = "tests/modules/TEST_Renamed.bas"
+        data["suite"]["certification_entry_point"] = "CertifyRenamed"
+        for item in data["modes"]:
+            item["log"] = f"renamed-{item['log']}"
+        data["evidence"]["certification_log"] = "renamed-certification.log"
+        data["evidence"]["results"] = "renamed-results.json"
+        policy = check_excel_run.parse_policy(json.dumps(data))
+        injected = policy.logs["INJECTED_FAILURE"]
+        procedures: list[str] = []
+
+        def certify(_context: object, workbook: Path, folder: Path,
+                    procedure: str) -> dict[str, object]:
+            procedures.append(procedure)
+            for name in policy.logs.values():
+                failure = "FAILURE=exact-double/half-plus-quarter\n" if name == injected else ""
+                (folder / name).write_text(f"{failure}RESULT=DONE\n", encoding="utf-8")
+            (folder / policy.certification).write_text("CERTIFIED\n", encoding="utf-8")
+            (folder / policy.results).write_text('{"kind": "test-results"}', encoding="utf-8")
+            return {"workbook": str(workbook), "error": None}
+
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "Workbook.xlsm"
+            workbook.write_bytes(b"built")
+            with unittest.mock.patch.object(check_excel_run, "working_policy",
+                                            return_value=policy), \
+                    unittest.mock.patch("shutil.which", return_value="soffice"), \
+                    unittest.mock.patch("importlib.util.find_spec",
+                                        return_value=object()), \
+                    unittest.mock.patch("subprocess.Popen"), \
+                    unittest.mock.patch.object(lo_smoke, "connect"), \
+                    unittest.mock.patch.object(lo_smoke, "enable_vba"), \
+                    unittest.mock.patch.object(lo_smoke, "certify", side_effect=certify), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                code = lo_smoke.main([str(workbook)])
+        summary = json.loads(output.getvalue())
+        self.assertEqual(procedures, ["TEST_Renamed.CertifyRenamed"])
+        self.assertEqual(list(summary["logs"]),
+                         [*policy.logs.values(), "renamed-certification.log"])
+        self.assertEqual(summary["logs"]["renamed-certification.log"], ["CERTIFIED"])
+        self.assertEqual(summary["results"], {"kind": "test-results"})
+        # The injected mode's designed failure is found under the policy's log name.
+        self.assertEqual(summary["unexpected"], [])
+        self.assertEqual(code, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

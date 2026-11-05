@@ -17,23 +17,29 @@ This table and the field tables are rendered from the
 <!-- END generated: data-contract-datasets -->
 
 A name with an extension is a file; one without is a sheet. *Encoding* is the
-encoding the workbook reads the files in, as a Python codec name such as
-`UTF-8` or `cp1252`; an empty cell means UTF-8. The
-[file-based test cases](TEST_CASES.md#file-based-cases) hold only these files,
-in this encoding.
+encoding the workbook reads a file in, as a Python codec name such as `UTF-8`
+or `cp1252`. For a file, an empty cell (`null` in the contract) means UTF-8; a
+sheet has no encoding, and its cell is always empty. The
+[file-based test cases](TEST_CASES.md#file-based-cases) hold only these files.
+Outside an `invalid` case, each decodes in its dataset's encoding; an
+`invalid` case may hold one that does not, because that is what it tests.
 
 ## File format
 
 State, for each delimited text file the workbook imports, its encoding,
 delimiter and decimal separator in `data-contract.json`. The rest of the
 format is fixed, so that the [reference validator](#reference-validator) and
-the workbook read a file the same way:
+the workbook read a file the same way. In outline:
 
 - dates are ISO 8601, `YYYY-MM-DD`;
 - the first row is a header that names each column by its field name, and
   the columns may come in any order;
 - a missing value is an empty cell, kept distinct from zero;
 - a cell may be quoted with double quotes.
+
+The [reference validator](#reference-validator) section gives the complete
+rules, including how numbers and booleans are written, the line endings, a
+blank line and a byte order mark.
 
 A provider file in another format is converted before it reaches the
 workbook, and the conversion is recorded as a *Decision* below.
@@ -53,6 +59,11 @@ Read from `positions.csv`, delimited text in `UTF-8`, with `,` between cells and
 | *Illustrative:* `currency` | Currency code, ISO 4217 | — | Yes | Any | Currency of the position's amounts |
 | *Illustrative:* `notional` | Decimal | Currency in field `currency` | Yes | ≥ 0 | Absolute amount, never negative |
 <!-- END generated: data-contract-fields -->
+
+A dataset's identifier field is its required `text` field whose name ends in
+`_id`, such as the illustrative `position_id`. A dataset whose records a
+[JSON fixture](TEST_CASES.md#fixture-format) lists has exactly one, and its
+value is the record's `id`.
 
 State the unit of every amount, rate and period explicitly: a percentage, a
 decimal fraction and basis points are different fields, not different
@@ -100,9 +111,10 @@ case. It reads a file this way:
   cell. LF and CRLF line endings are both read, and a cell may be quoted with
   double quotes.
 - An empty cell is a missing value. Each other cell is matched whole: a
-  number is written in ASCII digits, with no thousands separator, exponent,
-  surrounding blank or line break, and a quoted line break makes a code,
-  date or `true` invalid too.
+  number is written in ASCII digits, with an optional sign and the dataset's
+  decimal separator, and no thousands separator, exponent, surrounding blank
+  or line break; a boolean is `true` or `false`, in lower case; and a quoted
+  line break makes a code, date or boolean invalid too.
 
 It checks the layout and the values of a file, never what they mean: test a
 key that must be unique, a reconciliation against control totals or a rule of

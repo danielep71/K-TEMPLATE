@@ -31,10 +31,13 @@ source, because it compares every case and assertion of the log with it:
   on its line;
 - each case calls `TEST_Harness.BeginCase "<case-id>"` with a literal id,
   and each assertion has a literal name, such as
-  `TEST_Harness.AssertNear "holds", ...`;
+  `TEST_Harness.AssertNear "holds", ...`. The check reads them only in the
+  body of the case procedure itself: an assertion in a procedure that the
+  case calls is not counted, and the certification fails;
 - the counts are `Private Const EXPECTED_CASES As Long = <n>` and
-  `Private Const EXPECTED_ASSERTIONS As Long = <n>`. The
-expected values of a numerical case come from its
+  `Private Const EXPECTED_ASSERTIONS As Long = <n>`.
+
+The expected values of a numerical case come from its
 [test case](TEST_CASES.md), with the tolerance that the case states. A case
 that computes an output of an accuracy contract also records it with
 `RecordResult`, and the suite's certification entry point saves those
@@ -162,14 +165,14 @@ inputs to the input sheets, runs the calculation through its public entry
 point, compares the outputs with the case's expected values within the case's
 tolerance, and restores the sheets. It needs the input and result areas of the
 [workbook contract](WORKBOOK_CONTRACT.md), which the template does not lay out
-yet, so it ships no runner. The suite's runner calls one procedure per test
-case, `RunCase "<case-id>"`, which follows this skeleton; it uses the
-contract's illustrative `Inputs_Settings` area and `M_Run.RunCalculation`
-entry point, and the constant `SETTING_ROWS`, the number of rows the
-contract fixes for that area (one):
+yet, so it ships no runner. The suite's runner calls one case procedure per
+test case, `Case<Name>`, which follows this skeleton; it uses the contract's
+illustrative `Inputs_Settings` area and `M_Run.RunCalculation` entry point,
+and the constant `SETTING_ROWS`, the number of rows the contract fixes for
+that area (one):
 
 ```vb
-Private Sub RunCase(ByVal CaseId As String)
+Private Sub CaseExample()
     Dim Anchor           As Range      'The first header cell of the area
     Dim Area             As Range      'The input area the case fills
     Dim Saved            As Variant    'Its values before the case
@@ -180,7 +183,7 @@ Private Sub RunCase(ByVal CaseId As String)
     Dim ErrDescription   As String
 
         On Error GoTo Failed
-        TEST_Harness.BeginCase CaseId
+        TEST_Harness.BeginCase "<case-id>"
         Set Anchor = ThisWorkbook.Names("Inputs_Settings").RefersToRange
         Set Area = Anchor.Offset(1, 1).Resize(SETTING_ROWS, 1)
         Saved = Area.Value
@@ -189,7 +192,8 @@ Private Sub RunCase(ByVal CaseId As String)
         M_Run.RunCalculation
         ' For each output of tests/expected/<case-id>.json, read it where the
         ' workbook contract places it, then call TEST_Harness.AssertNear with
-        ' its value and tolerance and TEST_Harness.RecordResult with its scope.
+        ' a literal name, its value and tolerance, and
+        ' TEST_Harness.RecordResult with its scope.
 
 CleanUp:
         On Error GoTo 0
@@ -214,13 +218,15 @@ CaseFailed:
 End Sub
 ```
 
-- **Certification.** A runner that calls `RunCase "<case-id>"` for every
-  case does not have the shape the check reads: the case id and the outputs'
-  assertions are not literals of a case procedure. To certify the suite,
-  give each test case its own `Case<Name>` procedure that calls
-  `TEST_Harness.BeginCase "<case-id>"` and names its assertions, one per
-  output of its expected file, and keep the shared steps, such as filling
-  and restoring the area, in procedures that the cases call.
+- **Certification.** Each test case has its own `Case<Name>` procedure,
+  because the check reads the case id and the assertion names as literals of
+  the case procedure ([modules](#modules)). Every assertion is written there:
+  one per output of the case's expected file, and `inputs-restored`. A
+  runner that passes the case id to one shared procedure, or an assertion
+  made in a procedure the case calls, does not have that shape, and the
+  certification fails. Keep the shared steps, such as filling and restoring
+  the area, in helpers that return what the case asserts, as `RestoreInputs`
+  returns what failed.
 - **The inputs.** The runner stands in for the user, in a development build
   only. It writes only `Input` areas, which code otherwise never writes, and
   finds each by its defined name. A dataset that the
@@ -242,7 +248,8 @@ End Sub
   the success and the error path, through a helper such as `RestoreInputs`
   that contains its own error and returns what failed, as the
   [cleanup pattern](../VBA_HOUSE_STYLE.md#operation-and-cleanup-outcomes)
-  requires. `inputs-restored` is asserted on both paths, so the counts hold.
+  requires. The case asserts `inputs-restored` on that result on both paths,
+  so the counts hold.
 - **Excel's state.** The entry point owns the settings it changes, such as
   `Calculation` and `ScreenUpdating`, and the runner never restores them.
   `EndRun` compares them with their values at `BeginRun`: a setting the
@@ -430,8 +437,9 @@ fails when the commit has no file there, or when a suite's counts or entry
 point differ from the policy. Every log of every suite must come from one
 host. A policy of version 1, which older commits hold, has no `suites`. The same policy is read
 by `tools/devbuild/export_manifest.py`, for the names of the export folder and
-the manifest, and by `tools/render_docs.py`, for the expected results in the
-installation guide. `tests/test_check_excel_run.py` keeps the policy equal to
+the manifest, by `tools/devbuild/lo_smoke.py`, for the example suite's
+certification entry point and the names of its logs and results file, and by
+`tools/render_docs.py`, for the expected results in the installation guide. `tests/test_check_excel_run.py` keeps the policy equal to
 the suite, to the host policy of the installation guide and to the evidence
 files the guide names. To change a mode, a file name, a reference or the
 bitness, change the policy together with the suite, the installation guide

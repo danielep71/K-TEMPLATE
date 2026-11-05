@@ -162,8 +162,8 @@ the development workbook and runs the harness certification in headless
 LibreOffice; `python3 tools/devbuild/lo_smoke.py WORKBOOK` runs a workbook
 you built. It reports only failures that LibreOffice is not known to cause,
 and exits 0 when there is none, 1 on such a failure or when LibreOffice cannot
-run the workbook, and 2 for an unknown option, a missing workbook, or a
-missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
+run the workbook, and 2 for an unknown option, a missing workbook, a missing
+or malformed evidence policy, or a missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
 evidence.
 
 <a id="running-the-harness"></a>
@@ -202,10 +202,12 @@ Two more entry points show the failure paths and are expected to fail:
   keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`
   after it, with a folder outside the checkout or the ignored
   `test-results/` directory.
-- **Recovery.** A run that stopped half way, or that left Excel's state
-  changed, leaves `recovery=REQUIRED`, and the next run is refused. Check
-  **File → Options → Formulas** (calculation), the open workbooks and the
-  other settings the log names, then type `TEST_Harness.ResetTests`.
+- **Recovery.** A run that left Excel's state changed, or that stopped half
+  way while the project kept its state, leaves `recovery=REQUIRED`, and the
+  next run is refused. Check **File → Options → Formulas** (calculation), the
+  open workbooks and the other settings the log names, then type
+  `TEST_Harness.ResetTests`. A run stopped with **End** or **Reset** leaves
+  no flag: see the next item.
 - **End or Reset.** **End** in an error dialog, or **Run → Reset** in the
   VBE, clears the harness's state with the rest of the project's
   ([HB-06](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the

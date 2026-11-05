@@ -1,4 +1,4 @@
-# Configuration parser for the workflow and Dependabot control tests and the
+# Configuration parser for the tests that read YAML and the
 # codeql-default-branch check only.
 # Hash-locked: every wheel and the source distribution of this release, as
 # published on PyPI, so the install verifies hashes on any platform. CI
