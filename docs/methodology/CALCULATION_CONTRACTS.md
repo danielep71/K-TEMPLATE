@@ -18,6 +18,9 @@ State once, for every calculation:
 - **Currency conversion:** which rates, from which date and source.
 - **Failure:** a calculation that cannot complete reports why, and withdraws
   its earlier outputs instead of leaving them as if current.
+- **Tolerances:** the default absolute and relative bounds of the test cases'
+  comparisons, once decided ([tolerance](TEST_CASES.md#tolerance)), with the
+  decision in the *Decisions* table below.
 
 ## Contract template
 
@@ -41,9 +44,13 @@ Copy this section for each calculation.
 
 **Outputs:**
 
-| Output | Unit | Scope | Rounding |
-| --- | --- | --- | --- |
-| Example total | Reporting currency | Whole calculation | None |
+| Output | Quantity | Unit | Scope | Rounding |
+| --- | --- | --- | --- | --- |
+| Example total | `illustrative_total_notional_amount` | Reporting currency | Whole calculation | None |
+
+- **Quantity:** the lower snake case name that the test cases' expected
+  files and the accuracy contracts use for the output
+  ([expected-result format](TEST_CASES.md#expected-format)).
 
 **Limits and non-goals:** cases the calculation does not cover, and what
 happens if they occur in the input.

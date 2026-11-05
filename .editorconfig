@@ -183,7 +183,8 @@ end_of_line = unset
 insert_final_newline = unset
 trim_trailing_whitespace = false
 
-# The source register is ordinary documentation, matching .gitattributes.
+# A README in the directory, by convention, is ordinary documentation,
+# matching .gitattributes; the register itself is docs/methodology/SOURCES.md.
 [docs/methodology/sources/README.md]
 charset = utf-8
 end_of_line = lf

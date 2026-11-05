@@ -12,7 +12,7 @@ names, are built only in the development configuration. It carries the build sta
 reference sheet.
 
 Without src/workbook/Template.xlsx, every sheet is written blank, with only
-the stamp and the label beside each defined name. With it, the build starts
+the stamp and, to the left of each name that has one, its label. With it, the build starts
 from a copy of the template, which keeps its layout, styles and protection:
 its sheets must be the configuration's sheets other than Test, in order, and
 it must define their names on the same cells. The build sets the code names,
