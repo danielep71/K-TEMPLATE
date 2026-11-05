@@ -313,6 +313,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The **Traffic alert** job reads the `traffic-history` commit that its
+  collection pushed, or merged onto when nothing changed, which the collect
+  job outputs as `history-sha`, not the branch's current tip; it stops when
+  that output is missing, and a workflow control test keeps the binding
+  (#304).
 - External links must use HTTPS: `tools/check_links.py` fails a plain
   `http://` link in a Markdown link, a reference definition, an autolink or an
   HTML attribute, outside code, in **Repository integrity**, and the weekly

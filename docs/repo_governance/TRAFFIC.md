@@ -218,7 +218,10 @@ job needs at least one open milestone due after the collection day.
 
 The job uses the workflow token with `issues: write` and `contents: read`. It
 has no environment, so it never receives the App's key or token, and it runs
-only after a successful collection.
+only after a successful collection. It reads the `traffic-history` commit that
+its collection pushed, or merged onto when nothing changed, not the branch's
+current tip, so a re-run of the job reads the same data even after the branch
+has moved.
 
 ## 🩺 Failure diagnosis and recovery
 
