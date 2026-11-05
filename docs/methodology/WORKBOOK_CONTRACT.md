@@ -130,7 +130,8 @@ says that its number of rows varies.
   that reads it. A value that fails validation stops the operation; it is
   never corrected.
 - **Parameter** areas hold values one operation writes and later operations
-  read, with the operation and run that wrote them.
+  read, with the operation and run that wrote them, such as the data an
+  import reads from a file and its lineage.
 - **Result** areas hold the outputs of the calculation contracts, in the units
   and scopes they define. Every row names the scope and the run it belongs
   to.
@@ -157,10 +158,10 @@ with the run ID and the time of the operation that set it.
 
 | Area kind | After success | After failure |
 | --- | --- | --- |
+| Input | Unchanged: no operation writes it | Unchanged |
+| Parameter | An import replaces its data and their lineage; another operation appends one row or set | Unchanged: nothing replaced or appended |
 | Result | Replaced and `CURRENT` | Cleared and `FAILED` |
-| Imported data and its lineage | Replaced, by an import only | Unchanged |
-| Findings | Rewritten | Rewritten, so the findings that explain a failure are shown |
-| Append only (parameters, log) | One row or set appended | Nothing appended, except one log row |
+| Diagnostics | Findings rewritten; one log row appended | Findings rewritten, so those that explain the failure are shown; one log row appended |
 
 - A successful import marks every result that depends on it `STALE`. A
   rejected import keeps the previous data and still marks those results

@@ -153,9 +153,10 @@ milestones and their pull requests.
   maps each `SRC-` paragraph to its `CALC-` step, its VBA procedure, its test
   cases and a status: Validated, Exercised, Not validated or Not implemented.
   Each table has one illustrative row. `check_test_cases.py` fails a row whose
-  source, step, procedure under `src/` or case does not exist, whose case
-  tests another calculation, or whose status contradicts what the row names
-  (#247).
+  source, procedure under `src/` or case does not exist, whose step is not
+  one that its calculation contract's *Rules* table lists, whose case tests
+  another calculation, or whose status contradicts what the row names
+  (#247, #319).
 - `RELEASING.md` step 8 checks the published workbook, with a *Published
   workbook* section in the release certification: the attached workbook's
   build stamp names the candidate and `production`, a rebuild of the tag
@@ -299,8 +300,9 @@ milestones and their pull requests.
   `tools/check_test_cases.py`, which **Repository integrity** runs (#75).
   A case is a JSON fixture, or a file-based case whose variants hold input
   files named and encoded as in the data contract, stored byte for byte
-  (#117). An illustrative case of each form is under `tests/fixtures/` and
-  `tests/expected/`.
+  (#117). An output's `rule` is a step that its calculation contract's
+  *Rules* table lists (#319). An illustrative case of each form is under
+  `tests/fixtures/` and `tests/expected/`.
 - `tools/check_binaries.py`, which **Repository integrity** runs: a tracked
   binary file outside the approved paths fails unless
   `.github/binary-allowlist.json` lists it with its current SHA-256 (#113).
@@ -442,21 +444,34 @@ milestones and their pull requests.
   test-case format's meaning: values the project computes by hand, in a
   spreadsheet or with its own script are `illustrative` cross-checks, and a
   rule is validated only by `published` or `independent` values; the
-  validation matrix uses the traceability statuses. The data contract's file
-  format states the fixed rules its validator applies. `.gitattributes`,
+  validation matrix uses the traceability statuses and describes the
+  illustrative cases as they are, two script-derived `nominal` cases, with
+  empty and invalid input still to cover; derivation scripts are Python
+  only. The data contract's file format points at its reference validator
+  for the complete rules, the validator's rules include numbers and
+  booleans, an empty *Encoding* means UTF-8 for a file only, and a file of
+  an `invalid` case need not decode. `.gitattributes`,
   `.editorconfig` and the guides name the source register in `SOURCES.md`.
   The illustrative settings area is typed only in its value column `C5`, with
   its size in the contract, and the protection example and the case-runner
   skeleton follow it. The illustrative expected values cite rule
   `CALC-01.1`, the *Outputs* template names each output's quantity, default
-  tolerances go in the calculation contracts' common rules, a fixture
-  record's `id` carries the dataset's identifier field, and the protection
-  check is described as it compares options (#301).
+  tolerances go in the calculation contracts' common rules, and a contract
+  lists its `_status` quantities and their texts under *Failure behaviour*.
+  A fixture record's `id` carries the dataset's identifier field, its
+  required text field ending in `_id`. The workbook contract's status table
+  uses the area kinds it defines, the installation guide's recovery item
+  covers only a run that kept the project's state, and the `HB-06` probe
+  pauses the run at a breakpoint. The protection check is described as it
+  compares options (#301, #319).
 - A project suite can be certified with a runner of its own: its `suites`
   entry may name it as `runner` (`RunSuite` by default), and the harness
   guide states the shape `tools/check_excel_run.py` reads, so the relation
-  tests can be certified with `"runner": "RunRelationTests"`; a `RunCase`
-  runner is not certifiable as it stands. The Excel evidence documents agree
+  tests can be certified with `"runner": "RunRelationTests"`. The check
+  reads assertions only in the case procedure itself, so the end-to-end
+  case-runner skeleton is a case procedure that asserts every output and
+  `inputs-restored` there, with shared steps in helpers that return what
+  failed (#319). The Excel evidence documents agree
   with the code: `SECURITY.md` lists the harness's read of `build_commit`,
   `UNKNOWN` is allowed in any record that did not pass but never in
   `operator`, `started`, `finished` or `outcome`, a one-command run records
