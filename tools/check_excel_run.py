@@ -31,7 +31,8 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   holds what the suite writes, passes and is COMPLETE, from the same host,
   and its own certification log records that run and CERTIFICATION=PASS.
   A suite that records results names its own results file, which its
-  certification entry point saves after its normal run.
+  certification entry point saves after its normal run. A suite's cases are
+  the Case procedures its runner (RunSuite, or the entry's "runner") calls.
   A policy that names a volume benchmark (a TEST_Benchmark module) as the
   harness or a suite is rejected.
   Every suite is read as the policy's Office bitness compiles it, so a case
@@ -41,7 +42,8 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   (AutomationSecurity) and the Trust access to the VBA project as found, the
   references (exactly those of the policy), that Debug > Compile VBAProject
   completed, and the outcome. An outcome other than PASS is evidence of that
-  outcome, never of a pass. A run that stopped early may write UNKNOWN for a
+  outcome, never of a pass. A run that did not pass, because it ended FAIL or
+  stopped early, may write UNKNOWN for a
   value it could not read, but no record may leave unread who ran it, when
   or how it ended;
 - results.json, written by TEST_Harness.SaveResults after the example suite's
@@ -145,7 +147,7 @@ HOST_FIELDS = ("operator", "started", "finished", "windows", "excel", "bitness",
 # How a run ended. Only PASS can pass; any other outcome is evidence of itself.
 OUTCOMES = ("PASS", "FAIL", "IMPORT_FAILED", "COMPILE_FAILED", "EXECUTION_TIMEOUT",
             "INCOMPLETE", "NOT_ENABLED", "UNAVAILABLE")
-# What a run that stopped early writes for a host value it could not read; the
+# What a run that did not pass writes for a host value it could not read; the
 # record of a PASS has none.
 UNKNOWN = "UNKNOWN"
 # Excel's AutomationSecurity, as msoAutomationSecurityLow, ByUI and ForceDisable.
@@ -170,6 +172,7 @@ PROCEDURE = re.compile(r"^(?:Public|Private) Sub (\w+)\(.*?^End Sub$", re.M | re
 BEGIN_CASE = re.compile(r'TEST_Harness\.BeginCase "([^"]+)"')
 ASSERTION = re.compile(r'TEST_Harness\.Assert\w+ "([^"]+)"')
 CALL = re.compile(r"^\s+(Case\w+)$", re.M)
+IDENTIFIER = re.compile(r"[A-Za-z]\w*")
 INJECTED_VALUE = re.compile(r'If mMode = "INJECTED_FAILURE" Then\s+\w+ = ([-+.\dE]+)\s')
 
 
@@ -191,6 +194,7 @@ class ProjectSuite:
     log: str
     certification: str
     results: str | None = None
+    runner: str = "RunSuite"
 
 
 @dataclass(frozen=True)
@@ -235,7 +239,8 @@ def parse_policy(text: str) -> Policy:
                                str(item["certification_entry_point"]), item["expected_cases"],
                                item["expected_assertions"], str(item["log"]),
                                str(item["certification_log"]),
-                               str(item["results"]) if "results" in item else None)
+                               str(item["results"]) if "results" in item else None,
+                               str(item.get("runner", "RunSuite")))
                   for item in data.get("suites", [])))
     except (ValueError, KeyError, TypeError) as error:
         raise PolicyError(f"{POLICY}: {error!r}") from error
@@ -279,15 +284,24 @@ def policy_problems(data: dict[str, Any], modes: list[tuple[str, str, Any]],
                             "inside the repository")
         if path.stem.casefold().startswith(BENCHMARK_PREFIX.casefold()):
             problems.append(f"{source}: a volume benchmark is never certified evidence")
+    problems += suite_problems(policy)
+    if not policy.references or len(set(policy.references)) != len(policy.references):
+        problems.append("host references must be listed once each")
+    if policy.office not in OFFICE_BITNESS:
+        problems.append(f"host office must be one of {', '.join(OFFICE_BITNESS)}")
+    return problems
+
+
+def suite_problems(policy: Policy) -> list[str]:
+    """What is wrong with the counts and runners the policy states for its suites."""
+    problems = []
+    if any(not IDENTIFIER.fullmatch(item.runner) for item in policy.project_suites):
+        problems.append("a suite's runner must be the name of a VBA procedure")
     for suite in (policy, *policy.project_suites):
         for name in ("expected_cases", "expected_assertions"):
             value = getattr(suite, name)
             if not isinstance(value, int) or isinstance(value, bool) or value < 1:
                 problems.append(f"suite {name} must be a positive integer")
-    if not policy.references or len(set(policy.references)) != len(policy.references):
-        problems.append("host references must be listed once each")
-    if policy.office not in OFFICE_BITNESS:
-        problems.append(f"host office must be one of {', '.join(OFFICE_BITNESS)}")
     return problems
 
 
@@ -404,9 +418,11 @@ def read_log(path: Path, problems: list[str]) -> list[Record]:
     return records
 
 
-def read_suite(source: bytes, office: str = "64-bit") -> Suite:
+def read_suite(source: bytes, office: str = "64-bit", runner: str = "RunSuite") -> Suite:
     """The suite as a host of ``office`` bitness compiles it: lines inside an #If
-    branch that is inactive there are blank."""
+    branch that is inactive there are blank. Its cases are the Case procedures
+    that ``runner`` calls, each alone on its line, in that order; a case's id and
+    its assertions' names are the literals of its BeginCase and Assert calls."""
     text = source.decode("ascii", errors="replace").replace("\r\n", "\n")
     environment = BITNESS_ENVIRONMENT.get(office, BITNESS_ENVIRONMENT["64-bit"])
     text = check_vba_conditionals.reachable_sources("suite.bas", text)[0][environment]
@@ -417,7 +433,7 @@ def read_suite(source: bytes, office: str = "64-bit") -> Suite:
     last_case: list[str] = []
     injected: list[str] = []
     injected_expected = ""
-    for name in CALL.findall(bodies.get("RunSuite", "")):
+    for name in CALL.findall(bodies.get(runner, "")):
         body = bodies.get(name, "")
         case = BEGIN_CASE.findall(body)
         names = [f"{case[0] if case else name}/{item}" for item in ASSERTION.findall(body)]
@@ -777,7 +793,7 @@ def time_findings(host: dict[str, str], policy: Policy) -> list[str]:
 def host_findings(host: dict[str, str], policy: Policy,
                   environment: dict[str, str]) -> list[str]:
     """What is wrong with the values of a host record, whatever its outcome. A run
-    that stopped early may write UNKNOWN for what it could not read, apart from
+    that did not pass may write UNKNOWN for what it could not read, apart from
     who ran it, when and how it ended: no record leaves those unread."""
     outcome = host.get("outcome", "")
     findings = time_findings(host, policy)
@@ -793,7 +809,7 @@ def host_findings(host: dict[str, str], policy: Policy,
         if not value or (value == UNKNOWN and stopped and key != "outcome"):
             continue
         if value == UNKNOWN and key != "outcome":
-            findings.append(f"{policy.host}: {key}={UNKNOWN}, but only a run that stopped early "
+            findings.append(f"{policy.host}: {key}={UNKNOWN}, but only a run that did not pass "
                             "may leave a value unread")
         elif key == "excel" and not EXCEL_BUILD.match(value):
             findings.append(f"{policy.host}: excel={value}, expected <version> build <build>, "
@@ -1110,7 +1126,9 @@ def suite_findings(policy: Policy | ProjectSuite, suite: Suite, source: bytes,
     path = policy.suite_source if isinstance(policy, Policy) else policy.source
     where = f"{path} at {label}"
     if not suite.cases:
-        return [f"no suite in {where}"]
+        runner = "RunSuite" if isinstance(policy, Policy) else policy.runner
+        return [f"no suite in {where}: {runner} calls no Case procedure, each alone on "
+                "its line, that begins with a literal TEST_Harness.BeginCase id"]
     if isinstance(policy, Policy) and len(suite.injected) != 1:
         findings.append(f"{where}: INJECTED_FAILURE must change exactly one assertion, "
                         f"found {suite.injected}")
@@ -1151,13 +1169,14 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     if harness and failed is None:
         evidence.findings.append(f"{policy.harness}: no ERR_TEST_FAILED constant")
     runs = []
-    entries: list[tuple[Policy | ProjectSuite, str, str, dict[str, str], str]] = [
-        (policy, policy.suite, policy.suite_source, policy.logs, policy.certification),
-        *((item, item.name, item.source, {"NORMAL": item.log}, item.certification)
-          for item in policy.project_suites)]
-    for item, name, path, logs, certification in entries:
+    entries: list[tuple[Policy | ProjectSuite, str, str, dict[str, str], str, str]] = [
+        (policy, policy.suite, policy.suite_source, policy.logs, policy.certification,
+         "RunSuite"),
+        *((item, item.name, item.source, {"NORMAL": item.log}, item.certification,
+           item.runner) for item in policy.project_suites)]
+    for item, name, path, logs, certification, runner in entries:
         source = source_at(root, commit, path, evidence)
-        suite = read_suite(source, policy.office)
+        suite = read_suite(source, policy.office, runner)
         if source:
             evidence.findings += suite_findings(item, suite, source, commit[:12])
         runs.append((suite, name, logs))

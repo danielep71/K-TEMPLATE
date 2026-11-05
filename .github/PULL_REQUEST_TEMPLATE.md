@@ -82,5 +82,5 @@ comment on the pull request. -->
 - [ ] Each linked issue has the assignee, exactly one priority label (`P1` only with `bug`), only catalogue labels, an open milestone, a target end date before the milestone's due date, and a dependency section whose issue links all exist, with `blocked` exactly while a named prerequisite is unresolved; this PR has no milestone, links the relevant issues and carries appropriate labels.
 - [ ] Scope is focused: no unrelated changes, local artifacts or generated output.
 - [ ] Documentation affected by the change is updated.
-- [ ] `CHANGELOG.md` has an entry under `[Unreleased]` for this change, or the change is one its maintenance policy says needs none.
+- [ ] `CHANGELOG.md` has an entry under `[Unreleased]` for this change (in the dated section being released, for a fix of a failed release gate before the tag), or the change is one its maintenance policy says needs none.
 - [ ] No tokens, credentials, real portfolio or client data.

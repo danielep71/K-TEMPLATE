@@ -10,9 +10,10 @@ tests/fixtures as the folder of the test cases. Then it prints a JSON
 summary: the modules LibreOffice loaded, the error the certification raised,
 each run log's RESULT and failures, the certification log, the results file,
 and the failures that LibreOffice is not known to cause. It exits 0 when there is none, 1 when
-there is one or the certification wrote no log, and 2 when LibreOffice or
-its Python UNO bridge (python3-uno) is missing. Run it with the Python that
-provides the bridge.
+there is one, the certification wrote no log, or LibreOffice could not open
+the workbook or run it, and 2 when an option is unknown, WORKBOOK does not
+exist, or LibreOffice or its Python UNO bridge (python3-uno) is missing. Run
+it with the Python that provides the bridge.
 
 LibreOffice is not a supported host, and this is never Excel evidence. It
 only catches some runtime defects before a run on the supported host. It runs
@@ -28,6 +29,7 @@ valid VBA differently in known ways:
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import importlib.util
 import json
@@ -101,9 +103,14 @@ def enable_vba(context: Any) -> None:
 def certify(context: Any, workbook: Path, folder: Path) -> dict[str, object]:
     desktop = context.ServiceManager.createInstanceWithContext("com.sun.star.frame.Desktop",
                                                               context)
-    document = desktop.loadComponentFromURL(
-        workbook.resolve().as_uri(), "_blank", 0,
-        (property_value("Hidden", True), property_value("MacroExecutionMode", 4)))
+    try:
+        document = desktop.loadComponentFromURL(
+            workbook.resolve().as_uri(), "_blank", 0,
+            (property_value("Hidden", True), property_value("MacroExecutionMode", 4)))
+    except Exception:
+        # Let the office exit on its own; killing the launcher leaves it running.
+        desktop.terminate()
+        raise
     summary: dict[str, object] = {"workbook": str(workbook)}
     try:
         summary["modules"] = sorted(document.BasicLibraries.getByName("VBAProject")
@@ -156,15 +163,23 @@ def read_results(folder: Path) -> object:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument("workbook", nargs="?", type=Path,
+                        help="the workbook to run; without it, the development workbook is built")
+    args = parser.parse_args(argv)
+    # Checked before LibreOffice starts, which would otherwise wait on a load
+    # that cannot succeed.
+    if args.workbook is not None and not args.workbook.is_file():
+        print(f"lo-smoke: ERROR (no workbook at {args.workbook})", file=sys.stderr)
+        return 2
     soffice = shutil.which("soffice")
     if soffice is None or importlib.util.find_spec("uno") is None:
         print("lo-smoke: SKIP (needs LibreOffice and python3-uno; this is never Excel evidence)")
         return 2
     with tempfile.TemporaryDirectory(prefix="lo-smoke-") as temporary:
         base = Path(temporary)
-        if args:
-            workbook = Path(args[0])
+        if args.workbook is not None:
+            workbook = args.workbook
         else:
             import build_workbook
             workbook = base / "Workbook-development.xlsm"
@@ -177,15 +192,21 @@ def main(argv: list[str] | None = None) -> int:
              f"-env:UserInstallation={(base / 'profile').as_uri()}",
              f"--accept=socket,host=127.0.0.1,port={port};urp;"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        failure = None
         try:
             context = connect(port)
             enable_vba(context)
             summary = certify(context, workbook, folder)
+        except Exception as error:  # noqa: BLE001 - a UNO error: reported, not raised
+            failure = f"{type(error).__name__}: {error}"
         finally:
             try:
                 office.wait(timeout=60)
             except subprocess.TimeoutExpired:
                 office.kill()
+        if failure is not None:
+            print(f"lo-smoke: FAIL (LibreOffice could not run the workbook: {failure})")
+            return 1
         summary["logs"] = read_logs(folder)
         summary["results"] = read_results(folder)
     summary["unexpected"] = unexpected(summary["logs"])  # type: ignore[arg-type]

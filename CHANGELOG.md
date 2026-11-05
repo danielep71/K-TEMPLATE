@@ -19,7 +19,10 @@ neither a commit log nor release evidence. **No version has been released.**
   that describes a change to unreleased work: an entry describes what the
   release contains.
 - Entries move into a dated section only when a release is prepared, as
-  [RELEASING.md](RELEASING.md) describes. A published section is not
+  [RELEASING.md](RELEASING.md) describes. After that, until the tag exists,
+  a fix for a release gate that failed on the candidate records its change in
+  the dated section being released
+  ([step 2](RELEASING.md#2-integrate-and-freeze-the-candidate)). A published section is not
   rewritten; a demonstrable error is corrected in review, with a line
   `Corrected after release on YYYY-MM-DD: <reason>` in that section.
 
@@ -127,8 +130,9 @@ milestones and their pull requests.
   `PASS` only as evidence of that outcome; a record written by hand in the
   earlier three-line form now fails (#244, #284).
 - `tools/check_independent.py`, which **Repository integrity** runs: it runs
-  each independent implementation that `tests/independent/adapters.json`
-  registers for an `IMPL-` source on the test cases, through an adapter that
+  each independent implementation registered for an `IMPL-` source in
+  `tests/independent/adapters.json`, a file a project creates when it adds
+  one, on the test cases, through an adapter that
   translates each case into the implementation's input, and compares the
   results with the expected values within their tolerance. It lists the cases
   an implementation cannot represent, with the reason, and skips an adapter
@@ -406,6 +410,59 @@ milestones and their pull requests.
 
 ### Fixed
 
+- The release closeout can finish: the release certification, the
+  distribution review and the milestone closeout are issues of the next
+  milestone, and milestone N is closed in step 7, before publication, so
+  `tools/release.py verify-published --milestone N` can pass and **Issue
+  triage** still finds an open milestone for those issues; the checklist has
+  that gate, and every `verify-published` command names `--repository`. The
+  manual cleanup lists every edit the initializer makes, deleting `VERSION`
+  and resetting *Current status* included, and the initializer's
+  `--default-branch` help says what the link shows. The setup guide lists
+  `tests/test_check_issues.py` and `tests/test_repository_consistency.py`,
+  the changelog policy, the contributing guide and the pull request template
+  say where a release-gate fix records its change, the label guide matches
+  the workflows' write-permission list, and `tests/independent/adapters.json`
+  is described as a file to create (#302).
+- The methodology guides agree with each other, the illustrative data and
+  the repository's configuration. The validation plan gives "independent" the
+  test-case format's meaning: values the project computes by hand, in a
+  spreadsheet or with its own script are `illustrative` cross-checks, and a
+  rule is validated only by `published` or `independent` values; the
+  validation matrix uses the traceability statuses. The data contract's file
+  format states the fixed rules its validator applies. `.gitattributes`,
+  `.editorconfig` and the guides name the source register in `SOURCES.md`.
+  The illustrative settings area is typed only in its value column `C5`, with
+  its size in the contract, and the protection example and the case-runner
+  skeleton follow it. The illustrative expected values cite rule
+  `CALC-01.1`, the *Outputs* template names each output's quantity, default
+  tolerances go in the calculation contracts' common rules, a fixture
+  record's `id` carries the dataset's identifier field, and the protection
+  check is described as it compares options (#301).
+- A project suite can be certified with a runner of its own: its `suites`
+  entry may name it as `runner` (`RunSuite` by default), and the harness
+  guide states the shape `tools/check_excel_run.py` reads, so the relation
+  tests can be certified with `"runner": "RunRelationTests"`; a `RunCase`
+  runner is not certifiable as it stands. The Excel evidence documents agree
+  with the code: `SECURITY.md` lists the harness's read of `build_commit`,
+  `UNKNOWN` is allowed in any record that did not pass but never in
+  `operator`, `started`, `finished` or `outcome`, a one-command run records
+  the build's references, and the installation guide's rejection table
+  covers the project suites. The host behaviour register has `HB-06` (End
+  or Reset clears the harness's state) and `HB-07` (the Immediate window
+  keeps 200 lines), both `assumed`, and the guides cite them and `HB-01`;
+  `HOST_TARGETS` and the house style's examples are described consistently
+  (#300).
+- `tools/release.py notes` and `bundle` report a failure on a FAIL line
+  instead of a traceback, and `verify` reports a missing tag as a finding.
+  `tools/check_links.py --external` skips the repository's own links locally
+  as in CI, reading the repository from the `origin` remote when
+  `GITHUB_REPOSITORY` is unset. `tools/devbuild/lo_smoke.py` exits 2 for an
+  unknown option or a missing workbook before it starts LibreOffice, and 1
+  without a traceback when LibreOffice cannot run the workbook. The weekly
+  **OpenSSF Scorecard** run is no longer skipped: a scheduled event carries
+  no repository in its payload, so the job exempts it from the branch test
+  and reads the visibility from the API (#299).
 - The VBA harness guides, module headers and pull request template agree
   with the code. The example suite has a `cleanup-primary-only` case, in
   which only the operation fails and every restoration succeeds: the primary

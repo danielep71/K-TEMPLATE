@@ -34,6 +34,7 @@ import build_workbook  # noqa: E402
 import check_binaries  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
+import lo_smoke  # noqa: E402
 import vba_project  # noqa: E402
 import workbook_template  # noqa: E402
 
@@ -724,6 +725,39 @@ class Manifest(unittest.TestCase):
                 self.assertEqual(export_manifest.main([str(workbook), str(folder), "--policy",
                                                        str(policy)]), 1)
             self.assertIn("not a plain file name", output.getvalue())
+
+
+class LibreOfficeSmoke(unittest.TestCase):
+    """The exit codes of lo_smoke.py that need no LibreOffice."""
+
+    def test_an_unknown_option_or_a_missing_workbook_exits_2_before_starting_libreoffice(
+            self) -> None:
+        with unittest.mock.patch("subprocess.Popen") as popen, \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            with self.assertRaises(SystemExit) as raised:
+                lo_smoke.main(["--help-me"])
+            self.assertEqual(raised.exception.code, 2)
+            self.assertEqual(lo_smoke.main(["no-such-workbook.xlsm"]), 2)
+        popen.assert_not_called()
+        self.assertIn("no workbook at no-such-workbook.xlsm", errors.getvalue())
+
+    def test_a_workbook_libreoffice_cannot_run_exits_1_without_a_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            workbook = Path(directory) / "Workbook.xlsm"
+            workbook.write_bytes(b"not a workbook")
+            with unittest.mock.patch("shutil.which", return_value="soffice"), \
+                    unittest.mock.patch("importlib.util.find_spec",
+                                        return_value=object()), \
+                    unittest.mock.patch("subprocess.Popen") as popen, \
+                    unittest.mock.patch.object(lo_smoke, "connect"), \
+                    unittest.mock.patch.object(lo_smoke, "enable_vba"), \
+                    unittest.mock.patch.object(lo_smoke, "certify",
+                                               side_effect=RuntimeError("cannot load")), \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(lo_smoke.main([str(workbook)]), 1)
+        self.assertIn("lo-smoke: FAIL (LibreOffice could not run the workbook: "
+                      "RuntimeError: cannot load)", output.getvalue())
+        popen.return_value.wait.assert_called_once_with(timeout=60)
 
 
 if __name__ == "__main__":

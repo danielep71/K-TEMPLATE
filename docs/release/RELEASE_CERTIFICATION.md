@@ -2,8 +2,10 @@
 
 The record that one candidate commit was checked, built, run and accepted
 before a version is published. Copy the template below into an issue for the
-release, fill it in from the runs themselves, and close the issue only when
-every row holds evidence or a recorded deviation. [RELEASING.md](../../RELEASING.md)
+release, filed under the milestone after the released one
+([release records](../../RELEASING.md#release-records)), fill it in from the
+runs themselves, and close the issue only when every row holds evidence or a
+recorded deviation. [RELEASING.md](../../RELEASING.md)
 says when each part is due.
 
 Write `NOT RUN` with the reason for anything that was not done. A row left
@@ -71,7 +73,7 @@ What was checked by hand, by whom, against which independent values. Write
 
 | Check | Result | Evidence |
 | --- | --- | --- |
-| `tools/release.py verify-published vX.Y.Z --milestone N`, with an `--asset` for each other file of *Artifacts* (RELEASING.md step 7) | `release-verify-published: PASS`, or each `FAIL` line; a `NOTE` on an unattested bundle is a deviation | Its output |
+| `tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY --milestone N`, with an `--asset` for each other file of *Artifacts* (RELEASING.md step 7) | `release-verify-published: PASS`, or each `FAIL` line; a `NOTE` on an unattested bundle is a deviation | Its output |
 
 ### Published workbook
 

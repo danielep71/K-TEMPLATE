@@ -72,4 +72,4 @@ tables of the [validation plan](VALIDATION_PLAN.md) differ:
 
 Byte-preserved copies of sources go under `docs/methodology/sources/`, whose
 Git and editor rules are already set; [Sources](SOURCES.md) describes the
-naming and the register entry each copy needs.
+naming and the register entry, with its SHA-256, that each copy needs.

@@ -11,29 +11,42 @@ Code review and passing repository checks are necessary, but they are not
 evidence that a figure is right: the static checks never run Excel or a
 calculation.
 
-## Independent reference values
+## Reference values
 
-An expected result is computed outside the workbook: by hand, in a separate
-spreadsheet that shares no formulas with it, or by a script, for example in
-Python or R. Record how each value was derived and who derived it. A
-reference script is a test tool, never a runtime dependency of the workbook.
+An expected result is never taken from the workbook. Two kinds of value
+validate a rule:
+
+- **Published:** printed in a registered [source](SOURCES.md), such as a
+  worked example of the regulation.
+- **Independent:** computed by an external implementation by another author,
+  registered in the source register with an `IMPL-` ID.
+
+A value the project computes itself, by hand, in a separate spreadsheet that
+shares no formulas with the workbook, or with a script under
+`tests/derivations/`, for example in Python or R, is an `illustrative`
+cross-check: it catches defects, but it validates no rule. Record how each
+value was derived and who derived it. A reference script is a test tool,
+never a runtime dependency of the workbook.
 
 Each comparison has an absolute and a relative tolerance, with the reason for
 them: the source's own rounding, or the precision of `Double` arithmetic.
 
 The [numerical test cases](TEST_CASES.md) record each expected value with its
 reference class (`published`, `independent` or `illustrative`), its source,
-its derivation and its tolerance. Only `published` and `independent` values
-validate a rule.
+its derivation and its tolerance
+([reference classes](TEST_CASES.md#reference-classes)). Only `published` and
+`independent` values validate a rule: a rule reaches *Validated* in the
+[traceability table](#traceability) only through one of them.
 
 ## Validation matrix
 
-| Calculation | Independent checks | Evidence | Status |
+| Calculation | Reference values | Evidence | Status |
 | --- | --- | --- | --- |
-| *Illustrative:* `CALC-01` | Hand-computed totals for a synthetic portfolio; empty input; invalid input rejected | Evidence record per release candidate | Not started |
+| *Illustrative:* `CALC-01` | `illustrative` cross-checks only: hand-computed totals for a synthetic portfolio, empty input, invalid input rejected; no `published` or `independent` value yet | Evidence record per release candidate | Not implemented |
 
-The [traceability table](#traceability) gives the status of each rule of a
-calculation.
+The *Status* of a calculation is the least advanced
+[traceability](#traceability) status of its rules: *Validated* only when every
+rule is.
 
 Cover, for each calculation, with the case categories of the
 [test-case format](TEST_CASES.md#categories):
@@ -135,6 +148,8 @@ whether it was measured:
 | `HB-03` | `Application.Run` reaches a public procedure of an `Option Private Module` module when the name is qualified with the workbook (`'Book.xlsm'!Module.Procedure`) | `measured` | As `HB-02`, in a session whose macros were enabled | As `HB-02` | 2026-11-03 | `'Workbook-development.xlsm'!TEST_Harness.LastResult` ran | #204 |
 | `HB-04` | In a workbook opened through COM with its macros disabled, **Enable Content** enables them without reopening, and `Application.Run` then reaches its procedures | `measured` | `python tools/devbuild/excel_run.py` on a host with `HB-02`: click **Enable Content** in the yellow bar | As `HB-02` | 2026-11-03 | Excel showed the yellow bar; after the click, the certification ran to `excel-run: PASS` at 50c0658 without reopening the workbook | #204 |
 | `HB-05` | Excel compiles a VBA project written from source when the workbook opens: the project that `tools/devbuild/vba_project.py` writes holds no compiled code (`_VBA_PROJECT` version `0xFFFF`, no performance cache), so the code that runs is the source the build wrote, and no Trust access to the VBA project object model is needed | `assumed` | By hand: open a development build in Excel, then check that **Debug → Compile VBAProject** completes and that `? TEST_Harness.LastResult` runs in the Immediate window | — | — | Not measured by a probe of its own. `tools/devbuild/build_workbook.py` relies on it, and so does the identity by rebuild of `tools/check_excel_run.py`, which proves that the workbook Excel ran holds the source of the commit, not that Excel compiled it | #285 |
+| `HB-06` | **End** in an error dialog, or **Run → Reset** in the VBE, resets the project and clears every module-level variable, so the harness's active run and recovery flag are lost and the stop is not detected | `assumed` | By hand: start `TEST_Examples.RunExampleTests`, stop it with **Run → Reset**, then check that `? TEST_Harness.LastResult` is empty and that the next run is not refused | — | — | Not measured. The harness guides tell you to check Excel's state by hand after such a stop | #300 |
+| `HB-07` | The Immediate window keeps only its last 200 lines | `assumed` | By hand: print 250 numbered lines with `Debug.Print`, then check that the first line left is line 51 | — | — | Not measured. The installation guide tells you to save the whole log with `TEST_Harness.SaveLog` | #300 |
 
 - **Status:** `measured` when a probe ran on the named host and its output is
   kept; `assumed` otherwise.
@@ -155,4 +170,4 @@ measured.
 
 | Decision | Options | Issue |
 | --- | --- | --- |
-| *Illustrative:* which tool produces the reference values | By hand, separate spreadsheet, script | Link |
+| *Illustrative:* where the reference values that validate `CALC-01` come from | A worked example of a registered source (`published`); an external implementation by another author (`independent`, `IMPL-`) | Link |

@@ -171,7 +171,18 @@ class ReleaseTest(unittest.TestCase):
             self.assertEqual(release.main(["--root", str(self.root), "verify", "v9.9.9",
                                            "--default-branch", "main"]), 1)
         self.assertIn("release-verify: PASS (v1.2.0)", output.getvalue())
+        self.assertIn("FAIL: tag v9.9.9 is missing", output.getvalue())
         self.assertIn("release-verify: FAIL (v9.9.9)", output.getvalue())
+
+    def test_notes_and_bundle_report_a_failure_without_a_traceback(self) -> None:
+        # Neither subcommand has --sha: the summary line names its own argument.
+        with contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(release.main(["--root", str(self.root), "notes", "v9.9.9"]), 1)
+            self.assertEqual(release.main(["--root", str(self.root), "bundle", "no-such-ref",
+                                           "--name", "Project", "--out", str(self.root / "out")]),
+                             1)
+        self.assertIn("release-notes: FAIL (v9.9.9)", output.getvalue())
+        self.assertIn("release-bundle: FAIL (no-such-ref)", output.getvalue())
 
 
 class IntegrityTest(unittest.TestCase):

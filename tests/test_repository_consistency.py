@@ -122,6 +122,19 @@ class MarkdownTests(unittest.TestCase):
                 problems.append((relative.as_posix(), opened))
         self.assertEqual(problems, [])
 
+    def test_every_verify_published_command_names_the_repository(self):
+        # --repository is required; a shorthand without the python prefix
+        # escapes tools/check_doc_commands.py, so it is checked here.
+        command = re.compile(r'release\.py verify-published (?:v|--)[^`\n|]*(?:\\\n[^`\n|]*)?')
+        problems = []
+        for path in tracked('*.md'):
+            if path.name == 'CHANGELOG.md':
+                continue
+            for found in command.finditer(path.read_text(encoding='utf-8')):
+                if '--repository' not in found.group(0):
+                    problems.append(f'{path.relative_to(ROOT).as_posix()}: {found.group(0)}')
+        self.assertEqual(problems, [])
+
 
 class ApiVersionTests(unittest.TestCase):
     def test_every_github_api_call_uses_the_same_version(self):

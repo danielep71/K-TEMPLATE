@@ -68,7 +68,7 @@ calls back the other way, so there are no cycles.
 - Tests may call the core directly. Examples use only the supported facade.
 - The workbook never calls Python. Reference values are derived from the
   methodology, not by translating the VBA
-  ([validation plan](methodology/VALIDATION_PLAN.md#independent-reference-values)).
+  ([validation plan](methodology/VALIDATION_PLAN.md#reference-values)).
 - Repository tooling is not a second implementation of the calculation.
 
 The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations,

@@ -159,8 +159,11 @@ the failure in an issue.
 **Early warning in LibreOffice (optional).** Where LibreOffice and its
 Python UNO bridge are installed, `python3 tools/devbuild/lo_smoke.py` builds
 the development workbook and runs the harness certification in headless
-LibreOffice. It reports only failures that LibreOffice is not known to
-cause. LibreOffice is not a supported host, and this is never Excel
+LibreOffice; `python3 tools/devbuild/lo_smoke.py WORKBOOK` runs a workbook
+you built. It reports only failures that LibreOffice is not known to cause,
+and exits 0 when there is none, 1 on such a failure or when LibreOffice cannot
+run the workbook, and 2 for an unknown option, a missing workbook, or a
+missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
 evidence.
 
 <a id="running-the-harness"></a>
@@ -194,7 +197,8 @@ Two more entry points show the failure paths and are expected to fail:
 | `TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, `operation=PASS`, `completeness=INCOMPLETE`, `cases=13`, `assertions=32`, `failures=1`, then *Suite examples did not pass* |
 <!-- END generated: example-suite-results -->
 
-- **Complete log.** The Immediate window keeps only its last 200 lines. To
+- **Complete log.** The Immediate window keeps only its last 200 lines
+  ([HB-07](docs/methodology/VALIDATION_PLAN.md#host-behaviour)). To
   keep the whole run, type `TEST_Harness.SaveLog "<folder>\examples.log"`
   after it, with a folder outside the checkout or the ignored
   `test-results/` directory.
@@ -203,7 +207,8 @@ Two more entry points show the failure paths and are expected to fail:
   **File → Options → Formulas** (calculation), the open workbooks and the
   other settings the log names, then type `TEST_Harness.ResetTests`.
 - **End or Reset.** **End** in an error dialog, or **Run → Reset** in the
-  VBE, clears the harness's state with the rest of the project's, so the
+  VBE, clears the harness's state with the rest of the project's
+  ([HB-06](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the
   stop is not detected: the next run starts normally and takes Excel's state
   as it finds it as its baseline. After such a stop, check Excel by hand
   before the next run. In the Immediate window,
@@ -384,7 +389,9 @@ accuracy contracts, as step 3 says.
      every suite, and `FAIL` when a certification raised. When you stop
      early, write the record anyway, with `IMPORT_FAILED` (step 3),
      `COMPILE_FAILED` (step 4), `NOT_ENABLED`, `INCOMPLETE` or `UNAVAILABLE`
-     (Excel would not start), and `UNKNOWN` for a value you could not read.
+     (Excel would not start). In a record whose outcome is not `PASS`, write
+     `UNKNOWN` for a value you could not read, but never for `operator`,
+     `started`, `finished` or `outcome`.
 9. **Check** the folder against the commit, with Python 3.11 or later and
    Git:
 
@@ -416,11 +423,12 @@ accuracy contracts, as step 3 says.
 | A record is missing, extra or out of the order in which the commit's suite writes it, or an unexpected error (`ERROR`) is logged | The run did not execute the suite as written |
 | The normal run is `INCOMPLETE` | A mandatory case or assertion did not run |
 | The normal run is not `RESULT=PASS`, or its cases and assertions differ from the commit's suite in name or order | The run did not pass as written |
-| `CLEANUP` is not `PASS` or `RECOVERY` is not `NONE` in any of the three logs | Cleanup failed |
+| `CLEANUP` is not `PASS` or `RECOVERY` is not `NONE` in any log of any suite | Cleanup failed |
 | The two failure runs do not end as [documented](#running-the-harness), or fail anything but their own failure: the injected run its one designated assertion, with the expected value the suite injects and the same values in each record, the skipped-case run only `harness.completeness` | The failure paths did not behave |
 | `certification.log` is missing, a mode did not end as it must, a failure run did not reach its caller as `ERR_TEST_FAILED`, or it does not end with `CERTIFICATION=PASS` and `COMPLETE` | The certification did not pass |
+| A project suite's log or certification log, as `suites` names them, is missing; its normal run is not `RESULT=PASS` and `COMPLETE`, or its cases and assertions differ from the commit's suite; or its certification log does not end with `CERTIFICATION=PASS` | The project suite did not pass |
 | `ENVIRONMENT` lacks a field, differs between the logs, or Office is not 64-bit | The host is unknown or not the supported target |
-| `host.txt` lacks a field or holds a value the [host record](docs/methodology/TEST_HARNESS.md#host-record) does not allow, a time lacks its UTC offset, the run finished before it started, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), `compile` is not `PASS` (or `ON_DEMAND` with identity by rebuild: `--workbook` and no `exported\` folder, as the one command records it), `operator` is `UNKNOWN`, or `excel` or `bitness` differs from the logs' `ENVIRONMENT` | The host record is incomplete |
+| `host.txt` lacks a field or holds a value the [host record](docs/methodology/TEST_HARNESS.md#host-record) does not allow, a time lacks its UTC offset, the run finished before it started, the references are not exactly the four of the [host policy](#%EF%B8%8F-host-policy), `compile` is not `PASS` (or `ON_DEMAND` with identity by rebuild: `--workbook` and no `exported\` folder, as the one command records it), `operator`, `started`, `finished` or `outcome` is `UNKNOWN`, another field is `UNKNOWN` in the record of a `PASS`, or `excel` or `bitness` differs from the logs' `ENVIRONMENT` | The host record is incomplete |
 | `outcome` in `host.txt` is not `PASS` | The run stopped early or failed: the record is evidence of that outcome, never of a pass |
 | Without `exported\`, a part of the workbook given with `--workbook` differs from a rebuild of the commit, or a part is missing or extra | It was saved after the build, or not built from that commit (`Binding: FAIL`) |
 | `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |

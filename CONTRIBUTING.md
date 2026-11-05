@@ -28,7 +28,9 @@ closed, with a *Resolution* section.
   you ran; write NOT RUN or NOT APPLICABLE with a reason instead of claiming
   evidence that was not produced.
 - Add the `CHANGELOG.md` entry under `[Unreleased]` in the same pull request,
-  as its [maintenance policy](CHANGELOG.md#-maintenance-policy) describes.
+  as its [maintenance policy](CHANGELOG.md#-maintenance-policy) describes; a
+  fix for a failed release gate before the tag goes in the dated section
+  being released instead.
   `tools/check_changelog.py` checks the format, not that the change is
   recorded.
 - Every pull request needs a passing **Repository integrity** check and a

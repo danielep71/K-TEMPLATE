@@ -49,6 +49,17 @@ A release has two parts, each decided separately:
 | **Preparation** | 1 to 5 | Changes only the repository: the dated changelog section, `VERSION`, the integration into the default branch and the evidence. It can stop at any point and publishes nothing. |
 | **Publication** | 6 to 8 | Creates the tag and the GitHub Release, and checks what a user downloads. A pushed tag is never moved or deleted. |
 
+<a id="release-records"></a>
+
+The release certification, the distribution review and the
+[milestone closeout](docs/release/CLOSEOUT.md) of version X.Y.Z are issues of
+the next open milestone, the one after milestone N, never of N itself.
+`verify-published --milestone N` passes only once milestone N is closed with
+no open issue, and **Issue triage** rejects an open issue in a closed
+milestone; records filed under N could then never be completed or closed.
+Open the next milestone first if there is none. Milestone N closes in step 7,
+before publication, once all of its own issues are closed.
+
 <a id="release-invariants"></a>
 
 ## 🔒 Release invariants
@@ -130,7 +141,8 @@ open alerts under **Security → Code scanning**.
 ### 4. Certify the workbook
 
 Copy the [release certification](docs/release/RELEASE_CERTIFICATION.md)
-into an issue for the release, build the workbook from the candidate as
+into an issue for the release, in the next milestone
+([release records](#release-records)), build the workbook from the candidate as
 [INSTALLATION.md](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
 describes, run the regression cases of the
 [validation plan](docs/methodology/VALIDATION_PLAN.md), and fill in the
@@ -219,7 +231,10 @@ attestation and no release.
 
 ### 7. Publish and verify
 
-Review the draft release that the **Release** workflow created. Title it
+Close milestone N on GitHub: every one of its issues is closed, as the
+closeout's first criterion requires, and the
+[release records](#release-records) are in the next milestone. Then review
+the draft release that the **Release** workflow created. Title it
 `vX.Y.Z - <milestone title>`, and add the evidence summary to its notes.
 Attach any other artifact the certification record lists, such as the
 production workbook built from the candidate or the
@@ -368,5 +383,6 @@ Logs and artifacts expire, so copy the decisive lines.
 | 7 | Distribution review recorded and closed | ☐ |
 | 8 | I decided to publish | ☐ |
 | 9 | Annotated tag on the candidate | ☐ |
-| 10 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
-| 11 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |
+| 10 | Milestone N closed with no open issue; the release records are in the next milestone | ☐ |
+| 11 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
+| 12 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |

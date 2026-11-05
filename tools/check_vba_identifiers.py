@@ -11,8 +11,8 @@ never satisfies an assignment in an active one:
   ``Dim``, ``Static``, ``Const`` or ``ReDim`` of the procedure, a module-level
   name, a control of a form, the procedure's own name, a property of the
   module, a public name of a standard module, or a property the host
-  provides (HOST_TARGETS: Range and Cells anywhere, a UserForm's Caption in a
-  form, a Worksheet's Visible in a document module). ``ReDim`` declares, as VBA
+  provides (HOST_TARGETS, such as Range and Cells anywhere, a UserForm's
+  Caption in a form, a Worksheet's Visible in a document module). ``ReDim`` declares, as VBA
   does. A member access (``x.y =``, ``.y =`` in a ``With`` block) is not read;
 - every statement-level call, ``Name args`` or ``Call Name(args)``, names a
   procedure or ``Declare`` of the same module, a public procedure or

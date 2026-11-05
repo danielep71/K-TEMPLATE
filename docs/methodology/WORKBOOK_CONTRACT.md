@@ -89,7 +89,7 @@ State the layout every sheet shares. A common default:
 | *Illustrative:* `build_time` | `shReadme` | The commit's committer time | The build |
 | *Illustrative:* `build_configuration` | `shReadme` | `production` or `development` | The build |
 | *Illustrative:* `cfg_reporting_date` | `shInputs` | The value cell of the reporting date | Users |
-| *Illustrative:* `Inputs_Settings` | `shInputs` | The first header cell of the settings area ([areas](#areas)) | Users, in the rows below it |
+| *Illustrative:* `Inputs_Settings` | `shInputs` | The first header cell of the settings area ([areas](#areas)) | Users, in the value column below it |
 
 - Every name is workbook-scoped and visible, and refers to one cell of this
   workbook by an absolute reference. External and relative references are
@@ -111,12 +111,18 @@ State the layout every sheet shares. A common default:
 
 | Area | Sheet | Kind | Written by | Holds |
 | --- | --- | --- | --- | --- |
-| *Illustrative:* `Inputs_Settings` | `shInputs` | Input | Users | One row per setting: code, value, unit and the contract that uses it |
+| *Illustrative:* `Inputs_Settings` | `shInputs` | Input | Users, in the value column | Below a header row at `B4:E4`, one row per setting in columns B to E: code, value, unit and the contract that uses it. It has one row, the reporting date, so its value cell is `C5`, the cell of `cfg_reporting_date` |
 
 An area is named by its table anchor, which refers to its first header cell
 only ([defined names](#defined-names)). Code that reads, writes or restores
 an area derives it from the anchor: the rows below it, with the columns of
-its header.
+its header. The contract fixes each area's size, as in the table above, or
+says that its number of rows varies.
+
+- In a settings area, users type only the value column. The code, unit and
+  contract columns are labels that the template fills and keeps locked,
+  with the header row ([protection](#protection)); the label of the
+  reporting date is its code cell, `B5`.
 
 - **Input** areas hold what users type: settings, parameters chosen by hand,
   and datasets the data contract places on a sheet. Each cell's type, unit
@@ -189,8 +195,8 @@ tables above. It leaves the `Test` sheets and their names out of every
 configuration but `development`. It builds the sheets in one of two ways:
 
 - **Blank sheets**, while there is no `src/workbook/Template.xlsx`. Each
-  sheet holds only the stamp, a title on the reference sheet and the label
-  beside each defined name. Formats, data validation and print areas are not
+  sheet holds only the stamp, a title on the reference sheet and, to the
+  left of each stamp and setting cell, its label; a table anchor has none. Formats, data validation and print areas are not
   built on this path.
 - **From the template**, once `src/workbook/Template.xlsx` exists. The build
   starts from a copy of it, so the formats, data validation, print areas and
@@ -224,7 +230,7 @@ the illustrative sheets above, it could read:
     "shInputs": {
       "protection": {"sheet": true, "objects": true, "scenarios": true},
       "input": ["C5"],
-      "output": ["A1:B5"]
+      "output": ["A1:B5", "C4:E4", "D5:E5"]
     }
   }
 }
@@ -249,8 +255,9 @@ the illustrative sheets above, it could read:
 compares the matrix with the template's sheets and styles. A cell takes the
 style of its own cell, or else of its row when the row is formatted, or else
 of its column, as Excel shows it; a style is locked unless it unlocks the
-cell. A lock flag or a protection option that differs from the matrix fails
-the check. Without the template the check reads the matrix alone, and
+cell. A lock flag that differs from the matrix fails the check, and so does
+a protection option, compared when the matrix or the template protects the
+sheet; the options of a sheet that neither protects are not compared. Without the template the check reads the matrix alone, and
 without either it passes as inactive; a template without a matrix fails. It
 compares neither the password nor protection that VBA sets at run time with
 `Worksheet.Protect`.
