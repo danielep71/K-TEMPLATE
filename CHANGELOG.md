@@ -477,11 +477,12 @@ milestones and their pull requests.
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
   open or closed, still carries: with `prune: true`, it checks every label it
-  would delete and stops before any change. A name with a comma, which the
+  would delete and stops before any change; a dry run (`--dry-run`) only
+  previews the plan, that deletion included. A name with a comma, which the
   API's label filter cannot query, is checked against the labels of every
   issue and pull request, up to 10,000; a malformed response or the limit
   stops it. The reconcile job has `pull-requests: read`, without which the
-  issues API would omit pull requests from that check (#188, #305, #316).
+  issues API would omit pull requests from that check (#188, #305, #316, #336).
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may

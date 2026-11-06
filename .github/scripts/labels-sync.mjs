@@ -662,14 +662,14 @@ async function main() {
 
   const changes = planChanges(desired, live, { prune: manifest.prune });
   runState.changes = changes;
-  if (options.mode === "reconcile") {
-    await assertSafeDeletions(changes, name => labelInUse(options.repository, process.env.GITHUB_TOKEN, name));
-  }
   if (options.mode === "plan" || options.dryRun) {
     await publishSummary(renderSummary({ mode: options.mode, ...summaryBase, changes, dryRun: options.dryRun }));
     return;
   }
 
+  // Only a run that applies changes checks its deletions: a plan or a dry run
+  // changes nothing, and must preview the deletion of a label still in use.
+  await assertSafeDeletions(changes, name => labelInUse(options.repository, process.env.GITHUB_TOKEN, name));
   runState.applying = true;
   await applyChanges(options.repository, process.env.GITHUB_TOKEN, changes);
   const after = await listLiveLabels(options.repository, process.env.GITHUB_TOKEN);
