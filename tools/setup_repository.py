@@ -390,6 +390,15 @@ def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
         if actual is None:
             rulesets.append({'name': desired['name'], 'id': None, 'status': 'missing', 'differences': []})
             continue
+        if 'bypass_actors' not in actual:
+            # GitHub omits the bypass list unless the token can write the ruleset; an
+            # omitted list is not an empty one, so the ruleset cannot be verified.
+            visible = dict(actual, bypass_actors=desired['bypass_actors'])
+            found = differences(keyed(rule_spec(visible)), keyed(rule_spec(desired)))
+            found.append('bypass_actors: not reported (needs write access to the ruleset)')
+            rulesets.append({'name': desired['name'], 'id': actual.get('id'),
+                             'status': 'unknown', 'differences': found})
+            continue
         found = differences(keyed(rule_spec(actual)), keyed(rule_spec(desired)))
         if rule_spec(actual) != rule_spec(desired) and not found:
             found = ['rules: observed and configured differ']
@@ -607,6 +616,7 @@ def check_prerequisites(state: dict[str, Json], report: dict[str, Json]) -> None
     unknown = [row['setting'] for row in report['settings'] if row['observed'] is None]
     unknown += [row['feature'] for row in report['security']
                 if row['matches'] is not None and row['observed'] is None]
+    unknown += [f'ruleset "{row["name"]}"' for row in report['rulesets'] if row['status'] == 'unknown']
     if unknown:
         raise SetupError('Cannot apply while these managed values are unknown: ' + ', '.join(unknown)
                          + '. Rerun preview to see why GitHub did not report them.')

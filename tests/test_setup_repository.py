@@ -129,7 +129,11 @@ class FakeAPI:
         if '/rulesets?' in endpoint:
             return copy.deepcopy(self.rules)
         if '/rulesets/' in endpoint:
-            return copy.deepcopy(next(r for r in self.rules if r['id'] == int(endpoint.rsplit('/', 1)[1])))
+            ruleset = copy.deepcopy(next(r for r in self.rules if r['id'] == int(endpoint.rsplit('/', 1)[1])))
+            if not self.repo['permissions']['admin']:
+                # GitHub omits the bypass list unless the token can write the ruleset.
+                ruleset.pop('bypass_actors', None)
+            return ruleset
         repo = copy.deepcopy(self.repo)
         if not repo['permissions']['admin']:
             # GitHub shows this block to administrators only.
@@ -357,6 +361,38 @@ class SetupTests(unittest.TestCase):
         self.assertIn('DIFF actions retention_days: observed null, configured 90 '
                       '[GET actions/permissions/artifact-and-log-retention (HTTP 403: unreadable)]', output)
         self.assertEqual(self.api.writes, [])
+
+    def test_a_hidden_bypass_list_is_unknown_not_verified(self) -> None:
+        self.configure()
+        # Someone adds a bypass actor that a token without write access cannot see.
+        self.api.rules[0]['bypass_actors'] = [{'actor_id': 5, 'actor_type': 'RepositoryRole',
+                                               'bypass_mode': 'always'}]
+        self.api.repo['permissions']['admin'] = False
+        name = self.api.rules[0]['name']
+        self.args.check = True
+        with tempfile.TemporaryDirectory() as directory:
+            self.args.evidence = Path(directory) / 'evidence.json'
+            code, output = self.run_output()
+            record = json.loads(self.args.evidence.read_text(encoding='utf-8'))
+        self.assertEqual(code, 1)
+        self.assertIn(f'DIFF ruleset "{name}" (1) bypass_actors: not reported '
+                      '(needs write access to the ruleset)', output)
+        self.assertEqual(record['result'], 'DRIFT')
+        self.assertEqual(next(r for r in record['rulesets'] if r['name'] == name)['status'], 'unknown')
+        self.assertEqual(self.api.writes, [])
+        # With write access the bypass actor is visible and differs.
+        self.api.repo['permissions']['admin'] = True
+        self.args.evidence = None
+        code, output = self.run_output()
+        self.assertEqual(code, 1)
+        self.assertIn(f'DIFF ruleset "{name}" (1) bypass_actors: observed', output)
+
+    def test_apply_refuses_a_ruleset_it_cannot_verify(self) -> None:
+        report = {'visibility': {'matches': True}, 'settings': [], 'security': [],
+                  'rulesets': [{'name': 'Protect main', 'id': 1, 'status': 'unknown', 'differences': []}]}
+        state = {'metadata': {'permissions': {'admin': True}}}
+        with self.assertRaisesRegex(setup.SetupError, 'unknown: ruleset "Protect main"'):
+            setup.check_prerequisites(state, report)
 
     def test_public_secret_scanning_is_unknown_without_administrator_access(self) -> None:
         self.api.repo['visibility'] = 'public'

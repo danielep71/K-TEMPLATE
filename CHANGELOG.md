@@ -410,9 +410,10 @@ milestones and their pull requests.
   repeated rule type. An optional `visibility` makes a different visibility
   drift, which apply refuses and never changes. Preview and `--check` need no
   administrator access: a security feature or Actions setting that GitHub
-  does not report is unknown, with its endpoint and status, and counts as
-  drift, and apply refuses while a managed setting or security feature is
-  unknown. Each difference is printed as a `DIFF` line, a ruleset's by the
+  does not report is unknown, with its endpoint and status, and so is a
+  ruleset whose bypass list GitHub omits for a token that cannot write it;
+  an unknown value counts as drift, and apply refuses while a managed
+  setting, security feature or ruleset is unknown. Each difference is printed as a `DIFF` line, a ruleset's by the
   path of the parameter that differs. `--evidence PATH` writes the check as
   JSON with the configuration's SHA-256, a `{date}` in the path becoming the
   UTC date. Five GitHub Actions settings are checked and never written: an
