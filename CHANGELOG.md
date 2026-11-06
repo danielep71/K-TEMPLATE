@@ -400,6 +400,25 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/setup_repository.py` manages all twelve general repository settings
+  of `docs/setup/repository-settings.json`, now schema 4. It writes the merge
+  methods before the rulesets and the other settings after them, so merged
+  branches are deleted automatically only once the release branches are
+  protected. The configuration may hold any number of uniquely named
+  rulesets; loading refuses one that allows a merge method the settings
+  disable, a required check without a context and an integration ID, or a
+  repeated rule type. An optional `visibility` makes a different visibility
+  drift, which apply refuses and never changes. Preview and `--check` need no
+  administrator access: a security feature or Actions setting that GitHub
+  does not report is unknown, with its endpoint and status, and so is a
+  ruleset whose bypass list GitHub omits for a token that cannot write it;
+  an unknown value counts as drift, and apply refuses while a managed
+  setting, security feature or ruleset is unknown. Each difference is printed as a `DIFF` line, a ruleset's by the
+  path of the parameter that differs. `--evidence PATH` writes the check as
+  JSON with the configuration's SHA-256, a `{date}` in the path becoming the
+  UTC date. Five GitHub Actions settings are checked and never written: an
+  apply whose read-back finds one different names it, to set in
+  **Settings → Actions → General** (#332, #333, #334, #335).
 - The label guide states the dependency-section syntax that **Issue
   triage** reads: an issue link or URL, an `External condition:` line in any
   letter case after an optional list bullet, and a pull request reference,

@@ -26,7 +26,7 @@ observation dates and rule IDs belong in the repository's setup record described
 in the [setup guide](../setup/REPOSITORY_SETUP.md), not in this portable file.
 Copying this file does not apply settings or verify another repository.
 
-[General differences](#general) · [Security features](#security) · [Custom protection](#rulesets) · [Reuse](#reuse) · [Sources](#sources)
+[General differences](#general) · [Security features](#security) · [Actions settings](#actions) · [Custom protection](#rulesets) · [Reuse](#reuse) · [Sources](#sources)
 
 <a id="general"></a>
 
@@ -61,6 +61,26 @@ verifies it on every check.
 
 Sources: [private vulnerability reporting][pvr], [Dependabot alerts][dependabot-alerts],
 [Dependabot security updates][dependabot-updates] and [secret scanning][secret-scanning].
+
+<a id="actions"></a>
+
+## ⚡ Actions settings — checked, never applied
+
+Their initial state depends on the account and on any organization or
+enterprise policy, so they are not classified as differences from a default.
+The setup script reads each one and reports it as configured and observed, but
+never writes it: set them in the repository's **Settings → Actions → General**.
+
+| Setting | Configured value | Why |
+| --- | --- | --- |
+| Require actions to be pinned to a full-length commit SHA (`sha_pinning_required`) | **On** | GitHub refuses to run an action that is not pinned to a commit SHA. The workflows already pin every action, and the workflow control tests check it. |
+| Workflow permissions (`default_workflow_permissions`) | **Read** | The `GITHUB_TOKEN` starts with read access only; each job declares the write permissions it needs. |
+| Allow GitHub Actions to create and approve pull requests (`can_approve_pull_request_reviews`) | **Off** | A workflow cannot approve a pull request; no workflow here needs to create one. |
+| Approval for running fork pull request workflows (`fork_pr_approval_policy`) | **All external contributors** | Public repositories only. A workflow on a pull request from anyone who is not a member of the repository waits for approval. |
+| Check, workflow run, status, artifact and log retention (`retention_days`) | **90 days** | The longest period a public repository allows. A workflow can keep an artifact for less, as the integrity reports do. |
+
+Sources: [Actions permissions REST API][actions-api] and
+[Managing GitHub Actions settings for a repository][actions-settings].
 
 <a id="rulesets"></a>
 
@@ -136,6 +156,7 @@ reports on every relevant PR before adopting these rules.
 | [Secret scanning][secret-scanning] | Availability by visibility and the push protection it enables |
 | [Creating rulesets][ruleset-create] | Custom targets, bypass configuration and activation; the editor initially uses Disabled enforcement |
 | [Available rules][ruleset-rules] | Meaning of selected protection rules, including editor defaults |
+| [Actions permissions REST API][actions-api] and [Actions settings][actions-settings] | What each Actions setting does, where it is set and the endpoints that report it |
 | [Security configuration defaults][security-defaults] | Why organization-applied defaults must be distinguished from a standalone baseline |
 
 [repo-api]: https://docs.github.com/en/rest/repos/repos
@@ -143,6 +164,8 @@ reports on every relevant PR before adopting these rules.
 [dependabot-alerts]: https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-alerts
 [dependabot-updates]: https://docs.github.com/en/code-security/concepts/supply-chain-security/dependabot-security-updates
 [secret-scanning]: https://docs.github.com/en/code-security/concepts/secret-security/secret-scanning
+[actions-api]: https://docs.github.com/en/rest/actions/permissions
+[actions-settings]: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository
 [ruleset-create]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository
 [ruleset-rules]: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets
 [security-defaults]: https://docs.github.com/en/enterprise-cloud@latest/code-security/how-tos/secure-at-scale/configure-enterprise-security/establish-complete-coverage/create-custom-configuration
@@ -155,9 +178,17 @@ reports on every relevant PR before adopting these rules.
 
 The executable configuration is [repository-settings.json](../setup/repository-settings.json).
 See [REPOSITORY_SETUP.md](../setup/REPOSITORY_SETUP.md) for preview, apply and verification commands.
-The script covers the four general differences, the five security features and the
-five rulesets documented above. It applies the public-only features only on a public
-destination and names them in a note for any other visibility. Code scanning
+The configuration holds all twelve general settings that the script manages, so
+it also keeps the eight that match GitHub's defaults from drifting; only the four
+that differ are listed above. The script applies them, the five security features
+and the rulesets documented above; the configuration may hold any number of
+uniquely named rulesets. It applies the public-only features only on a public
+destination and names them in a note for any other visibility. It reports the five
+Actions settings and never writes them: after an apply, its read-back fails while
+one differs, naming each to set by hand. The configuration's `visibility` is
+optional: `null` accepts any visibility, while `public` or `private` makes a
+different visibility drift that the script reports and never changes; follow the
+[distribution review](DISTRIBUTION.md) before changing it. Code scanning
 is not part of this baseline: the CodeQL workflow
 (`.github/workflows/codeql.yml`) runs it with advanced setup, so leave GitHub's
 default setup off, which would reject the workflow's results. On a private

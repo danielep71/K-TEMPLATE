@@ -74,13 +74,16 @@ GitHub copies files from a template, not its settings. In order:
 3. Enable Actions and let **Repository integrity** pass on the default branch.
 4. Apply and verify the settings baseline, as the
    [repository setup guide](docs/setup/REPOSITORY_SETUP.md) describes. It
-   needs Python 3.11+ and GitHub CLI authentication with administrator access:
+   needs Python 3.11+ and GitHub CLI authentication; applying needs
+   administrator access. Set the Actions settings it reports, which it never
+   writes, in **Settings → Actions → General**:
 
    ```sh
    python tools/setup_repository.py --repo OWNER/NEW-REPO
    python tools/setup_repository.py --repo OWNER/NEW-REPO --apply
    python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
-     --report docs/repo_governance/SETTINGS_EVIDENCE.md
+     --report docs/repo_governance/SETTINGS_EVIDENCE.md \
+     --evidence docs/repo_governance/settings-evidence-{date}.json
    ```
 
 5. Run **Sync issue labels** and create milestones with due dates
