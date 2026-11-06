@@ -400,6 +400,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The label guide states the dependency-section syntax that **Issue
+  triage** reads: an issue link or URL, an `External condition:` line in any
+  letter case after an optional list bullet, and a pull request reference,
+  which never counts as a prerequisite. A test reads its example as triage
+  does (#329).
 - *Keep milestones issue-only* writes a job summary with its scope and each
   pull request and milestone it removed, or says that nothing was removed.
   When GitHub gives the run of one pull request a read-only token, it warns
