@@ -400,6 +400,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- *Keep milestones issue-only* writes a job summary with its scope and each
+  pull request and milestone it removed, or says that nothing was removed.
+  When GitHub gives the run of one pull request a read-only token, it warns
+  and passes, because the next daily or manual scan removes the milestone; a
+  scan still fails on any error (#328).
 - The **Traffic alert** job reads the `traffic-history` commit that its
   collection pushed, or merged onto when nothing changed, which the collect
   job outputs as `history-sha`, not the branch's current tip; it stops when
