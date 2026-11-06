@@ -2,7 +2,7 @@
 
 ![Labels](https://img.shields.io/badge/labels-20-1D76DB)
 
-This repository defines 20 issue labels, each with a name, description, and colour. `.github/labels.json` is authoritative; edit it through a pull request. `prune: true` deletes live labels outside the catalogue, but only unused ones. Before it changes anything, synchronization checks every label it would delete against all issues and pull requests, open and closed. It stops if one still carries the label. A name that contains a comma cannot be passed to the API's label filter, so for that name it reads the labels of every issue and pull request, up to 10,000, and stops if a response is malformed or the limit is reached. Remove a label that is still used from its issues and pull requests, or add it to the catalogue, then rerun.
+This repository defines 20 issue labels, each with a name, description, and colour. `.github/labels.json` is authoritative; edit it through a pull request. `prune: true` deletes live labels outside the catalogue, but only unused ones. Before it changes anything, synchronization checks every label it would delete against all issues and pull requests, open and closed. It stops if one still carries the label. A name that contains a comma cannot be passed to the API's label filter, so for that name it reads the labels of every issue and pull request, up to 10,000, and stops if a response is malformed or the limit is reached. Remove a label that is still used from its issues and pull requests, or add it to the catalogue, then rerun. A dry run, `node .github/scripts/labels-sync.mjs --mode reconcile --dry-run`, changes nothing and makes no such check: it previews the plan, including the deletion of a label still in use. `tests/test_labels_sync.py` runs both against a local fake API.
 
 ## ⚙️ Automation
 
@@ -11,7 +11,7 @@ This repository defines 20 issue labels, each with a name, description, and colo
 | Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Refuses to delete a label in use. Verifies the exact live result. |
 | Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. |
 | Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, target end date or dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; invalid labels; and inconsistent blocked status. |
-| Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. It never checks out pull-request code. |
+| Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. Its job summary lists each pull request and the milestone removed. If GitHub gives a pull-request run a read-only token, the run warns instead of failing, and the next daily or manual scan removes the milestone. It never checks out pull-request code. |
 | Dependabot (`.github/dependabot.yml`) | Opens weekly grouped pull requests for the SHA-pinned GitHub Actions, the hash-locked configuration parser, and the hash-locked Python quality tools, labelled `ci` and `P3` and assigned to me. Nothing merges automatically. |
 
 Among these workflows, only synchronization has `issues: write` and only *Keep milestones issue-only* has `pull-requests: write`; outside them, only the optional traffic-alert job writes issues ([TRAFFIC.md](TRAFFIC.md)). Synchronization also has `pull-requests: read`: without it the issues API omits pull requests, and the check before a deletion would miss a label only pull requests carry. `tests/test_workflow_controls.py` fails if a job outside its `WRITE_PERMISSIONS` list gains a write permission, or a listed job gains one the list does not give it; the list also lets code scanning, the Scorecard analysis, the release workflow's attestation and draft, and traffic collection write what each needs. PR validation is read-only. Actions are pinned to full commit SHAs.
@@ -69,13 +69,32 @@ When both are present, that line takes precedence over the form field, so edit t
 
 | Label | Use |
 | --- | --- |
-| `blocked` | A prerequisite named in the dependency section, as an issue link or an `External condition:` line, is unresolved. Remove it once all are resolved; ready issues carry no status label. In the same edit, delete the `External condition:` line of each resolved condition, or replace the section with "None" if nothing else is named: **Issue triage** treats every such line as unresolved. |
+| `blocked` | A prerequisite named in the [dependency section](#dependency-section), as an issue link or an `External condition:` line, is unresolved. Remove it once all are resolved; ready issues carry no status label. In the same edit, delete the `External condition:` line of each resolved condition, or replace the section with "None" if nothing else is named: **Issue triage** treats every such line as unresolved. |
 | `question` | I need information or a decision before the work can proceed. |
 | `help wanted` | I welcome outside investigation, implementation, validation, or review. |
 | `good first issue` | Well-scoped task suitable for a first contribution. |
 | `duplicate` | Close the issue and link the issue or pull request that already covers the work. |
 | `invalid` | Close the issue: it is incomplete, unsupported, or not actionable as submitted. |
 | `wontfix` | Close the issue: I have decided not to do this work. |
+
+### Dependency section
+
+**Issue triage** reads the section under the first level-2 or level-3 heading whose text contains "Dependencies", up to the next level-2 or level-3 heading. In it:
+
+- name a prerequisite issue as `#12` or by its URL in this repository; it blocks the work while it is open;
+- write an external blocker on a line that starts with `External condition:`, in any letter case, optionally after a `-` or `*` list bullet, followed by what you are waiting for; it counts as unresolved until you delete the line;
+- a pull request named there is a known reference, never a prerequisite: to wait for one, name the issue it resolves;
+- write `None` when nothing blocks the work.
+
+A blocked issue, for example:
+
+```markdown
+## Dependencies and blocking status
+
+- #12, which defines the input layout
+- External condition: waiting for access to an Excel host
+- Related: #34, the pull request that started this work
+```
 
 ## ✅ Closing issues
 

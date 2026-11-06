@@ -170,6 +170,32 @@ class DependencyTests(unittest.TestCase):
                          [(2, "dependencies"), (2, "blocked")])
 
 
+class GuideExampleTests(unittest.TestCase):
+    """The dependency-section example of the label guide reads as the guide says."""
+
+    def example(self) -> str:
+        guide = (ROOT / "docs/repo_governance/ISSUE_LABELS.md").read_text(encoding="utf-8")
+        section = guide.split("### Dependency section", 1)[1]
+        return section.split("```markdown\n", 1)[1].split("```", 1)[0]
+
+    def findings(self, body: str, *labels: str) -> list[str]:
+        # #12 is an open issue and #34 a pull request, as the example says.
+        found = rules([issue(1, "P3", *labels, body=body)], {12: "open"}, pulls=frozenset({34}))
+        return [rule for _, rule in found if rule in {"blocked", "dependencies"}]
+
+    def test_the_example_is_a_correctly_blocked_issue(self) -> None:
+        self.assertEqual(self.findings(self.example(), BLOCKED_LABEL), [])
+
+    def test_each_blocker_of_the_example_requires_blocked(self) -> None:
+        self.assertEqual(self.findings(self.example()), ["blocked", "blocked"])
+
+    def test_the_pull_request_alone_does_not_block(self) -> None:
+        only_pull = "\n".join(line for line in self.example().splitlines()
+                              if "#12" not in line and "External condition" not in line)
+        self.assertIn("#34", only_pull)
+        self.assertEqual(self.findings(only_pull, BLOCKED_LABEL), ["blocked"])
+
+
 class ConfigTests(unittest.TestCase):
     def test_repository_configuration_passes(self) -> None:
         self.assertEqual(check_issues.config_findings(ROOT), [])

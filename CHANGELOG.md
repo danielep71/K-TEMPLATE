@@ -400,6 +400,35 @@ milestones and their pull requests.
 
 ### Changed
 
+- `tools/setup_repository.py` manages all twelve general repository settings
+  of `docs/setup/repository-settings.json`, now schema 4. It writes the merge
+  methods before the rulesets and the other settings after them, so merged
+  branches are deleted automatically only once the release branches are
+  protected. The configuration may hold any number of uniquely named
+  rulesets; loading refuses one that allows a merge method the settings
+  disable, a required check without a context and an integration ID, or a
+  repeated rule type. An optional `visibility` makes a different visibility
+  drift, which apply refuses and never changes. Preview and `--check` need no
+  administrator access: a security feature or Actions setting that GitHub
+  does not report is unknown, with its endpoint and status, and so is a
+  ruleset whose bypass list GitHub omits for a token that cannot write it;
+  an unknown value counts as drift, and apply refuses while a managed
+  setting, security feature or ruleset is unknown. Each difference is printed as a `DIFF` line, a ruleset's by the
+  path of the parameter that differs. `--evidence PATH` writes the check as
+  JSON with the configuration's SHA-256, a `{date}` in the path becoming the
+  UTC date. Five GitHub Actions settings are checked and never written: an
+  apply whose read-back finds one different names it, to set in
+  **Settings → Actions → General** (#332, #333, #334, #335).
+- The label guide states the dependency-section syntax that **Issue
+  triage** reads: an issue link or URL, an `External condition:` line in any
+  letter case after an optional list bullet, and a pull request reference,
+  which never counts as a prerequisite. A test reads its example as triage
+  does (#329).
+- *Keep milestones issue-only* writes a job summary with its scope and each
+  pull request and milestone it removed, or says that nothing was removed.
+  When GitHub gives the run of one pull request a read-only token, it warns
+  and passes, because the next daily or manual scan removes the milestone; a
+  scan still fails on any error (#328).
 - The **Traffic alert** job reads the `traffic-history` commit that its
   collection pushed, or merged onto when nothing changed, which the collect
   job outputs as `history-sha`, not the branch's current tip; it stops when
@@ -449,11 +478,12 @@ milestones and their pull requests.
   that type narrowing has already excluded; strict mode alone does not (#191).
 - Label synchronization no longer deletes a label that an issue or pull request,
   open or closed, still carries: with `prune: true`, it checks every label it
-  would delete and stops before any change. A name with a comma, which the
+  would delete and stops before any change; a dry run (`--dry-run`) only
+  previews the plan, that deletion included. A name with a comma, which the
   API's label filter cannot query, is checked against the labels of every
   issue and pull request, up to 10,000; a malformed response or the limit
   stops it. The reconcile job has `pull-requests: read`, without which the
-  issues API would omit pull requests from that check (#188, #305, #316).
+  issues API would omit pull requests from that check (#188, #305, #316, #336).
 - `tools/check_changelog.py` freezes released sections: once the tag
   `vX.Y.Z` exists, the section must equal its content at the tag. A section
   with a reviewed line `Corrected after release on YYYY-MM-DD: <reason>` may

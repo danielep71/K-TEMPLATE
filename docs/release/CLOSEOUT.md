@@ -55,7 +55,7 @@ and the Excel checks of an attached workbook stay manual
 | 2 | The documented setup reproduces from a fresh checkout of the candidate | Candidate record | ☐ |
 | 3 | Repository integrity is green on the candidate | Run link | ☐ |
 | 4 | Live labels match the catalogue, and Issue triage passes | Live label drift and Issue triage run links | ☐ |
-| 5 | Repository settings match the baseline when the candidate is checked: `setup_repository.py --check` | Dated evidence record | ☐ |
+| 5 | Repository settings match the baseline when the candidate is checked: `setup_repository.py --check` | Dated evidence record: the `--report` Markdown or the `--evidence` JSON | ☐ |
 | 6 | The file audit covers every tracked file at the candidate | File audit | ☐ |
 | 7 | The scope statement is recorded | This issue | ☐ |
 

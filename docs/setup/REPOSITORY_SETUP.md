@@ -4,7 +4,7 @@
 
 **From template files to a configured GitHub repository**
 
-[![Scope](https://img.shields.io/badge/Scope-4_settings_%C2%B7_5_security_features_%C2%B7_5_rulesets-00338D?style=flat-square)](#%EF%B8%8F-what-this-applies)
+[![Scope](https://img.shields.io/badge/Scope-12_settings_%C2%B7_5_security_features_%C2%B7_5_rulesets-00338D?style=flat-square)](#%EF%B8%8F-what-this-applies)
 [![Mode](https://img.shields.io/badge/Default-Preview_only-005EB8?style=flat-square)](#%EF%B8%8F-launch-sequence)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](#-before-you-start)
 [![Verification](https://img.shields.io/badge/Verification-Read_back_after_apply-00875A?style=flat-square)](#-verification-and-recovery)
@@ -27,11 +27,10 @@
 | **Runtime** | Python **3.11+** and a recent [GitHub CLI](https://cli.github.com/) are installed. |
 | **Destination** | The new repository exists and contains the template files. |
 | **Template cleanup** | The template-only section of `AGENTS.md`, between its `template-only` markers, is deleted; the two `contact_links` URLs in `.github/ISSUE_TEMPLATE/config.yml` and the README traffic badges name the new repository, or the badges are removed; `target-branch` in `.github/dependabot.yml` names a branch of the new repository, or is removed; and every link reference of `CHANGELOG.md` points to the new repository. `Repository integrity` fails in a generated repository until all five are done. Replace the changelog's entries with an empty `[Unreleased]` section, and restore the introduction's "No version has been released" sentence if it is missing; delete `VERSION` if the template has one, since it exists only after a template release; reset the *Current status* of `RELEASING.md` to no release; and replace `<REGIME>` in `docs/VBA_HOUSE_STYLE.md`. Once the changelog holds no dated release, `Repository integrity` fails while `VERSION` exists, the sentence is missing or *Current status* does not say that no version is released and that `VERSION` does not exist; it does not check the changelog's entries or `<REGIME>`. In a clean clone, `python tools/initialize_repository.py --repository OWNER/NEW-REPO --regime PREFIX` lists all these edits and makes them with `--apply`; see *Recommended handover* for its options. Without it, make them by hand. |
-| **Identity** | `gh auth status --hostname github.com` shows an account with administrator access to the destination. Sign in with `gh auth login --hostname github.com`, or set `GH_TOKEN` to a fine-grained token. |
-| **Token permissions** | A fine-grained token has destination repository **Administration: write**, **Contents: read**, and **Checks: read**. A workflow `GITHUB_TOKEN` cannot administer these rulesets. Never commit tokens. |
+| **Identity** | `gh auth status --hostname github.com` shows an account that can read the destination; `--apply` needs one with administrator access to it. Sign in with `gh auth login --hostname github.com`, or set `GH_TOKEN` to a fine-grained token. |
+| **Token permissions** | Preview and `--check` only read. A fine-grained token needs destination repository **Metadata: read**, and **Administration: read** for Dependabot alerts, Dependabot security updates and the five Actions settings. GitHub reports secret scanning and push protection only to administrators of the repository, and a ruleset's bypass list only to a token that can write the ruleset; without it, each managed ruleset is unknown. A value the token cannot read is shown as unknown, with the endpoint and HTTP status, and counts as drift. `--apply` needs administrator access and a token with **Administration: write**, **Contents: read** and **Checks: read**. A workflow `GITHUB_TOKEN` cannot administer these rulesets. Never commit tokens. |
 | **Integrity check** | Actions is enabled and `Repository integrity` has succeeded on the **current default-branch HEAD**. |
 | **Workflow coverage** | The required job runs on every relevant PR without path filters. The supplied workflow runs on all branches, including a renamed default branch. |
-| **Merge methods** | Repository-level merge commits and squash merging are enabled. |
 | **Availability** | The destination's plan and visibility support repository rulesets. |
 
 ## ▶️ Launch sequence
@@ -45,8 +44,19 @@ Run from the copied repository directory. Replace `OWNER/NEW-REPO` with the
 python tools/setup_repository.py --repo OWNER/NEW-REPO
 ```
 
-Read-only by default. Review the printed destination, visibility, default branch,
-and proposed API changes before applying them.
+Read-only by default, and it needs no administrator access. Review the printed
+destination, visibility and default branch, then one `DIFF` line for each managed
+value that differs from the configuration, and the proposed API changes that
+follow them, before applying them:
+
+```text
+DIFF setting has_projects: observed true, configured false
+DIFF security vulnerability_alerts: observed false, configured true [GET vulnerability-alerts (HTTP 404: off)]
+DIFF ruleset "Protect main" (12345) rules.pull_request.allowed_merge_methods: observed ["merge", "squash"], configured ["merge"]
+```
+
+A security feature or Actions setting that GitHub does not report to your token is
+`null`, with the endpoint and status in brackets; it counts as drift.
 
 ### ② Apply the baseline
 
@@ -54,25 +64,50 @@ and proposed API changes before applying them.
 python tools/setup_repository.py --repo OWNER/NEW-REPO --apply
 ```
 
-The script creates missing rulesets, enables the security features GitHub offers
-for the destination's visibility, patches differing general settings, and reads
-back the result. Protection is installed before automatic branch deletion is enabled.
+The script first sets the three merge methods where they differ, because GitHub
+may reject a ruleset that allows a disabled one. It then creates missing rulesets,
+replaces differing ones when you allow it, sets the security features GitHub offers for the destination's
+visibility, patches the other differing general settings, and reads back the
+result. Protection is installed before automatic branch deletion is enabled, so a
+merged pull request cannot delete a release branch before its deletion rule exists.
+
+Apply refuses before any write when you lack administrator access, the destination
+is archived or disabled, its visibility differs from a `visibility` the
+configuration sets, or a managed general setting, security feature or ruleset is unknown.
+It never changes visibility: follow the
+[distribution review](../repo_governance/DISTRIBUTION.md) first.
+
+The script never writes the five Actions settings. When one still differs after
+the rest is applied, the read-back fails and names each: set it in the
+repository's **Settings → Actions → General**, then rerun `--check`.
 
 ### ③ Verify the result
 
 ```sh
 python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
-  --report docs/repo_governance/SETTINGS_EVIDENCE.md
+  --report docs/repo_governance/SETTINGS_EVIDENCE.md \
+  --evidence docs/repo_governance/settings-evidence-{date}.json
 ```
 
 A verified match returns **0**. `--report` writes the repository's **setup
-record**: a dated Markdown file with each managed setting and security feature as
-configured and as GitHub reports it, each managed ruleset with its ID and status,
+record**: a dated Markdown file with each managed general setting, security feature
+and Actions setting as configured and as GitHub reports it, each managed ruleset with its ID and status,
 and any unmanaged or inherited rulesets. `docs/repo_governance/SETTINGS_EVIDENCE.md`
 is the conventional place to commit it in a generated repository; add anything the
 script cannot read, such as decisions and exceptions, below it. `--report` works with
 preview, `--check` and `--apply`; after apply it records the read-back state.
 Running apply again against matching settings makes no writes.
+
+`--evidence PATH` writes the same check as JSON, for a machine to read, whether or
+not you also pass `--report`; a `{date}` in the path becomes the UTC date of the
+check (`YYYY-MM-DD`). The record names the mode, repository, default branch and
+result, the configuration's path and SHA-256, and each managed value as configured
+and observed, with the source of each security feature and Actions setting, each
+managed ruleset with its differences, the unmanaged and inherited rulesets, and the
+method and endpoint of each planned change, without its payload. It works in the
+same modes as `--report`. A public-only feature or Actions setting on another
+visibility is recorded as `not applied (public repositories only)` and does not
+count as drift.
 
 Dependabot security updates count as on only when GitHub reports them enabled and
 not paused. GitHub pauses them when Dependabot pull requests go unanswered. Paused
@@ -116,13 +151,15 @@ of the [settings reference](../repo_governance/SETTINGS.md).
 
 | Layer | Managed configuration |
 | --- | --- |
-| **General · 4 settings** | Delete merged head branches; suggest PR branch updates; disable Projects; disable the legacy downloads flag. |
+| **General · 12 settings** | The three merge methods, auto-merge, branch update suggestions, deletion of merged head branches, web commit sign-off, and the Issues, Projects, Wiki, Discussions and legacy downloads features. Four differ from GitHub's defaults: delete merged head branches, suggest PR branch updates, disable Projects and the legacy downloads flag. |
 | **Security · 5 features** | Dependabot alerts and security updates on every repository; private vulnerability reporting, secret scanning and push protection on a public repository (skipped with a note otherwise). |
-| **Protection · 5 rulesets** | Default branch, release branches, independent release-branch deletion protection, release tags, and traffic history. |
+| **Actions · 5 settings, checked only** | SHA pinning required, read-only default workflow permissions, no pull request approval by workflows, approval for every external contributor's fork pull request workflows (public repository only) and 90-day retention. Reported and verified, never written. |
+| **Protection · 5 rulesets** | Default branch, release branches, independent release-branch deletion protection, release tags, and traffic history. The configuration may hold any number of uniquely named rulesets. |
+| **Visibility · optional** | `null` in the template: any visibility. Set to `public` or `private`, a different visibility is drift that apply refuses and never changes. |
 | **Enforcement** | Active rulesets with no bypass actors or ref exclusions. `Protect main` targets `~DEFAULT_BRANCH`, not a fixed branch name. |
 | **Verification** | All pages are read; full rule definitions are compared without response metadata; managed settings are read back after apply. |
 
-**Outside this baseline:** visibility, template mode, Actions policy, Pages,
+**Outside this baseline:** template mode, the other Actions policies, Pages,
 secrets, environments, labels, collaborators and integrations. Configure these
 separately where required. Code scanning is configured by the CodeQL workflow,
 not by the script; see *Recommended handover*.
@@ -142,7 +179,7 @@ inherited policies may impose additional restrictions.
 | --- | --- | --- |
 | `tools/check_binaries.py`, `tests/test_check_binaries.py`, `.github/binary-allowlist.json` | **Keep** | Fails **Repository integrity** on a tracked binary outside the approved paths. Add a reviewed binary, such as a documentation image, to the allowlist with its SHA-256 and reason. |
 | `.gitattributes`, `.gitignore`, `.editorconfig` | **Keep** | Line-ending, binary-file, ignore and editor rules for workbooks, exported VBA source and regulatory source copies. Adjust them only with a layout change that needs it. |
-| `.github/labels.json`, `.github/scripts/`, `.github/ISSUE_TEMPLATE/`, the label, triage and milestone workflows, `tools/check_issues.py`, `tests/test_check_issues.py`, `docs/repo_governance/ISSUE_LABELS.md` | **Keep** | Ongoing label and issue automation and its guide; see *Initialize issue labels* above. |
+| `.github/labels.json`, `.github/scripts/`, `.github/ISSUE_TEMPLATE/`, the label, triage and milestone workflows, `tools/check_issues.py`, `tests/test_check_issues.py`, `tests/test_labels_sync.py`, `docs/repo_governance/ISSUE_LABELS.md` | **Keep** | Ongoing label and issue automation and its guide; see *Initialize issue labels* above. |
 | `tests/test_repository_consistency.py` | **Keep** | Cross-file checks in **Repository integrity**: the label guide against the catalogue, with every label's name, colour and description, each label once in *Using the labels*, and every label count the Markdown files state; Dependabot's labels against the catalogue and its assignee against the bug form's; office-type ignore rules for regulatory source copies; closed code fences in Markdown, and `--repository` in every `release.py verify-published` command outside the changelog; one GitHub API version; the third-party notice against the files and its provenance register; and where the template may name other repositories, skipped once the template-only section is gone. Adapt a check only together with the files it compares. |
 | `tools/initialize_repository.py`, `tests/test_initialize_repository.py` | **Remove once run** | Makes the *Template cleanup* edits of *Before you start*: it also replaces the changelog's entries and `<REGIME>`, restores the changelog's "No version has been released" sentence if it is missing, deletes `VERSION` if it exists and resets the *Current status* of `RELEASING.md`, as one diff to review and commit. Without `--apply` it lists them and writes nothing. With `--apply` it refuses a working tree that differs from the commit, and a second run changes nothing. It never changes GitHub or commits. By default it repoints the traffic badges, removes Dependabot's `target-branch` and links the changelog's `[Unreleased]` to `main`; `--remove-traffic-badges`, `--release-branch BRANCH` (an existing branch) and `--default-branch BRANCH` change that. Its test initializes a copy of the template and runs **Repository integrity** on it with `--template false`; it is skipped once the template-only section is gone. Delete both files together after committing the result: nothing else uses them. |
 | `AGENTS.md` | **Adapt** | Delete the template-only section first; keep the remaining instructions that still apply to the project. |
@@ -244,8 +281,8 @@ project validation depends on the new project. There is no automatic deletion st
 | Exit code | Meaning | Next action |
 | --- | --- | --- |
 | **0** | Successful preview, or verified match in apply/check mode | Read the mode-specific message: preview success does not mean settings were applied. |
-| **1** | Drift found by `--check` | Preview the differences and decide whether to reapply. |
-| **2** | Invalid configuration, missing prerequisite, unavailable feature, API failure or read-back mismatch | Resolve the reported problem, then preview and retry. |
+| **1** | Drift found by `--check`, an unknown value included | Preview the differences and decide whether to reapply, or grant the access the unknown value needs. |
+| **2** | Invalid configuration, refused or failed apply prerequisite, unavailable feature, API failure or read-back mismatch, an Actions setting to set by hand included | Resolve the reported problem, then preview and retry. |
 
 API operations are **not transactional**. If a later request fails, earlier changes
 remain. There is no silent skip, no success claim for partial application and no
@@ -346,6 +383,7 @@ replacement validation and settings-maintenance process instead.
 
 **References:** [Repository updates](https://docs.github.com/en/rest/repos/repos#update-a-repository)
 · [Rulesets](https://docs.github.com/en/rest/repos/rules)
+· [Actions permissions](https://docs.github.com/en/rest/actions/permissions)
 · [GitHub CLI API](https://cli.github.com/manual/gh_api)
 
 [↑ Back to top](#-repository-setup)
