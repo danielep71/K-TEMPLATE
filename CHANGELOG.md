@@ -400,6 +400,11 @@ milestones and their pull requests.
 
 ### Changed
 
+- The label guide states the dependency-section syntax that **Issue
+  triage** reads: an issue link or URL, an `External condition:` line in any
+  letter case after an optional list bullet, and a pull request reference,
+  which never counts as a prerequisite. A test reads its example as triage
+  does (#329).
 - The **Traffic alert** job reads the `traffic-history` commit that its
   collection pushed, or merged onto when nothing changed, which the collect
   job outputs as `history-sha`, not the branch's current tip; it stops when

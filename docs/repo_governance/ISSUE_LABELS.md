@@ -69,13 +69,32 @@ When both are present, that line takes precedence over the form field, so edit t
 
 | Label | Use |
 | --- | --- |
-| `blocked` | A prerequisite named in the dependency section, as an issue link or an `External condition:` line, is unresolved. Remove it once all are resolved; ready issues carry no status label. In the same edit, delete the `External condition:` line of each resolved condition, or replace the section with "None" if nothing else is named: **Issue triage** treats every such line as unresolved. |
+| `blocked` | A prerequisite named in the [dependency section](#dependency-section), as an issue link or an `External condition:` line, is unresolved. Remove it once all are resolved; ready issues carry no status label. In the same edit, delete the `External condition:` line of each resolved condition, or replace the section with "None" if nothing else is named: **Issue triage** treats every such line as unresolved. |
 | `question` | I need information or a decision before the work can proceed. |
 | `help wanted` | I welcome outside investigation, implementation, validation, or review. |
 | `good first issue` | Well-scoped task suitable for a first contribution. |
 | `duplicate` | Close the issue and link the issue or pull request that already covers the work. |
 | `invalid` | Close the issue: it is incomplete, unsupported, or not actionable as submitted. |
 | `wontfix` | Close the issue: I have decided not to do this work. |
+
+### Dependency section
+
+**Issue triage** reads the section under the first level-2 or level-3 heading whose text contains "Dependencies", up to the next level-2 or level-3 heading. In it:
+
+- name a prerequisite issue as `#12` or by its URL in this repository; it blocks the work while it is open;
+- write an external blocker on a line that starts with `External condition:`, in any letter case, optionally after a `-` or `*` list bullet, followed by what you are waiting for; it counts as unresolved until you delete the line;
+- a pull request named there is a known reference, never a prerequisite: to wait for one, name the issue it resolves;
+- write `None` when nothing blocks the work.
+
+A blocked issue, for example:
+
+```markdown
+## Dependencies and blocking status
+
+- #12, which defines the input layout
+- External condition: waiting for access to an Excel host
+- Related: #34, the pull request that started this work
+```
 
 ## ✅ Closing issues
 
