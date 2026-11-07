@@ -418,7 +418,15 @@ milestones and their pull requests.
   JSON with the configuration's SHA-256, a `{date}` in the path becoming the
   UTC date. Five GitHub Actions settings are checked and never written: an
   apply whose read-back finds one different names it, to set in
-  **Settings → Actions → General** (#332, #333, #334, #335).
+  **Settings → Actions → General**. The plan ends with its SHA-256 over the
+  repository, the configuration, the observed managed values and the exact
+  writes, recorded in the evidence; `--apply` requires `--approve-plan` with
+  that digest, refusing a plan that changed since the review, and `--journal`
+  with a new path, written atomically before the first write and after each,
+  with each write's status and the read-back result. A configured ruleset
+  that active rulesets without bypass actors or excluded refs enforce at least
+  as strictly, under any names, is `covered`: not drift, and never written
+  (#332, #333, #334, #335, #352, #353).
 - The label guide states the dependency-section syntax that **Issue
   triage** reads: an issue link or URL, an `External condition:` line in any
   letter case after an optional list bullet, and a pull request reference,

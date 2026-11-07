@@ -4,7 +4,9 @@
 The baseline is docs/setup/repository-settings.json: an optional visibility,
 the general repository settings, the security features, the GitHub Actions
 settings (reported, never written) and the repository rulesets. Preview (the
-default) and --check only read; --apply writes, then reads everything back.
+default) and --check only read and print the plan with its SHA-256; --apply
+writes that approved plan, journaling before the first write and after each,
+then reads everything back.
 """
 # Postponed annotations let the version check in main() run on older Python versions.
 from __future__ import annotations
@@ -16,6 +18,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +63,9 @@ ACTIONS_SOURCES = {
 FORK_POLICIES = ('first_time_contributors_new_to_github', 'first_time_contributors',
                  'all_external_contributors')
 REPOSITORY_PATTERN = re.compile(r'[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9_.-]+')
+DIGEST_PATTERN = re.compile(r'[0-9a-fA-F]{64}')
+# Ruleset statuses that need no write and are not drift.
+SATISFIED = ('matches', 'covered')
 NOT_APPLIED = 'not applied (public repositories only)'
 DISTRIBUTION = 'docs/repo_governance/DISTRIBUTION.md'
 
@@ -369,6 +375,122 @@ def compare(key: str, name: str, configured: Json, state: Row) -> Row:
     return row
 
 
+# Coverage: live rulesets that enforce a configured one at least as strictly,
+# under any names. Only an active ruleset of the same target with a reported and
+# empty bypass list and no excluded refs can count: GitHub applies every active
+# ruleset, so its rules hold whatever the configured name's ruleset does.
+
+
+def parameters(rule: Json) -> dict[str, Json]:
+    return dict(rule.get('parameters') or {})
+
+
+def include_covers(candidate: Json, desired: dict[str, Json], default_branch: str) -> bool:
+    """Whether a live ruleset's ref conditions reach every ref the configured one names."""
+    conditions = (candidate.get('conditions') or {}).get('ref_name') or {}
+    if conditions.get('exclude'):
+        return False
+    include = set(conditions.get('include') or [])
+    if '~ALL' in include:
+        return True
+    if desired['target'] == 'branch' and '~DEFAULT_BRANCH' in include:
+        include.add(f'refs/heads/{default_branch}')
+    return set(desired['conditions']['ref_name']['include']) <= include
+
+
+def candidates(desired: dict[str, Json], rulesets: list[Json], default_branch: str) -> list[Json]:
+    """The live rulesets whose scope can stand in for the configured one, the named one first."""
+    found = [r for r in rulesets
+             if r.get('enforcement') == 'active' and r.get('target') == desired['target']
+             and r.get('bypass_actors') == [] and include_covers(r, desired, default_branch)]
+    return sorted(found, key=lambda r: r.get('name') != desired['name'])
+
+
+def covers_pull_request(configured: dict[str, Json], actual: dict[str, Json]) -> bool:
+    """More approvals, a true option, fewer merge methods or more reviewers are stricter."""
+    for key, value in configured.items():
+        if key == 'allowed_merge_methods':
+            if not set(actual.get(key, tuple(MERGE_METHODS))) <= set(value):
+                return False
+        elif key == 'required_approving_review_count':
+            if actual.get(key, 0) < value:
+                return False
+        elif type(value) is bool:
+            if actual.get(key, False) not in (True, value):
+                return False
+        elif isinstance(value, list):
+            dumped = {json.dumps(canonical(item), sort_keys=True) for item in actual.get(key) or []}
+            if not {json.dumps(canonical(item), sort_keys=True) for item in value} <= dumped:
+                return False
+        elif actual.get(key) != value:
+            return False
+    return True
+
+
+def covers_status_checks(configured: dict[str, Json], actual: dict[str, Json]) -> bool:
+    """A strict policy, more checks or enforcement on creation are stricter."""
+    def checks(found: dict[str, Json]) -> set[tuple[Json, Json]]:
+        return {(c.get('context'), c.get('integration_id')) for c in found.get('required_status_checks') or []}
+    strict, on_create = 'strict_required_status_checks_policy', 'do_not_enforce_on_create'
+    return (actual.get(strict, False) in (True, configured.get(strict, False))
+            and checks(configured) <= checks(actual)
+            and actual.get(on_create, False) in (False, configured.get(on_create, False)))
+
+
+def covers_rule(rule: Json, candidate: Json) -> bool:
+    """Whether a live rule of the configured rule's type is at least as strict as it."""
+    configured, actual = parameters(rule), parameters(candidate)
+    kind = rule['type']
+    if kind in ('deletion', 'non_fast_forward'):
+        return True
+    if kind == 'update':
+        allows = 'update_allows_fetch_and_merge'
+        return actual.get(allows, False) in (False, configured.get(allows, False))
+    if kind == 'required_status_checks':
+        return covers_status_checks(configured, actual)
+    if kind == 'pull_request':
+        return covers_pull_request(configured, actual)
+    return bool(canonical(actual) == canonical(configured))
+
+
+def covered_by(desired: dict[str, Json], rulesets: list[Json], default_branch: str) -> list[str]:
+    """The names of the live rulesets that together enforce every configured rule, or none."""
+    possible = candidates(desired, rulesets, default_branch)
+    names: list[str] = []
+    for rule in desired['rules']:
+        covering = next((c for c in possible if any(r.get('type') == rule['type'] and covers_rule(rule, r)
+                                                    for r in c.get('rules') or [])), None)
+        if covering is None:
+            return []
+        names.append(covering['name'])
+    return sorted(set(names))
+
+
+def assess_ruleset(desired: dict[str, Json], state: dict[str, Json]) -> Row:
+    """The status of one configured ruleset: matches, covered, differs, missing or unknown."""
+    actual = next((r for r in state['rulesets'] if r.get('name') == desired['name']), None)
+    row: Row = {'name': desired['name'], 'id': None if actual is None else actual.get('id'),
+                'status': 'missing', 'differences': [], 'covered_by': []}
+    if actual is not None and 'bypass_actors' not in actual:
+        # GitHub omits the bypass list unless the token can write the ruleset; an
+        # omitted list is not an empty one, so the ruleset cannot be verified.
+        visible = dict(actual, bypass_actors=desired['bypass_actors'])
+        found = differences(keyed(rule_spec(visible)), keyed(rule_spec(desired)))
+        found.append('bypass_actors: not reported (needs write access to the ruleset)')
+        row.update(status='unknown', differences=found)
+        return row
+    if actual is not None:
+        found = differences(keyed(rule_spec(actual)), keyed(rule_spec(desired)))
+        if rule_spec(actual) != rule_spec(desired) and not found:
+            found = ['rules: observed and configured differ']
+        row.update(status='differs' if found else 'matches', differences=found)
+    if row['status'] != 'matches':
+        names = covered_by(desired, state['rulesets'], str(state['metadata'].get('default_branch', '')))
+        if names:
+            row.update(status='covered', covered_by=names)
+    return row
+
+
 def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
     """Compare every managed value with what GitHub reports."""
     metadata = state['metadata']
@@ -384,34 +506,37 @@ def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
                 for key in SECURITY_PUBLIC_ONLY]
     actions = [compare('setting', key, config['actions'][key], state['actions'][key])
                for key in ACTIONS_SOURCES]
-    rulesets: list[Row] = []
-    for desired in config['rulesets']:
-        actual = next((r for r in state['rulesets'] if r.get('name') == desired['name']), None)
-        if actual is None:
-            rulesets.append({'name': desired['name'], 'id': None, 'status': 'missing', 'differences': []})
-            continue
-        if 'bypass_actors' not in actual:
-            # GitHub omits the bypass list unless the token can write the ruleset; an
-            # omitted list is not an empty one, so the ruleset cannot be verified.
-            visible = dict(actual, bypass_actors=desired['bypass_actors'])
-            found = differences(keyed(rule_spec(visible)), keyed(rule_spec(desired)))
-            found.append('bypass_actors: not reported (needs write access to the ruleset)')
-            rulesets.append({'name': desired['name'], 'id': actual.get('id'),
-                             'status': 'unknown', 'differences': found})
-            continue
-        found = differences(keyed(rule_spec(actual)), keyed(rule_spec(desired)))
-        if rule_spec(actual) != rule_spec(desired) and not found:
-            found = ['rules: observed and configured differ']
-        rulesets.append({'name': desired['name'], 'id': actual.get('id'),
-                         'status': 'differs' if found else 'matches', 'differences': found})
+    rulesets = [assess_ruleset(desired, state) for desired in config['rulesets']]
     managed = {r['name'] for r in config['rulesets']}
     drift = (not visibility['matches']
              or any(row['matches'] is False for row in settings + security + actions)
-             or any(row['status'] != 'matches' for row in rulesets))
+             or any(row['status'] not in SATISFIED for row in rulesets))
     return {'result': 'DRIFT' if drift else 'VERIFIED', 'visibility': visibility,
             'settings': settings, 'security': security, 'actions': actions, 'rulesets': rulesets,
             'unmanaged_rulesets': [r['name'] for r in state['rulesets'] if r.get('name') not in managed],
             'inherited_rulesets': sorted(state['inherited'])}
+
+
+def plan_digest(repo: str, config_sha256: str, report: dict[str, Json], steps: Plan) -> str:
+    """SHA-256 of the plan: repository, configuration, observed managed values and exact writes.
+
+    Sources and timestamps are left out, so the same unchanged repository and
+    configuration give the same digest, and any change to either changes it.
+    """
+    def stable(rows: list[Row]) -> list[Row]:
+        return [{key: value for key, value in row.items() if key != 'source'} for row in rows]
+    document = {
+        'repository': repo, 'configuration_sha256': config_sha256,
+        'observed': {'visibility': report['visibility'], 'settings': report['settings'],
+                     'security': stable(report['security']), 'actions': stable(report['actions']),
+                     'rulesets': report['rulesets'],
+                     'unmanaged_rulesets': sorted(report['unmanaged_rulesets']),
+                     'inherited_rulesets': sorted(report['inherited_rulesets'])},
+        'writes': [{'method': method, 'endpoint': endpoint, 'payload': payload}
+                   for method, endpoint, payload in steps],
+    }
+    text = json.dumps(document, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
 def plan(config: dict[str, Json], report: dict[str, Json], repo: str) -> Plan:
@@ -507,6 +632,11 @@ def print_differences(report: dict[str, Json]) -> None:
             print(f'DIFF actions {row["setting"]}: observed {shown(row)}, '
                   f'configured {json.dumps(row["configured"])} [{row["source"]}]')
     for row in report['rulesets']:
+        if row['status'] == 'covered':
+            names = ', '.join(f'"{name}"' for name in row['covered_by'])
+            print(f'NOTE: ruleset "{row["name"]}" is covered by {names}: every configured rule '
+                  'is enforced at least as strictly there, so no write is planned for it.')
+            continue
         if row['status'] == 'missing':
             print(f'DIFF ruleset "{row["name"]}": missing')
         for line in row['differences']:
@@ -523,7 +653,8 @@ def print_plan(steps: Plan) -> None:
 # Records
 
 
-def markdown_record(state: dict[str, Json], report: dict[str, Json], mode: str, now: datetime) -> str:
+def markdown_record(state: dict[str, Json], report: dict[str, Json], plan_sha256: str, mode: str,
+                    now: datetime) -> str:
     """A dated Markdown record of the managed settings as GitHub reports them."""
     metadata = state['metadata']
 
@@ -535,12 +666,18 @@ def markdown_record(state: dict[str, Json], report: dict[str, Json], mode: str, 
             return NOT_APPLIED
         return cell(row['observed']) + (' (paused)' if row.get('paused') else '')
 
+    def status(row: Row) -> str:
+        if row['status'] == 'covered':
+            return 'covered by ' + ', '.join(f'"{name}"' for name in row['covered_by'])
+        return str(row['status'])
+
     lines = ['# Repository settings evidence', '',
              f'- Checked: **{now.strftime("%Y-%m-%dT%H:%M:%SZ")}** with `tools/setup_repository.py` ({mode})',
              f'- Destination: `{metadata["full_name"]}`; visibility: {metadata["visibility"]} '
              f'(configured: {report["visibility"]["configured"] or "any"}); '
              f'default branch: `{metadata["default_branch"]}`',
-             f'- Result: **{report["result"]}**', '',
+             f'- Result: **{report["result"]}**',
+             f'- Plan SHA-256: `{plan_sha256}`', '',
              '## General settings', '', '| Setting | Configured | Observed |', '| --- | --- | --- |']
     lines += [f'| `{row["setting"]}` | {cell(row["configured"])} | {cell(row["observed"])} |'
               for row in report['settings']]
@@ -551,7 +688,7 @@ def markdown_record(state: dict[str, Json], report: dict[str, Json], mode: str, 
     lines += [f'| `{row["setting"]}` | {cell(row["configured"])} | {observed(row)} |'
               for row in report['actions']]
     lines += ['', '## Managed rulesets', '', '| Ruleset | ID | Status |', '| --- | --- | --- |']
-    lines += [f'| {row["name"]} | {"—" if row["id"] is None else row["id"]} | {row["status"]} |'
+    lines += [f'| {row["name"]} | {"—" if row["id"] is None else row["id"]} | {status(row)} |'
               for row in report['rulesets']]
     lines += ['', '## Other rules', '',
               f'- Unmanaged repository rulesets: {", ".join(report["unmanaged_rulesets"]) or "none"}',
@@ -560,8 +697,9 @@ def markdown_record(state: dict[str, Json], report: dict[str, Json], mode: str, 
     return '\n'.join(lines) + '\n'
 
 
-def evidence_record(config_path: Path, repo: str, state: dict[str, Json], report: dict[str, Json],
-                    steps: Plan, mode: str, now: datetime) -> dict[str, Json]:
+def evidence_record(config_path: Path, config_sha256: str, repo: str, state: dict[str, Json],
+                    report: dict[str, Json], steps: Plan, plan_sha256: str, mode: str,
+                    now: datetime) -> dict[str, Json]:
     """A dated JSON record of the managed settings as GitHub reports them."""
     try:
         shown_path = config_path.resolve().relative_to(ROOT).as_posix()
@@ -576,8 +714,7 @@ def evidence_record(config_path: Path, repo: str, state: dict[str, Json], report
         'mode': mode,
         'repository': metadata.get('full_name', repo),
         'default_branch': metadata.get('default_branch'),
-        'configuration': {'path': shown_path,
-                          'sha256': hashlib.sha256(config_path.read_bytes()).hexdigest()},
+        'configuration': {'path': shown_path, 'sha256': config_sha256},
         'result': report['result'],
         'visibility': report['visibility'],
         'settings': report['settings'],
@@ -587,6 +724,7 @@ def evidence_record(config_path: Path, repo: str, state: dict[str, Json], report
         'unmanaged_rulesets': report['unmanaged_rulesets'],
         'inherited_rulesets': report['inherited_rulesets'],
         'planned_changes': [{'method': method, 'endpoint': endpoint} for method, endpoint, _ in steps],
+        'plan_sha256': plan_sha256,
         'scope': 'Only the settings that the configuration manages are recorded; '
                  'everything else is outside this record.',
     }
@@ -596,6 +734,19 @@ def write_text(path: Path, text: str, what: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding='utf-8', newline='\n')
     print(f'{what} written to {path}')
+
+
+def write_json_atomically(path: Path, record: dict[str, Json]) -> None:
+    """Write the record to a temporary file beside the path, then replace the path with it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(dir=path.parent, prefix=path.name + '.', suffix='.tmp')
+    try:
+        with os.fdopen(descriptor, 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write(json.dumps(record, indent=2) + '\n')
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 # Apply
@@ -643,7 +794,7 @@ def readback_error(report: dict[str, Json]) -> SetupError:
     rest = report['result'] == 'DRIFT' and (
         not report['visibility']['matches']
         or any(row['matches'] is False for row in report['settings'] + report['security'])
-        or any(row['status'] != 'matches' for row in report['rulesets']))
+        or any(row['status'] not in SATISFIED for row in report['rulesets']))
     message = 'Read-back verification failed'
     message += ('; the differences above remain. Rerun preview to inspect them.' if rest
                 else ': the other settings match, but this tool never writes Actions settings.')
@@ -654,37 +805,92 @@ def readback_error(report: dict[str, Json]) -> SetupError:
     return SetupError(message)
 
 
+def check_approval(args: argparse.Namespace, digest: str) -> None:
+    """Refuse an apply that is not bound to the plan just printed, before any write."""
+    approved, journal = getattr(args, 'approve_plan', None), getattr(args, 'journal', None)
+    if not approved or journal is None:
+        raise SetupError('--apply requires --approve-plan SHA256 and --journal PATH.')
+    if approved.lower() != digest:
+        raise SetupError('The plan differs from the approved one: the repository or the configuration '
+                         'changed since the reviewed plan, or the digest is not the one preview printed. '
+                         'Nothing was written. Run preview again, review the plan above and approve '
+                         'its PLAN SHA-256.')
+    if Path(journal).exists():
+        raise SetupError(f'Journal {journal} exists; choose a new path. Nothing was written.')
+
+
+def apply(call: Call, args: argparse.Namespace, config: dict[str, Json], state: dict[str, Json],
+          report: dict[str, Json], steps: Plan, digest: str, config_sha256: str,
+          started: datetime) -> tuple[dict[str, Json], dict[str, Json], Plan]:
+    """Write the approved plan, journaling before the first write and after each result.
+
+    A failing write stops the sequence; the journal records it and the error
+    propagates. Nothing is retried or rolled back. The read-back state is returned.
+    """
+    if any(method == 'PUT' and '/rulesets/' in endpoint for method, endpoint, _ in steps) \
+            and not args.update_existing:
+        raise SetupError('A named ruleset differs. Review the preview, then use --update-existing '
+                         'to replace that entire named ruleset. Additional rules in it will be removed.')
+    if steps:
+        check_required_checks(call, args.repo, config, state['metadata'])
+    journal: dict[str, Json] = {
+        'record': 'repository-settings-journal',
+        'tool': 'tools/setup_repository.py',
+        'plan_sha256': digest,
+        'repository': state['metadata'].get('full_name', args.repo),
+        'configuration_sha256': config_sha256,
+        'started_at': started.strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'writes': [{'method': method, 'endpoint': endpoint, 'status': 'pending'}
+                   for method, endpoint, _ in steps],
+        'readback': None,
+    }
+    write_json_atomically(args.journal, journal)
+    for entry, (method, endpoint, payload) in zip(journal['writes'], steps):
+        try:
+            call(method, endpoint, payload)
+        except Exception as error:
+            entry.update(status='failed', error=str(error))
+            write_json_atomically(args.journal, journal)
+            raise
+        entry['status'] = 'done'
+        write_json_atomically(args.journal, journal)
+        print(f'Applied {method} {endpoint}')
+    if steps:
+        state = observe(call, args.repo, config)
+        report = assess(config, state)
+        steps = plan(config, report, args.repo)
+    journal['readback'] = report['result']
+    write_json_atomically(args.journal, journal)
+    print(f'Journal written to {args.journal}')
+    return state, report, steps
+
+
 def run(args: argparse.Namespace, call: Call = api, now: datetime | None = None) -> int:
     if not REPOSITORY_PATTERN.fullmatch(args.repo) or args.repo.split('/')[1] in ('.', '..'):
         raise SetupError('Destination must be an explicit owner/repository on github.com.')
     config = load_config(args.config)
+    config_sha256 = hashlib.sha256(args.config.read_bytes()).hexdigest()
     mode = 'apply' if args.apply else 'check' if args.check else 'preview'
+    started = now or datetime.now(timezone.utc)
     state = observe(call, args.repo, config)
     report = assess(config, state)
     steps = plan(config, report, args.repo)
+    digest = plan_digest(state['metadata'].get('full_name', args.repo), config_sha256, report, steps)
     print_notes(config, state, report)
     print_differences(report)
     print_plan(steps)
+    print(f'PLAN SHA-256: {digest}')
     if args.apply:
+        check_approval(args, digest)
         check_prerequisites(state, report)
-    if args.apply and steps:
-        if any(method == 'PUT' and '/rulesets/' in endpoint for method, endpoint, _ in steps) \
-                and not args.update_existing:
-            raise SetupError('A named ruleset differs. Review the preview, then use --update-existing '
-                             'to replace that entire named ruleset. Additional rules in it will be removed.')
-        check_required_checks(call, args.repo, config, state['metadata'])
-        for method, endpoint, payload in steps:
-            call(method, endpoint, payload)
-            print(f'Applied {method} {endpoint}')
-        state = observe(call, args.repo, config)
-        report = assess(config, state)
-        steps = plan(config, report, args.repo)
+        state, report, steps = apply(call, args, config, state, report, steps, digest, config_sha256, started)
+        digest = plan_digest(state['metadata'].get('full_name', args.repo), config_sha256, report, steps)
     stamp = now or datetime.now(timezone.utc)
     if getattr(args, 'report', None):
-        write_text(args.report, markdown_record(state, report, mode, stamp), 'Record')
+        write_text(args.report, markdown_record(state, report, digest, mode, stamp), 'Record')
     if getattr(args, 'evidence', None):
         target = Path(str(args.evidence).replace('{date}', stamp.strftime('%Y-%m-%d')))
-        record = evidence_record(args.config, args.repo, state, report, steps, mode, stamp)
+        record = evidence_record(args.config, config_sha256, args.repo, state, report, steps, digest, mode, stamp)
         write_text(target, json.dumps(record, indent=2) + '\n', 'Evidence')
     if report['result'] == 'VERIFIED':
         print('VERIFIED: all documented settings match' + (' after apply' if args.apply else '')
@@ -708,15 +914,26 @@ def main() -> int:
     parser.add_argument('--repo', required=True, help='Explicit destination owner/repository')
     parser.add_argument('--config', type=Path, default=CONFIG)
     mode = parser.add_mutually_exclusive_group()
-    mode.add_argument('--apply', action='store_true', help='Apply changes, then verify')
+    mode.add_argument('--apply', action='store_true',
+                      help='Apply the approved plan, then verify (needs --approve-plan and --journal)')
     mode.add_argument('--check', action='store_true', help='Read-only verification; exit 1 for drift')
+    parser.add_argument('--approve-plan', metavar='SHA256',
+                        help='The PLAN SHA-256 that preview printed for the plan to apply')
+    parser.add_argument('--journal', type=Path,
+                        help='Write a JSON journal of the apply to this new path, before the first '
+                             'write and after each')
     parser.add_argument('--update-existing', action='store_true', help='Allow replacement of differing named rulesets')
     parser.add_argument('--report', type=Path, help='Write a dated Markdown evidence record of the managed settings')
     parser.add_argument('--evidence', type=Path,
                         help='Write a JSON evidence record of the managed settings ({date} becomes YYYY-MM-DD, UTC)')
     args = parser.parse_args()
-    if args.update_existing and not args.apply:
-        parser.error('--update-existing requires --apply')
+    for option in ('approve_plan', 'journal', 'update_existing'):
+        if getattr(args, option) and not args.apply:
+            parser.error(f'--{option.replace("_", "-")} requires --apply')
+    if args.apply and (args.approve_plan is None or args.journal is None):
+        parser.error('--apply requires --approve-plan SHA256 and --journal PATH')
+    if args.approve_plan is not None and not DIGEST_PATTERN.fullmatch(args.approve_plan):
+        parser.error('--approve-plan takes the 64 hexadecimal digits of the PLAN SHA-256 line that preview printed')
     try:
         return run(args)
     except (SetupError, OSError, ValueError, KeyError, TypeError) as exc:

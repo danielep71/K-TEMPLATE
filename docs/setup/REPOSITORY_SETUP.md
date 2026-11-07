@@ -58,11 +58,47 @@ DIFF ruleset "Protect main" (12345) rules.pull_request.allowed_merge_methods: ob
 A security feature or Actions setting that GitHub does not report to your token is
 `null`, with the endpoint and status in brackets; it counts as drift.
 
+A configured ruleset that other active rulesets already enforce at least as
+strictly, under any names, is **covered**: the preview prints a `NOTE` line that
+names them instead of a `DIFF`, it is not drift, and nothing is planned or written
+for it. A ruleset counts towards coverage only when it has the same target, a
+reported and empty bypass list, no excluded refs and every configured ref in its
+include (`~ALL`, or `~DEFAULT_BRANCH` for the default branch); each configured
+rule must be present in one of them with parameters at least as strict: more
+required approvals, fewer allowed merge methods, a superset of the required
+checks. Different rules may be covered by different rulesets, and the ruleset with
+the configured name counts too, so a named ruleset with stronger parameters is
+`covered`, not `differs`. Otherwise the named ruleset is `matches`, `differs`,
+`missing` or `unknown`, as the `DIFF` lines show.
+
+The plan ends with its digest, `PLAN SHA-256: <hex>`: the SHA-256 of the
+repository name, the configuration's SHA-256, every observed managed value and
+the exact planned writes. The same unchanged repository and configuration give the
+same digest; `--check` prints it too, and `--report` and `--evidence` record it.
+Apply needs it.
+
 ### ② Apply the baseline
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --apply
+python tools/setup_repository.py --repo OWNER/NEW-REPO --apply \
+  --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
 ```
+
+Replace `PLAN_SHA256` with the digest that the preview printed. Apply reads the
+repository again, rebuilds the plan and computes its digest before any write; when
+it differs from the approved one, because the repository or the configuration
+changed since the reviewed plan, apply refuses and asks you to preview again. An
+approved plan with no steps is a valid apply: the journal is written, nothing is
+written to GitHub, and the read-back runs as usual.
+
+`--journal PATH` names a new file; an existing one is refused before any write.
+The journal is JSON with the plan digest, the repository, the configuration's
+SHA-256, the start time, each planned write with its method, endpoint and status
+(`pending`, `done` or `failed`, with the error text) and the read-back result. It
+is written atomically before the first write and again after each write's result,
+so it exists before anything reaches GitHub. A failing write stops the sequence
+and is recorded; nothing is retried or rolled back. Keep the journal with the
+setup record, for example beside `SETTINGS_EVIDENCE.md` as the path above does.
 
 The script first sets the three merge methods where they differ, because GitHub
 may reject a ruleset that allows a disabled one. It then creates missing rulesets,
@@ -71,7 +107,8 @@ visibility, patches the other differing general settings, and reads back the
 result. Protection is installed before automatic branch deletion is enabled, so a
 merged pull request cannot delete a release branch before its deletion rule exists.
 
-Apply refuses before any write when you lack administrator access, the destination
+Apply refuses before any write when the plan's digest differs from the approved
+one, the journal path exists, you lack administrator access, the destination
 is archived or disabled, its visibility differs from a `visibility` the
 configuration sets, or a managed general setting, security feature or ruleset is unknown.
 It never changes visibility: follow the
@@ -90,9 +127,9 @@ python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
 ```
 
 A verified match returns **0**. `--report` writes the repository's **setup
-record**: a dated Markdown file with each managed general setting, security feature
+record**: a dated Markdown file with the plan digest, each managed general setting, security feature
 and Actions setting as configured and as GitHub reports it, each managed ruleset with its ID and status,
-and any unmanaged or inherited rulesets. `docs/repo_governance/SETTINGS_EVIDENCE.md`
+the rulesets that cover it included, and any unmanaged or inherited rulesets. `docs/repo_governance/SETTINGS_EVIDENCE.md`
 is the conventional place to commit it in a generated repository; add anything the
 script cannot read, such as decisions and exceptions, below it. `--report` works with
 preview, `--check` and `--apply`; after apply it records the read-back state.
@@ -103,8 +140,9 @@ not you also pass `--report`; a `{date}` in the path becomes the UTC date of the
 check (`YYYY-MM-DD`). The record names the mode, repository, default branch and
 result, the configuration's path and SHA-256, and each managed value as configured
 and observed, with the source of each security feature and Actions setting, each
-managed ruleset with its differences, the unmanaged and inherited rulesets, and the
-method and endpoint of each planned change, without its payload. It works in the
+managed ruleset with its differences and the rulesets that cover it, the unmanaged
+and inherited rulesets, the method and endpoint of each planned change, without
+its payload, and the plan digest (`plan_sha256`). It works in the
 same modes as `--report`. A public-only feature or Actions setting on another
 visibility is recorded as `not applied (public repositories only)` and does not
 count as drift.
@@ -117,22 +155,25 @@ apply that does not resume them fails its read-back.
 <details>
 <summary><strong>⚙️ Advanced: reconcile an existing named ruleset</strong></summary>
 
-A differing managed ruleset blocks apply before any writes. After reviewing the
-preview, explicitly allow replacement of its entire definition:
+A named ruleset that differs and is not covered blocks apply before any writes.
+After reviewing the preview, explicitly allow replacement of its entire definition:
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --update-existing
+python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --update-existing \
+  --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
 ```
 
-Replacement removes additional rules or bypasses inside that named ruleset.
-Rulesets with other names and inherited organization rules remain unchanged.
-Duplicate managed names are rejected.
+Replacement removes additional rules or bypasses inside that named ruleset; a
+named ruleset that is `covered` is never replaced. Rulesets with other names and
+inherited organization rules remain unchanged. Duplicate managed names are rejected.
 
-When you adopt an existing repository, its rulesets may cover the same branches
-and tags under other names. The preview names every such unmanaged ruleset with
-its target, ref patterns and enforcement. It stays active after apply, with its
-own rules and bypasses, so delete the ones that a managed ruleset replaces in
-**Settings → Rules → Rulesets**. The script never deletes a ruleset.
+When you adopt an existing repository, its rulesets may protect the same branches
+and tags under other names. One that enforces a configured ruleset at least as
+strictly covers it, and the preview says so. The preview also names every unmanaged
+ruleset with its target, ref patterns and enforcement. It stays active after
+apply, with its own rules and bypasses, so delete the ones that a managed ruleset
+replaces in **Settings → Rules → Rulesets**. The script never edits or deletes an
+unmanaged ruleset.
 
 The destination is always explicit; it is never inferred from the current directory.
 The default JSON path is relative to the script, so it also works from another
@@ -154,10 +195,10 @@ of the [settings reference](../repo_governance/SETTINGS.md).
 | **General · 12 settings** | The three merge methods, auto-merge, branch update suggestions, deletion of merged head branches, web commit sign-off, and the Issues, Projects, Wiki, Discussions and legacy downloads features. Four differ from GitHub's defaults: delete merged head branches, suggest PR branch updates, disable Projects and the legacy downloads flag. |
 | **Security · 5 features** | Dependabot alerts and security updates on every repository; private vulnerability reporting, secret scanning and push protection on a public repository (skipped with a note otherwise). |
 | **Actions · 5 settings, checked only** | SHA pinning required, read-only default workflow permissions, no pull request approval by workflows, approval for every external contributor's fork pull request workflows (public repository only) and 90-day retention. Reported and verified, never written. |
-| **Protection · 5 rulesets** | Default branch, release branches, independent release-branch deletion protection, release tags, and traffic history. The configuration may hold any number of uniquely named rulesets. |
+| **Protection · 5 rulesets** | Default branch, release branches, independent release-branch deletion protection, release tags, and traffic history. The configuration may hold any number of uniquely named rulesets. Active rulesets without bypass actors or excluded refs that enforce a configured one at least as strictly, under any names, cover it: nothing is written for it. |
 | **Visibility · optional** | `null` in the template: any visibility. Set to `public` or `private`, a different visibility is drift that apply refuses and never changes. |
 | **Enforcement** | Active rulesets with no bypass actors or ref exclusions. `Protect main` targets `~DEFAULT_BRANCH`, not a fixed branch name. |
-| **Verification** | All pages are read; full rule definitions are compared without response metadata; managed settings are read back after apply. |
+| **Verification** | All pages are read; full rule definitions are compared without response metadata; apply writes only the plan whose digest was approved, journaling each write; managed settings are read back after apply. |
 
 **Outside this baseline:** template mode, the other Actions policies, Pages,
 secrets, environments, labels, collaborators and integrations. Configure these
@@ -282,11 +323,12 @@ project validation depends on the new project. There is no automatic deletion st
 | --- | --- | --- |
 | **0** | Successful preview, or verified match in apply/check mode | Read the mode-specific message: preview success does not mean settings were applied. |
 | **1** | Drift found by `--check`, an unknown value included | Preview the differences and decide whether to reapply, or grant the access the unknown value needs. |
-| **2** | Invalid configuration, refused or failed apply prerequisite, unavailable feature, API failure or read-back mismatch, an Actions setting to set by hand included | Resolve the reported problem, then preview and retry. |
+| **2** | Invalid configuration, a plan whose digest is not the approved one, an existing journal path, refused or failed apply prerequisite, unavailable feature, API failure or read-back mismatch, an Actions setting to set by hand included | Resolve the reported problem, then preview and retry. |
 
 API operations are **not transactional**. If a later request fails, earlier changes
 remain. There is no silent skip, no success claim for partial application and no
-automatic rollback of protection. Rerun preview to see what remains.
+automatic rollback of protection. The journal records which writes were done and
+which one failed; rerun preview to see what remains.
 
 A passing check on the current HEAD is a prerequisite, not proof of future workflow
 coverage or destructive enforcement testing. Verification covers the documented

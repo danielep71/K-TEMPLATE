@@ -207,5 +207,9 @@ GitHub Enterprise Cloud for attestations and the repository variable
 `RELEASE_ATTESTATIONS` set to `enabled`; without them the workflow skips the
 attestation and still drafts the release, whose notes say so.
 `Protect main` targets `~DEFAULT_BRANCH`, so it follows the default branch under
-any name. The script matches rulesets by name: renaming one in the configuration
-creates a new ruleset and leaves the old one in place.
+any name. The script matches each configured ruleset by name, and accepts other
+active rulesets with no bypass actors or excluded refs that enforce it at least as
+strictly, under any names, as covering it: a covered ruleset is not drift and is
+never written, so renaming one in the configuration creates nothing while the old
+one covers it. Apply writes only the plan whose digest, printed by the preview,
+I pass with `--approve-plan`, and journals each write to a new `--journal` file.
