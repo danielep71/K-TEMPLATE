@@ -68,6 +68,11 @@ jobs:
                   result = request("PATCH", f"/repos/{repository}/issues/{number}", {"milestone": None})
                   if result.get("milestone") is not None:
                       raise ValueError(f"PR #{number} still has a milestone")
+                  # Read the pull request again: the summary records what GitHub
+                  # keeps, not what the response to the write reports.
+                  after = request("GET", f"/repos/{repository}/issues/{number}")
+                  if after.get("milestone") is not None:
+                      raise ValueError(f"PR #{number} still has a milestone after the change")
                   title = str(milestone.get("title", ""))
                   removed.append((number, title))
                   print(f"Removed milestone {title!r} from PR #{number}")
