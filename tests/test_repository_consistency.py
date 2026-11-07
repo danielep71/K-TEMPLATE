@@ -12,6 +12,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def catalogue_labels():
+    """The resolved label catalogue: the core plus the selected overlays, sorted by name."""
+    manifest = json.loads((ROOT / '.github/labels.json').read_text(encoding='utf-8'))
+    labels = list(manifest['core'])
+    for name in manifest['selected_overlays']:
+        labels += manifest['overlays'][name]
+    return sorted(labels, key=lambda label: (label['name'].lower(), label['name']))
+
+
 def tracked(*patterns):
     """Files Git tracks, so ignored directories such as .venv/ are never scanned."""
     try:
@@ -26,25 +35,22 @@ def tracked(*patterns):
 
 class CatalogueDocumentationTests(unittest.TestCase):
     def test_guide_matches_label_names_colors_and_descriptions(self):
-        manifest = json.loads((ROOT / '.github/labels.json').read_text(encoding='utf-8'))
         guide = (ROOT / 'docs/repo_governance/ISSUE_LABELS.md').read_text(encoding='utf-8')
         rows = re.findall(r'^\| `([^`]+)` \| `#([0-9A-F]+)` \| (.+) \|$', guide, re.M)
         expected = [(label['name'], label['color'], label['description'])
-                    for label in manifest['labels']]
+                    for label in catalogue_labels()]
         self.assertEqual(rows, expected)
 
     def test_usage_guide_covers_every_label_once(self):
-        manifest = json.loads((ROOT / '.github/labels.json').read_text(encoding='utf-8'))
         guide = (ROOT / 'docs/repo_governance/ISSUE_LABELS.md').read_text(encoding='utf-8')
         section = re.search(r'^## 🧭 Using the labels$(.*?)^## ', guide, re.M | re.S)
         assert section, 'ISSUE_LABELS.md has no "Using the labels" section'
         names = re.findall(r'^\| `([^`]+)` \|', section.group(1), re.M)
         self.assertEqual(sorted(names, key=str.lower),
-                         sorted((label['name'] for label in manifest['labels']), key=str.lower))
+                         sorted((label['name'] for label in catalogue_labels()), key=str.lower))
 
     def test_documented_label_counts_match_the_catalogue(self):
-        manifest = json.loads((ROOT / '.github/labels.json').read_text(encoding='utf-8'))
-        expected = str(len(manifest['labels']))
+        expected = str(len(catalogue_labels()))
         pattern = re.compile(r'labels-(\d+)-|\b(\d+) (?:issue )?labels\b', re.I)
         counts = []
         for path in tracked('*.md'):
@@ -90,8 +96,7 @@ class IgnoreRuleTests(unittest.TestCase):
 class DependabotTests(unittest.TestCase):
     def test_labels_exist_and_assignee_matches_the_issue_forms(self):
         text = (ROOT / '.github/dependabot.yml').read_text(encoding='utf-8')
-        manifest = json.loads((ROOT / '.github/labels.json').read_text(encoding='utf-8'))
-        catalogue = {label['name'] for label in manifest['labels']}
+        catalogue = {label['name'] for label in catalogue_labels()}
         labels = yaml_list(text, 'labels')
         self.assertTrue(labels)
         self.assertEqual([label for label in labels if label not in catalogue], [])

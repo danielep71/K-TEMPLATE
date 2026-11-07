@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { appendFile, readFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
 
-const EXPECTED_SCHEMA_VERSION = 2;
+const EXPECTED_SCHEMA_VERSION = 3;
+const ROOT_KEYS = ["schema_version", "prune", "core", "overlays", "selected_overlays"];
 const DEFAULT_MANIFEST = ".github/labels.json";
 const API_VERSION = "2022-11-28";
 const LABELS_PER_PAGE = 100;
@@ -89,28 +92,112 @@ function validateLabelArray(labels, location, seen) {
   return errors;
 }
 
+function validateSortedNames(names, location) {
+  for (let index = 1; index < names.length; index += 1) {
+    if (compareNames(names[index - 1], names[index]) >= 0) {
+      return [`${location} must be sorted case-insensitively by name: ${names[index - 1]} precedes ${names[index]}`];
+    }
+  }
+  return [];
+}
+
+// Overlays are named label sets besides the core: a generated repository
+// defines its own, such as one per regulatory regime, and selects them.
+function validateOverlays(overlays, seen) {
+  if (!overlays || typeof overlays !== "object" || Array.isArray(overlays)) {
+    return ["overlays must be an object mapping each overlay name to its label array"];
+  }
+  const errors = [];
+  const names = Object.keys(overlays);
+  const seenOverlays = new Map();
+  for (const name of names) {
+    const item = `overlays[${JSON.stringify(name)}]`;
+    if (name.length === 0 || name !== name.trim() || /\r|\n/.test(name)) {
+      errors.push(`${item} name must be non-empty, single-line, with no surrounding whitespace`);
+    }
+    const key = name.toLowerCase();
+    if (seenOverlays.has(key)) {
+      errors.push(`${item} duplicates overlay ${JSON.stringify(seenOverlays.get(key))} case-insensitively`);
+    } else {
+      seenOverlays.set(key, name);
+    }
+    errors.push(...validateLabelArray(overlays[name], item, seen));
+    if (Array.isArray(overlays[name]) && overlays[name].length === 0) errors.push(`${item} must not be empty`);
+  }
+  errors.push(...validateSortedNames(names, "overlays"));
+  return errors;
+}
+
+function validateSelection(selected, overlays) {
+  if (!Array.isArray(selected)) return ["selected_overlays must be an array of overlay names"];
+  const errors = [];
+  const defined = overlays && typeof overlays === "object" && !Array.isArray(overlays) ? overlays : {};
+  const chosen = new Set();
+  selected.forEach((name, index) => {
+    const item = `selected_overlays[${index}]`;
+    if (typeof name !== "string") {
+      errors.push(`${item} must be a string`);
+      return;
+    }
+    if (!Object.hasOwn(defined, name)) {
+      errors.push(`${item} selects unknown overlay ${JSON.stringify(name)}`);
+    }
+    if (chosen.has(name.toLowerCase())) {
+      errors.push(`${item} selects overlay ${JSON.stringify(name)} again`);
+    }
+    chosen.add(name.toLowerCase());
+  });
+  if (selected.every(name => typeof name === "string")) {
+    errors.push(...validateSortedNames(selected, "selected_overlays"));
+  }
+  return errors;
+}
+
 export function validateManifest(document) {
   const errors = [];
   if (!document || typeof document !== "object" || Array.isArray(document)) {
     throw new Error("Manifest must be a JSON object.");
   }
-  if (!sameKeys(document, ["schema_version", "prune", "labels"])) {
-    errors.push("root must contain exactly schema_version, prune, and labels");
+  if (document.schema_version === 2 && Object.hasOwn(document, "labels")) {
+    throw new Error(
+      "Invalid label manifest:\n- schema_version 2 with a labels list is no longer supported: "
+      + `set schema_version ${EXPECTED_SCHEMA_VERSION}, rename labels to core, and add overlays {} and selected_overlays []`
+    );
+  }
+  if (!sameKeys(document, ROOT_KEYS)) {
+    errors.push(`root must contain exactly ${ROOT_KEYS.slice(0, -1).join(", ")}, and ${ROOT_KEYS.at(-1)}`);
   }
   if (document.schema_version !== EXPECTED_SCHEMA_VERSION) {
     errors.push(`schema_version must be ${EXPECTED_SCHEMA_VERSION}`);
   }
   if (typeof document.prune !== "boolean") errors.push("prune must be a boolean");
 
-  errors.push(...validateLabelArray(document.labels, "labels", new Map()));
-  if (Array.isArray(document.labels) && document.labels.length === 0) errors.push("labels must not be empty");
+  // One map across the core and every overlay: a name is unique in the whole catalogue.
+  const seen = new Map();
+  errors.push(...validateLabelArray(document.core, "core", seen));
+  if (Array.isArray(document.core) && document.core.length === 0) errors.push("core must not be empty");
+  errors.push(...validateOverlays(document.overlays, seen));
+  errors.push(...validateSelection(document.selected_overlays, document.overlays));
 
   if (errors.length > 0) throw new Error(`Invalid label manifest:\n- ${errors.join("\n- ")}`);
   return structuredClone(document);
 }
 
+export function catalogueCounts(manifest) {
+  if (!manifest) return null;
+  return {
+    core: manifest.core.length,
+    overlays: Object.keys(manifest.overlays).length,
+    selected: manifest.selected_overlays.length,
+    resolved: resolveDesired(manifest).length
+  };
+}
+
+// The core plus the labels of every selected overlay, sorted by name.
 export function resolveDesired(document) {
-  const labels = [...validateManifest(document).labels];
+  const manifest = validateManifest(document);
+  const labels = [...manifest.core];
+  for (const name of manifest.selected_overlays) labels.push(...manifest.overlays[name]);
   labels.sort((left, right) => compareNames(left.name, right.name));
   return labels;
 }
@@ -155,6 +242,7 @@ function parseArguments(argv) {
     mode: null,
     live: null,
     repository: process.env.GITHUB_REPOSITORY || null,
+    planOutput: null,
     dryRun: false,
     selfTest: false
   };
@@ -164,16 +252,25 @@ function parseArguments(argv) {
       parsed.dryRun = true;
     } else if (argument === "--self-test") {
       parsed.selfTest = true;
-    } else if (["--manifest", "--mode", "--live", "--repository"].includes(argument)) {
+    } else if (["--manifest", "--mode", "--live", "--repository", "--plan-output"].includes(argument)) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`);
-      parsed[argument.slice(2)] = value;
+      parsed[argument === "--plan-output" ? "planOutput" : argument.slice(2)] = value;
       index += 1;
     } else {
       throw new Error(`Unknown argument: ${argument}`);
     }
   }
+  if (parsed.planOutput !== null && parsed.mode !== "plan") throw new Error("--plan-output requires --mode plan");
   return parsed;
+}
+
+// The planned changes as JSON, so that another tool can compare its own plan
+// with the reconciler's on the same live snapshot.
+export async function writePlan(path, changes) {
+  const directory = dirname(path);
+  if (directory !== ".") await mkdir(directory, { recursive: true });
+  await writeFile(path, `${JSON.stringify({ changes }, null, 2)}\n`, "utf8");
 }
 
 export async function loadJson(path) {
@@ -380,6 +477,7 @@ function renderSummary({
     action,
     planned ? changes.filter(change => change.action === action).length : "n/a"
   ]));
+  const catalogue = catalogueCounts(manifest);
   const lines = [
     "# Repository label synchronization",
     "",
@@ -387,6 +485,9 @@ function renderSummary({
     `- Label manifest: ${inlineCode(manifestPath ?? "unavailable")}`,
     `- Schema: **${manifest?.schema_version ?? "unavailable"}**`,
     `- Labels: **${resolvedLabels.length}**`,
+    `- Core / overlays defined / selected / resolved: **${catalogue
+      ? `${catalogue.core} / ${catalogue.overlays} / ${catalogue.selected} / ${catalogue.resolved}`
+      : "unavailable"}**`,
     `- Prune: **${manifest ? (manifest.prune ? "enabled" : "disabled") : "unavailable"}**`,
     `- Planned changes: **${planned ? changes.length : "not computed (live labels not read)"}**`,
     `- Create / update / delete: **${counts.create} / ${counts.update} / ${counts.delete}**`
@@ -396,7 +497,10 @@ function renderSummary({
     "",
     "## Label catalogue",
     "",
-    `- Labels (${resolvedLabels.length}): ${renderLabelNames(resolvedLabels)}`
+    `- Labels (${resolvedLabels.length}): ${renderLabelNames(resolvedLabels)}`,
+    `- Selected overlays (${catalogue?.selected ?? 0}): ${manifest && manifest.selected_overlays.length > 0
+      ? manifest.selected_overlays.map(name => inlineCode(name)).join(", ")
+      : "none"}`
   );
   if (error) {
     lines.push("", "## Failure", "", inlineCode(error));
@@ -446,8 +550,13 @@ async function runSelfTest(manifestPath) {
   expectFailure(() => validateManifest(missingRoot), /root must contain exactly/);
 
   const extraRoot = structuredClone(baseline);
-  extraRoot.overlays = {};
+  extraRoot.labels = [];
   expectFailure(() => validateManifest(extraRoot), /root must contain exactly/);
+
+  // The previous shape, schema 2 with one labels list, names its replacement.
+  const previousSchema = { schema_version: 2, prune: baseline.prune, labels: structuredClone(baseline.core) };
+  expectFailure(() => validateManifest(previousSchema),
+    /schema_version 2 with a labels list is no longer supported: set schema_version 3, rename labels to core/);
 
   const wrongSchema = structuredClone(baseline);
   wrongSchema.schema_version = 1;
@@ -458,28 +567,96 @@ async function runSelfTest(manifestPath) {
   expectFailure(() => validateManifest(invalidPrune), /prune must be a boolean/);
 
   const emptyLabels = structuredClone(baseline);
-  emptyLabels.labels = [];
-  expectFailure(() => validateManifest(emptyLabels), /must not be empty/);
+  emptyLabels.core = [];
+  expectFailure(() => validateManifest(emptyLabels), /core must not be empty/);
 
   const missingField = structuredClone(baseline);
-  delete missingField.labels[0].description;
+  delete missingField.core[0].description;
   expectFailure(() => validateManifest(missingField), /name, color, and description/);
 
   const invalidColor = structuredClone(baseline);
-  invalidColor.labels[0].color = "#c24e00";
+  invalidColor.core[0].color = "#c24e00";
   expectFailure(() => validateManifest(invalidColor), /uppercase hexadecimal/);
 
   const duplicateName = structuredClone(baseline);
-  duplicateName.labels[1].name = baseline.labels[0].name.toUpperCase();
+  duplicateName.core[1].name = baseline.core[0].name.toUpperCase();
   expectFailure(() => validateManifest(duplicateName), /duplicates/);
 
   const longDescription = structuredClone(baseline);
-  longDescription.labels[0].description = "x".repeat(101);
+  longDescription.core[0].description = "x".repeat(101);
   expectFailure(() => validateManifest(longDescription), /100-character/);
 
   const unsorted = structuredClone(baseline);
-  [unsorted.labels[0], unsorted.labels[1]] = [unsorted.labels[1], unsorted.labels[0]];
-  expectFailure(() => validateManifest(unsorted), /sorted/);
+  [unsorted.core[0], unsorted.core[1]] = [unsorted.core[1], unsorted.core[0]];
+  expectFailure(() => validateManifest(unsorted), /core must be sorted/);
+
+  // Overlays: an overlay is a sorted label array; the selection resolves core plus the selected ones.
+  // The fixtures start from the core alone, so that the overlays a repository configures
+  // do not change what they assert; the configured catalogue is checked by its own selection.
+  const coreOnly = { ...structuredClone(baseline), overlays: {}, selected_overlays: [] };
+  const core = resolveDesired(coreOnly);
+  assert.deepEqual(core, [...manifest.core].sort((left, right) => compareNames(left.name, right.name)));
+  const overlayLabel = { name: "zz-regime", color: "ABCDEF", description: "overlay label" };
+  const secondLabel = { name: "zz-regime-review", color: "ABCDEF", description: "second overlay label" };
+  const overlaid = structuredClone(coreOnly);
+  overlaid.overlays = { regime: [overlayLabel, secondLabel], unused: [{ name: "zz-unused", color: "ABCDEF", description: "d" }] };
+  overlaid.selected_overlays = ["regime"];
+  const resolved = resolveDesired(overlaid);
+  assert.deepEqual(resolved, [...core, overlayLabel, secondLabel], "resolved set is core plus the selected overlay");
+  assert.deepEqual(catalogueCounts(overlaid), { core: core.length, overlays: 2, selected: 1, resolved: core.length + 2 });
+  const unselected = structuredClone(overlaid);
+  unselected.selected_overlays = [];
+  assert.deepEqual(resolveDesired(unselected), core, "an overlay that is not selected adds nothing");
+  const configured = {
+    core: manifest.core.length,
+    overlays: Object.keys(manifest.overlays).length,
+    selected: manifest.selected_overlays.length,
+    resolved: desired.length
+  };
+  assert.deepEqual(catalogueCounts(manifest), configured, "counts follow the configured selection");
+  assert.equal(configured.resolved, configured.core
+    + manifest.selected_overlays.reduce((sum, name) => sum + manifest.overlays[name].length, 0));
+
+  const unknownSelection = structuredClone(overlaid);
+  unknownSelection.selected_overlays = ["missing"];
+  expectFailure(() => validateManifest(unknownSelection), /selected_overlays\[0\] selects unknown overlay "missing"/);
+  const duplicatedSelection = structuredClone(overlaid);
+  duplicatedSelection.selected_overlays = ["regime", "regime"];
+  expectFailure(() => validateManifest(duplicatedSelection), /selected_overlays\[1\] selects overlay "regime" again/);
+  const unsortedSelection = structuredClone(overlaid);
+  unsortedSelection.selected_overlays = ["unused", "regime"];
+  expectFailure(() => validateManifest(unsortedSelection), /selected_overlays must be sorted/);
+  const notAList = structuredClone(overlaid);
+  notAList.selected_overlays = "regime";
+  expectFailure(() => validateManifest(notAList), /selected_overlays must be an array/);
+  const crossDuplicate = structuredClone(overlaid);
+  crossDuplicate.overlays.regime[0].name = baseline.core[0].name.toUpperCase();
+  expectFailure(() => validateManifest(crossDuplicate), /overlays\["regime"\]\[0\]\.name duplicates core\[0\]\.name/);
+  const overlayDuplicate = structuredClone(overlaid);
+  overlayDuplicate.overlays.unused[0].name = overlayLabel.name;
+  expectFailure(() => validateManifest(overlayDuplicate), /overlays\["unused"\]\[0\]\.name duplicates overlays\["regime"\]\[0\]\.name/);
+  const unsortedOverlay = structuredClone(overlaid);
+  unsortedOverlay.overlays.regime.reverse();
+  expectFailure(() => validateManifest(unsortedOverlay), /overlays\["regime"\] must be sorted/);
+  const unsortedOverlays = structuredClone(overlaid);
+  unsortedOverlays.overlays = { unused: overlaid.overlays.unused, regime: overlaid.overlays.regime };
+  expectFailure(() => validateManifest(unsortedOverlays), /overlays must be sorted case-insensitively by name: unused precedes regime/);
+  const sameOverlayName = structuredClone(overlaid);
+  sameOverlayName.overlays = { regime: overlaid.overlays.regime, Regime: overlaid.overlays.unused };
+  expectFailure(() => validateManifest(sameOverlayName), /overlays\["Regime"\] duplicates overlay "regime"/);
+  const emptyOverlay = structuredClone(overlaid);
+  emptyOverlay.overlays.unused = [];
+  expectFailure(() => validateManifest(emptyOverlay), /overlays\["unused"\] must not be empty/);
+  const blankOverlayName = structuredClone(overlaid);
+  blankOverlayName.overlays = { " ": overlaid.overlays.regime };
+  blankOverlayName.selected_overlays = [];
+  expectFailure(() => validateManifest(blankOverlayName), /overlays\[" "\] name must be non-empty/);
+  const overlaysAsList = structuredClone(overlaid);
+  overlaysAsList.overlays = [];
+  expectFailure(() => validateManifest(overlaysAsList), /overlays must be an object/);
+  const overlayNotArray = structuredClone(overlaid);
+  overlayNotArray.overlays.regime = { name: "x" };
+  expectFailure(() => validateManifest(overlayNotArray), /overlays\["regime"\] must be an array/);
 
   assert.equal(planChanges(desired, desired, { prune: manifest.prune }).length, 0, "idempotent plan must be empty");
 
@@ -533,6 +710,34 @@ async function runSelfTest(manifestPath) {
   assert.match(failureSummary, /some changes may already be applied/);
   assert.match(summary, new RegExp(`Labels \\(${desired.length}\\):`));
   for (const label of desired) assert.ok(summary.includes(inlineCode(label.name)), label.name);
+  assert.ok(summary.includes(`Core / overlays defined / selected / resolved: **${configured.core} / `
+    + `${configured.overlays} / ${configured.selected} / ${configured.resolved}**`), summary);
+  assert.ok(summary.includes(`Selected overlays (${configured.selected}): ${configured.selected === 0
+    ? "none" : manifest.selected_overlays.map(name => inlineCode(name)).join(", ")}`), summary);
+  assert.match(failureSummary, /Core \/ overlays defined \/ selected \/ resolved: \*\*unavailable\*\*/);
+  const overlaidSummary = renderSummary({
+    mode: "plan",
+    manifest: validateManifest(overlaid),
+    manifestPath: "fixture-labels.json",
+    desiredLabels: resolved,
+    changes: planChanges(resolved, core)
+  });
+  assert.match(overlaidSummary, new RegExp(`Core / overlays defined / selected / resolved: \\*\\*${core.length} / 2 / 1 / ${core.length + 2}\\*\\*`));
+  assert.match(overlaidSummary, /Selected overlays \(1\): `regime`/);
+  assert.ok(overlaidSummary.includes("| create | `zz-regime` | missing live label |"), overlaidSummary);
+
+  // The plan written for another tool is the planner's own change list.
+  const planDirectory = await mkdtemp(join(tmpdir(), "labels-plan-"));
+  try {
+    const planPath = join(planDirectory, "nested", "plan.json");
+    await writePlan(planPath, changedPlan);
+    assert.deepEqual(await loadJson(planPath), { changes: changedPlan });
+  } finally {
+    await rm(planDirectory, { recursive: true, force: true });
+  }
+  expectFailure(() => parseArguments(["--plan-output", "plan.json"]), /--plan-output requires --mode plan/);
+  expectFailure(() => parseArguments(["--mode", "validate", "--plan-output", "plan.json"]), /--plan-output requires --mode plan/);
+  assert.equal(parseArguments(["--mode", "plan", "--live", "live.json", "--plan-output", "plan.json"]).planOutput, "plan.json");
 
   // Values are data: no backtick, pipe or line break may close the code span or split the row.
   assert.equal(inlineCode("plain"), "`plain`");
@@ -619,7 +824,7 @@ async function runSelfTest(manifestPath) {
   await assertSafeDeletions(planChanges(desired, desired.slice(1)), usage(["anything"]));
   assert.deepEqual(asked, [], "a plan without deletions makes no query");
 
-  process.stdout.write("SELF-TEST PASS: retry delays, validation, reconciliation, safe pruning and summary fixtures\n");
+  process.stdout.write("SELF-TEST PASS: retry delays, validation, overlays, reconciliation, safe pruning, plan output and summary fixtures\n");
 }
 
 // What the run knew before a failure, so that the failure summary reports it.
@@ -663,6 +868,7 @@ async function main() {
   const changes = planChanges(desired, live, { prune: manifest.prune });
   runState.changes = changes;
   if (options.mode === "plan" || options.dryRun) {
+    if (options.planOutput) await writePlan(options.planOutput, changes);
     await publishSummary(renderSummary({ mode: options.mode, ...summaryBase, changes, dryRun: options.dryRun }));
     return;
   }
