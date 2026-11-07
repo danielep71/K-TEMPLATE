@@ -4,12 +4,13 @@ import copy
 import hashlib
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
 import unittest
 from collections.abc import Callable
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -57,6 +58,12 @@ class FakeAPI:
         self.alerts = False
         self.fixes = False
         self.paused = False
+        # The write, counting from 1, that answers HTTP 500, and a path whose
+        # existence is recorded at each write attempt.
+        self.fail_at: int | None = None
+        self.attempts = 0
+        self.journal: Path | None = None
+        self.journal_seen: list[bool] = []
 
     def not_found(self, endpoint: str) -> Any:
         raise setup.ApiError('GET', endpoint, '404')
@@ -87,6 +94,11 @@ class FakeAPI:
     def __call__(self, method: str, endpoint: str, payload: Any = None) -> Any:
         if method == 'GET':
             return self.get(endpoint)
+        self.attempts += 1
+        if self.journal is not None:
+            self.journal_seen.append(self.journal.exists())
+        if self.attempts == self.fail_at:
+            raise setup.ApiError(method, endpoint, '500')
         switches = {'/private-vulnerability-reporting': 'reporting',
                     '/vulnerability-alerts': 'alerts', '/automated-security-fixes': 'fixes'}
         for suffix, attribute in switches.items():
@@ -97,7 +109,8 @@ class FakeAPI:
         self.check_write_order(method, endpoint, payload)
         self.writes.append((method, endpoint, copy.deepcopy(payload)))
         if method == 'POST':
-            self.rules.append(dict(copy.deepcopy(payload), id=len(self.rules) + 1, source_type='Repository'))
+            self.rules.append(dict(copy.deepcopy(payload), source_type='Repository',
+                                   id=max((r['id'] for r in self.rules), default=0) + 1))
         elif method == 'PUT':
             i = int(endpoint.rsplit('/', 1)[1])
             self.rules = [dict(copy.deepcopy(payload), id=i, source_type='Repository') if r['id'] == i else r
@@ -150,7 +163,12 @@ class SetupTests(unittest.TestCase):
     def setUp(self) -> None:
         self.api = FakeAPI()
         self.args = argparse.Namespace(repo='example/project', config=setup.CONFIG, apply=False,
-                                       check=False, update_existing=False, report=None, evidence=None)
+                                       check=False, approve_plan=None, journal=None,
+                                       update_existing=False, report=None, evidence=None)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.journals = Path(directory.name)
+        self.applies = 0
 
     def run_setup(self) -> int:
         with redirect_stdout(io.StringIO()):
@@ -162,8 +180,32 @@ class SetupTests(unittest.TestCase):
             code = setup.run(self.args, self.api, NOW)
         return code, output.getvalue()
 
-    def configure(self) -> None:
+    def digest(self) -> str:
+        """The PLAN SHA-256 that a preview of the repository as it is now prints."""
+        apply, check = self.args.apply, self.args.check
+        self.args.apply = self.args.check = False
+        _, output = self.run_output()
+        self.args.apply, self.args.check = apply, check
+        digests = re.findall(r'^PLAN SHA-256: ([0-9a-f]{64})$', output, re.MULTILINE)
+        self.assertEqual(len(digests), 1)
+        return str(digests[0])
+
+    def approve(self) -> Path:
+        """Arm an apply of the plan as it is now: its previewed digest and a new journal path."""
+        self.args.check = False
+        self.args.approve_plan = self.digest()
+        self.applies += 1
+        journal = self.journals / f'journal-{self.applies}.json'
+        self.args.journal = journal
         self.args.apply = True
+        return journal
+
+    def journal(self) -> dict[str, Any]:
+        record: dict[str, Any] = json.loads(self.args.journal.read_text(encoding='utf-8'))
+        return record
+
+    def configure(self) -> None:
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.api.writes.clear()
         self.args.apply = False
@@ -187,18 +229,24 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.api.writes, [])
 
     def test_apply_verify_and_second_run_is_noop(self) -> None:
-        self.args.apply = True
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         # Five rulesets, vulnerability alerts, security updates, general settings.
         self.assertEqual([w[0] for w in self.api.writes], ['POST'] * 5 + ['PUT', 'PUT', 'PATCH'])
         self.assertEqual([w[1].rsplit('/', 1)[1] for w in self.api.writes[5:7]],
                          ['vulnerability-alerts', 'automated-security-fixes'])
+        record = self.journal()
+        self.assertEqual([(w['method'], w['status']) for w in record['writes']],
+                         [(method, 'done') for method, _, _ in self.api.writes])
+        self.assertEqual(record['readback'], 'VERIFIED')
         self.api.writes.clear()
+        # The same plan is stale once applied: the second apply approves the empty one.
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.assertEqual(self.api.writes, [])
 
     def test_failed_check_blocks_all_writes(self) -> None:
-        self.args.apply = True
+        self.approve()
         self.api.green = False
         with self.assertRaisesRegex(setup.SetupError, 'has not succeeded'):
             self.run_setup()
@@ -233,7 +281,7 @@ class SetupTests(unittest.TestCase):
                 self.assertEqual(code, 1)
                 self.assertIn(f'DIFF setting {key}: observed {json.dumps(not configured)}, '
                               f'configured {json.dumps(configured)}', output)
-                self.args.check, self.args.apply = False, True
+                self.approve()
                 self.assertEqual(self.run_setup(), 0)
                 self.assertEqual(self.api.writes, [('PATCH', REPO, {key: configured})])
                 self.args.apply = False
@@ -242,7 +290,7 @@ class SetupTests(unittest.TestCase):
         # The fake refuses a ruleset that allows a disabled merge method, and branch
         # cleanup before the release branches are protected, as the order requires.
         self.api.repo.update(allow_merge_commit=False, allow_squash_merge=False)
-        self.args.apply = True
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         methods = [(method, endpoint.removeprefix(REPO)) for method, endpoint, _ in self.api.writes]
         self.assertEqual(methods, [('PATCH', '')] + [('POST', '/rulesets')] * 5
@@ -273,7 +321,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('DIFF visibility: observed private, configured public (never changed by this tool; '
                       'see docs/repo_governance/DISTRIBUTION.md)', output)
-        self.args.check, self.args.apply = False, True
+        self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'never changes visibility.*DISTRIBUTION.md'):
             self.run_setup()
         self.assertEqual(self.api.writes, [])
@@ -339,7 +387,7 @@ class SetupTests(unittest.TestCase):
         def keep_one(config: dict[str, Any]) -> None:
             config['rulesets'] = config['rulesets'][:1]
         self.use_config(keep_one)
-        self.args.apply = True
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.assertEqual(len(self.api.rules), 1)
 
@@ -364,28 +412,28 @@ class SetupTests(unittest.TestCase):
 
     def test_a_hidden_bypass_list_is_unknown_not_verified(self) -> None:
         self.configure()
-        # Someone adds a bypass actor that a token without write access cannot see.
-        self.api.rules[0]['bypass_actors'] = [{'actor_id': 5, 'actor_type': 'RepositoryRole',
-                                               'bypass_mode': 'always'}]
+        # Someone adds a bypass actor that a token without write access cannot see,
+        # to the one ruleset that no other configured ruleset covers.
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        main['bypass_actors'] = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
         self.api.repo['permissions']['admin'] = False
-        name = self.api.rules[0]['name']
         self.args.check = True
         with tempfile.TemporaryDirectory() as directory:
             self.args.evidence = Path(directory) / 'evidence.json'
             code, output = self.run_output()
             record = json.loads(self.args.evidence.read_text(encoding='utf-8'))
         self.assertEqual(code, 1)
-        self.assertIn(f'DIFF ruleset "{name}" (1) bypass_actors: not reported '
+        self.assertIn(f'DIFF ruleset "Protect main" ({main["id"]}) bypass_actors: not reported '
                       '(needs write access to the ruleset)', output)
         self.assertEqual(record['result'], 'DRIFT')
-        self.assertEqual(next(r for r in record['rulesets'] if r['name'] == name)['status'], 'unknown')
+        self.assertEqual(next(r for r in record['rulesets'] if r['name'] == 'Protect main')['status'], 'unknown')
         self.assertEqual(self.api.writes, [])
         # With write access the bypass actor is visible and differs.
         self.api.repo['permissions']['admin'] = True
         self.args.evidence = None
         code, output = self.run_output()
         self.assertEqual(code, 1)
-        self.assertIn(f'DIFF ruleset "{name}" (1) bypass_actors: observed', output)
+        self.assertIn(f'DIFF ruleset "Protect main" ({main["id"]}) bypass_actors: observed', output)
 
     def test_apply_refuses_a_ruleset_it_cannot_verify(self) -> None:
         report = {'visibility': {'matches': True}, 'settings': [], 'security': [],
@@ -406,7 +454,7 @@ class SetupTests(unittest.TestCase):
                       output)
 
     def test_non_admin_blocks_all_writes(self) -> None:
-        self.args.apply = True
+        self.approve()
         self.api.repo['permissions']['admin'] = False
         with self.assertRaisesRegex(setup.SetupError, 'Administrative'):
             self.run_setup()
@@ -416,7 +464,7 @@ class SetupTests(unittest.TestCase):
         self.api.repo['archived'] = True
         self.args.check = True
         self.assertEqual(self.run_setup(), 1)
-        self.args.check, self.args.apply = False, True
+        self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'archived'):
             self.run_setup()
         self.assertEqual(self.api.writes, [])
@@ -444,7 +492,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn('DIFF security private_vulnerability_reporting: observed null, configured true '
                       '[GET private-vulnerability-reporting (HTTP 403: unreadable)]', output)
-        self.args.check, self.args.apply = False, True
+        self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'unknown: private_vulnerability_reporting'):
             self.run_setup()
         self.assertEqual(self.api.writes, [])
@@ -492,7 +540,7 @@ class SetupTests(unittest.TestCase):
         rule = copy.deepcopy(setup.load_config(setup.CONFIG)['rulesets'][0])
         rule.update(id=1, source_type='Repository', enforcement='disabled')
         self.api.rules = [rule]
-        self.args.apply = True
+        self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'named ruleset differs'):
             self.run_setup()
         self.assertEqual(self.api.writes, [])
@@ -501,7 +549,7 @@ class SetupTests(unittest.TestCase):
 
     def test_unrelated_rules_are_preserved(self) -> None:
         self.api.rules = [{'name': 'Other rule', 'id': 10, 'source_type': 'Repository'}]
-        self.args.apply = True
+        self.approve()
         self.run_setup()
         self.assertEqual(self.api.rules[0]['name'], 'Other rule')
 
@@ -527,17 +575,18 @@ class SetupTests(unittest.TestCase):
 
     def test_public_repository_enables_vulnerability_reporting_once(self) -> None:
         self.api.repo['visibility'] = 'public'
-        self.args.apply = True
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.assertIn(('PUT', 'repos/example/project/private-vulnerability-reporting', None),
                       self.api.writes)
         self.assertEqual(self.api.writes[-1][0], 'PATCH')
         self.api.writes.clear()
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.assertEqual(self.api.writes, [])
 
     def test_private_repository_skips_public_only_features_with_a_note(self) -> None:
-        self.args.apply = True
+        self.approve()
         code, output = self.run_output()
         self.assertEqual(code, 0)
         self.assertIn('private_vulnerability_reporting, secret_scanning, '
@@ -547,7 +596,7 @@ class SetupTests(unittest.TestCase):
 
     def test_public_repository_enables_secret_scanning_and_push_protection(self) -> None:
         self.api.repo['visibility'] = 'public'
-        self.args.apply = True
+        self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.assertIn(('PATCH', 'repos/example/project',
                        {'security_and_analysis': {'secret_scanning': {'status': 'enabled'},
@@ -592,7 +641,7 @@ class SetupTests(unittest.TestCase):
     def test_apply_that_leaves_updates_paused_fails_the_readback(self) -> None:
         self.configure()
         self.api.paused = True
-        self.args.apply = True
+        self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'Read-back'):
             self.run_setup()
         self.assertEqual([w[:2] for w in self.api.writes],
@@ -624,7 +673,7 @@ class SetupTests(unittest.TestCase):
         self.assertIn('DIFF actions default_workflow_permissions: observed "write", configured "read" '
                       '[GET actions/permissions/workflow default_workflow_permissions]', output)
         self.assertIn('DIFF actions retention_days: observed 30, configured 90', output)
-        self.args.check, self.args.apply = False, True
+        self.approve()
         with self.assertRaises(setup.SetupError) as caught:
             self.run_setup()
         message = str(caught.exception)
@@ -636,7 +685,7 @@ class SetupTests(unittest.TestCase):
 
     def test_apply_writes_the_rest_then_names_the_actions_settings(self) -> None:
         self.api.actions['actions/permissions']['sha_pinning_required'] = False
-        self.args.apply = True
+        self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'Read-back.*sha_pinning_required to true'):
             self.run_setup()
         self.assertEqual(len(self.api.writes), 8)
@@ -698,7 +747,7 @@ class SetupTests(unittest.TestCase):
             self.assertIn('| `default_workflow_permissions` | read | read |', drift)
             self.assertIn('| `fork_pr_approval_policy` | all_external_contributors | '
                           'not applied (public repositories only) |', drift)
-            self.args.check, self.args.apply = False, True
+            self.approve()
             self.assertEqual(self.run_setup(), 0)
             verified = self.args.report.read_text(encoding='utf-8')
             self.assertIn('- Result: **VERIFIED**', verified)
@@ -722,7 +771,7 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(list(drift), [
                 'schema_version', 'record', 'checked_at', 'tool', 'mode', 'repository', 'default_branch',
                 'configuration', 'result', 'visibility', 'settings', 'security', 'actions', 'rulesets',
-                'unmanaged_rulesets', 'inherited_rulesets', 'planned_changes', 'scope'])
+                'unmanaged_rulesets', 'inherited_rulesets', 'planned_changes', 'plan_sha256', 'scope'])
             self.assertEqual({key: drift[key] for key in ('schema_version', 'record', 'checked_at', 'tool',
                                                           'mode', 'repository', 'default_branch', 'result')},
                              {'schema_version': 1, 'record': 'repository-settings-evidence',
@@ -747,7 +796,7 @@ class SetupTests(unittest.TestCase):
             self.assertNotIn('"rules"', json.dumps(drift['planned_changes']))
             self.assertIn('Only the settings', drift['scope'])
 
-            self.args.check, self.args.apply = False, True
+            self.approve()
             self.assertEqual(self.run_setup(), 0)
             verified = json.loads(written.read_text(encoding='utf-8'))
             self.assertEqual((verified['mode'], verified['result'], verified['planned_changes']),
@@ -788,10 +837,11 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(self.api.writes)
 
     def test_readback_detects_ignored_changes(self) -> None:
-        self.args.apply = True
+        self.approve()
         self.api.ignore_patch = True
         with self.assertRaisesRegex(setup.SetupError, 'Read-back verification failed; the differences'):
             self.run_setup()
+        self.assertEqual(self.journal()['readback'], 'DRIFT')
 
     def test_pagination_reads_beyond_first_page(self) -> None:
         calls: list[str] = []
@@ -832,6 +882,314 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(caught.exception.status, '403')
         self.assertIn('HTTP 403', str(caught.exception))
         self.assertNotIn('secret token', str(caught.exception))
+
+    # Apply only against an approved plan digest, with a journal before each write (#352).
+
+    def test_plan_digest_is_deterministic_and_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            self.args.evidence = Path(directory) / 'evidence.json'
+            self.args.report = Path(directory) / 'settings.md'
+            first = self.digest()
+            # Reading the same unchanged repository again gives the same digest, in --check too.
+            self.assertEqual(self.digest(), first)
+            self.args.check = True
+            code, output = self.run_output()
+            self.assertEqual(code, 1)
+            self.assertIn(f'\nPLAN SHA-256: {first}\n', output)
+            self.assertLess(output.index(f'POST {REPO}/rulesets'), output.index('PLAN SHA-256'))
+            record = json.loads(self.args.evidence.read_text(encoding='utf-8'))
+            self.assertEqual(record['plan_sha256'], first)
+            self.assertIn(f'- Plan SHA-256: `{first}`', self.args.report.read_text(encoding='utf-8'))
+        self.args.check, self.args.evidence, self.args.report = False, None, None
+        # A changed managed value, then a changed configuration, each change the digest.
+        self.api.repo['has_wiki'] = False
+        changed = self.digest()
+        self.assertNotEqual(changed, first)
+        self.use_config(lambda config: config['repository'].update(has_wiki=False))
+        self.assertNotEqual(self.digest(), changed)
+
+    def test_apply_requires_an_approved_plan_and_a_journal_at_the_parser(self) -> None:
+        digest = '0' * 64
+        cases = [
+            (['--apply'], '--apply requires --approve-plan SHA256 and --journal PATH'),
+            (['--apply', '--approve-plan', digest], '--apply requires --approve-plan'),
+            (['--apply', '--journal', 'journal.json'], '--apply requires --approve-plan'),
+            (['--approve-plan', digest], '--approve-plan requires --apply'),
+            (['--check', '--journal', 'journal.json'], '--journal requires --apply'),
+            (['--apply', '--approve-plan', 'abc', '--journal', 'journal.json'], '64 hexadecimal digits'),
+        ]
+        for options, message in cases:
+            with self.subTest(options=options):
+                stderr = io.StringIO()
+                with patch.object(sys, 'argv', ['setup_repository.py', '--repo', 'example/project', *options]), \
+                        patch.object(setup, 'run', side_effect=AssertionError('run was called')), \
+                        redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
+                    setup.main()
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn(message, stderr.getvalue())
+
+    def test_a_stale_or_wrong_digest_is_refused_before_any_write(self) -> None:
+        journal = self.approve()
+        self.args.approve_plan = '0' * 64
+        with self.assertRaisesRegex(setup.SetupError, 'changed since the reviewed plan.*Run preview again'):
+            self.run_setup()
+        self.assertEqual(self.api.writes, [])
+        self.assertFalse(journal.exists())
+        # The digest preview printed is accepted in either letter case.
+        self.args.approve_plan = self.digest().upper()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(len(self.api.writes), 8)
+
+    def test_a_repository_changed_since_the_plan_is_refused_before_any_write(self) -> None:
+        journal = self.approve()
+        # A managed value changes between the reviewed plan and the apply.
+        self.api.repo['has_wiki'] = False
+        with self.assertRaisesRegex(setup.SetupError, 'repository or the configuration changed'):
+            self.run_setup()
+        self.assertEqual(self.api.writes, [])
+        self.assertFalse(journal.exists())
+        self.api.repo['has_wiki'] = True
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(len(self.api.writes), 8)
+
+    def test_the_journal_exists_before_a_failing_write_and_records_it(self) -> None:
+        journal = self.approve()
+        self.api.fail_at = 2
+        self.api.journal = journal
+        with self.assertRaisesRegex(setup.ApiError, 'HTTP 500'):
+            self.run_setup()
+        self.assertEqual(self.api.journal_seen, [True, True])
+        self.assertEqual([w[0] for w in self.api.writes], ['POST'])
+        record = self.journal()
+        self.assertEqual(list(record), ['record', 'tool', 'plan_sha256', 'repository',
+                                        'configuration_sha256', 'started_at', 'writes', 'readback'])
+        self.assertEqual(record['record'], 'repository-settings-journal')
+        self.assertEqual(record['plan_sha256'], self.args.approve_plan)
+        self.assertEqual(record['repository'], 'example/project')
+        self.assertEqual(record['configuration_sha256'], hashlib.sha256(setup.CONFIG.read_bytes()).hexdigest())
+        self.assertEqual(record['started_at'], '2026-11-06T09:30:00Z')
+        self.assertEqual([w['status'] for w in record['writes']], ['done', 'failed'] + ['pending'] * 6)
+        self.assertEqual(record['writes'][1]['method'], 'POST')
+        self.assertEqual(record['writes'][1]['endpoint'], REPO + '/rulesets')
+        self.assertIn('HTTP 500', record['writes'][1]['error'])
+        self.assertNotIn('error', record['writes'][0])
+        self.assertIsNone(record['readback'])
+        # No temporary file is left beside the journal.
+        self.assertEqual([p.name for p in journal.parent.iterdir()], [journal.name])
+
+    def test_an_existing_journal_path_is_refused_before_any_write(self) -> None:
+        journal = self.approve()
+        journal.write_text('{}', encoding='utf-8')
+        with self.assertRaisesRegex(setup.SetupError, 'exists; choose a new path'):
+            self.run_setup()
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(journal.read_text(encoding='utf-8'), '{}')
+
+    def test_an_unchanged_second_apply_writes_nothing_and_journals(self) -> None:
+        self.configure()
+        journal = self.approve()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.api.writes, [])
+        self.assertTrue(journal.exists())
+        record = self.journal()
+        self.assertEqual((record['writes'], record['readback']), ([], 'VERIFIED'))
+        self.assertEqual(record['plan_sha256'], self.args.approve_plan)
+
+    # A configured ruleset covered by content, not only by name (#353).
+
+    def rename(self, name: str, new: str) -> dict[str, Any]:
+        ruleset = next(r for r in self.api.rules if r['name'] == name)
+        ruleset['name'] = new
+        return ruleset
+
+    def ruleset_row(self, name: str) -> dict[str, Any]:
+        config = setup.load_config(self.args.config)
+        report = setup.assess(config, setup.observe(self.api, 'example/project', config))
+        row: dict[str, Any] = next(r for r in report['rulesets'] if r['name'] == name)
+        return row
+
+    def test_a_differently_named_ruleset_that_covers_a_configured_one_needs_no_write(self) -> None:
+        self.configure()
+        history = self.rename('Protect traffic history', 'History')
+        self.args.check = True
+        with tempfile.TemporaryDirectory() as directory:
+            self.args.evidence = Path(directory) / 'evidence.json'
+            self.args.report = Path(directory) / 'settings.md'
+            code, output = self.run_output()
+            evidence = json.loads(self.args.evidence.read_text(encoding='utf-8'))
+            record = self.args.report.read_text(encoding='utf-8')
+        self.assertEqual(code, 0)
+        self.assertIn('NOTE: ruleset "Protect traffic history" is covered by "History": every configured '
+                      'rule is enforced at least as strictly there, so no write is planned for it.', output)
+        self.assertNotIn('DIFF', output)
+        self.assertIn('unmanaged ruleset "History"', output)
+        row = next(r for r in evidence['rulesets'] if r['name'] == 'Protect traffic history')
+        self.assertEqual(row, {'name': 'Protect traffic history', 'id': None, 'status': 'covered',
+                               'differences': [], 'covered_by': ['History']})
+        self.assertEqual((evidence['result'], evidence['planned_changes']), ('VERIFIED', []))
+        self.assertIn('| Protect traffic history | — | covered by "History" |', record)
+        self.args.evidence = self.args.report = None
+        self.approve()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(history['name'], 'History')
+
+    def test_coverage_follows_all_refs_and_the_default_branch(self) -> None:
+        self.configure()
+        default = self.rename('Protect main', 'Default')
+        self.use_config(lambda c: next(r for r in c['rulesets'] if r['name'] == 'Protect main')
+                        ['conditions']['ref_name'].update(include=['refs/heads/main']))
+        # The live ~DEFAULT_BRANCH covers the configured refs/heads/main while main is the default.
+        self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Default'])
+        self.api.repo['default_branch'] = 'trunk'
+        self.assertEqual(self.ruleset_row('Protect main')['status'], 'missing')
+        default['conditions']['ref_name']['include'] = ['~ALL']
+        self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Default'])
+        default['conditions']['ref_name']['include'] = ['refs/heads/develop', 'refs/heads/main']
+        self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Default'])
+        default['conditions']['ref_name']['include'] = ['refs/heads/develop']
+        self.assertEqual(self.ruleset_row('Protect main')['status'], 'missing')
+
+    def test_rulesets_that_together_cover_a_configured_one_count(self) -> None:
+        self.configure()
+        history = self.rename('Protect traffic history', 'No deletion')
+        history['rules'] = [{'type': 'deletion'}]
+        self.assertEqual(self.ruleset_row('Protect traffic history')['status'], 'missing')
+        self.api.rules.append({
+            'name': 'Fast forward only', 'id': 9, 'source_type': 'Repository', 'target': 'branch',
+            'enforcement': 'active', 'bypass_actors': [], 'rules': [{'type': 'non_fast_forward'}],
+            'conditions': {'ref_name': {'include': ['refs/heads/traffic-history'], 'exclude': []}}})
+        row = self.ruleset_row('Protect traffic history')
+        self.assertEqual((row['status'], row['covered_by']), ('covered', ['Fast forward only', 'No deletion']))
+        self.approve()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.api.writes, [])
+
+    def test_a_named_ruleset_with_stronger_parameters_is_covered_not_differs(self) -> None:
+        self.configure()
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        rules = {rule['type']: rule for rule in main['rules']}
+        rules['pull_request']['parameters']['required_approving_review_count'] = 1
+        rules['required_status_checks']['parameters']['required_status_checks'].append(
+            {'context': 'Lint', 'integration_id': 15368})
+        self.args.check = True
+        code, output = self.run_output()
+        self.assertEqual(code, 0)
+        self.assertIn('NOTE: ruleset "Protect main" is covered by "Protect main"', output)
+        self.assertNotIn('DIFF', output)
+        row = self.ruleset_row('Protect main')
+        self.assertEqual((row['status'], row['covered_by'], row['id']), ('covered', ['Protect main'], main['id']))
+        self.assertTrue(any('required_approving_review_count' in line for line in row['differences']))
+        self.approve()
+        self.args.update_existing = True
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(rules['pull_request']['parameters']['required_approving_review_count'], 1)
+
+    def test_a_candidate_with_bypass_actors_or_excluded_refs_never_counts(self) -> None:
+        self.configure()
+        history = self.rename('Protect traffic history', 'History')
+        bypass = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        cases: dict[str, Callable[[], Any]] = {
+            'bypass actors': lambda: history.update(bypass_actors=bypass),
+            'excluded refs': lambda: history['conditions']['ref_name'].update(exclude=['refs/heads/x']),
+            'bypass list not reported': lambda: history.pop('bypass_actors'),
+            'not active': lambda: history.update(enforcement='evaluate'),
+            'other target': lambda: history.update(target='tag'),
+        }
+        for case, change in cases.items():
+            with self.subTest(case=case):
+                saved = copy.deepcopy(history)
+                change()
+                self.assertEqual(self.ruleset_row('Protect traffic history')['status'], 'missing')
+                history.clear()
+                history.update(saved)
+        # The named ruleset with stronger parameters and a bypass actor differs, as before.
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        next(rule for rule in main['rules'] if rule['type'] == 'pull_request')['parameters'][
+            'required_approving_review_count'] = 1
+        main['bypass_actors'] = bypass
+        self.args.check = True
+        code, output = self.run_output()
+        self.assertEqual(code, 1)
+        self.assertEqual(self.ruleset_row('Protect main')['status'], 'differs')
+        self.assertIn(f'DIFF ruleset "Protect main" ({main["id"]}) bypass_actors: observed', output)
+        self.assertIn(f'PUT {REPO}/rulesets/{main["id"]}', output)
+
+    def test_coverage_is_judged_against_the_rulesets_the_plan_leaves(self) -> None:
+        # Live "Protect main" reaches every branch and differs from the configuration, so
+        # the plan replaces it with the default-branch definition: the live reach is not
+        # coverage for a missing "Protect traffic history", which must be created, first.
+        self.configure()
+        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        main['conditions']['ref_name']['include'] = ['~ALL']
+        next(rule for rule in main['rules'] if rule['type'] == 'pull_request')['parameters'][
+            'required_review_thread_resolution'] = False
+        self.assertEqual(self.ruleset_row('Protect main')['status'], 'differs')
+        history = self.ruleset_row('Protect traffic history')
+        self.assertEqual((history['status'], history['covered_by']), ('missing', []))
+        self.args.update_existing = True
+        self.approve()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual([(method, endpoint) for method, endpoint, _ in self.api.writes],
+                         [('POST', f'{REPO}/rulesets'), ('PUT', f'{REPO}/rulesets/{main["id"]}')])
+        self.assertEqual(self.api.writes[0][2]['name'], 'Protect traffic history')
+        # Once the plan would leave main matching, a live reach it keeps does cover.
+        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        main['conditions']['ref_name']['include'] = ['~ALL']
+        self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Protect main'])
+        self.assertEqual(self.ruleset_row('Protect traffic history')['covered_by'], ['Protect main'])
+
+    def test_a_weaker_named_ruleset_is_replaced_whatever_else_enforces_it(self) -> None:
+        self.configure()
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        next(rule for rule in main['rules'] if rule['type'] == 'pull_request')['parameters'][
+            'required_review_thread_resolution'] = False
+        other = copy.deepcopy(next(r for r in setup.load_config(self.args.config)['rulesets']
+                                   if r['name'] == 'Protect main'))
+        other.update(name='Every branch', id=77, source_type='Repository')
+        other['conditions']['ref_name']['include'] = ['~ALL']
+        self.api.rules.append(other)
+        row = self.ruleset_row('Protect main')
+        self.assertEqual((row['status'], row['covered_by']), ('differs', []))
+        self.args.check = True
+        code, output = self.run_output()
+        self.assertEqual(code, 1)
+        self.assertIn(f'PUT {REPO}/rulesets/{main["id"]}', output)
+
+    def test_a_weaker_ruleset_does_not_cover(self) -> None:
+        self.configure()
+        main = self.rename('Protect main', 'Main')
+        tags = self.rename('Protect release tags', 'Tags')
+        rules = {rule['type']: rule for rule in main['rules']}
+        cases: dict[str, Callable[[], Any]] = {
+            'more merge methods': lambda: rules['pull_request']['parameters'].update(
+                allowed_merge_methods=['merge', 'squash']),
+            'a false option': lambda: rules['pull_request']['parameters'].update(
+                required_review_thread_resolution=False),
+            'no strict policy': lambda: rules['required_status_checks']['parameters'].update(
+                strict_required_status_checks_policy=False),
+            'not enforced on create': lambda: rules['required_status_checks']['parameters'].update(
+                do_not_enforce_on_create=True),
+            'a missing check': lambda: rules['required_status_checks']['parameters'].update(
+                required_status_checks=[]),
+            'a missing rule': lambda: main['rules'].remove(rules['deletion']),
+        }
+        for case, change in cases.items():
+            with self.subTest(case=case):
+                saved = copy.deepcopy(main)
+                change()
+                self.assertEqual(self.ruleset_row('Protect main')['status'], 'missing')
+                main.clear()
+                main.update(saved)
+                rules = {rule['type']: rule for rule in main['rules']}
+        self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Main'])
+        self.assertEqual(self.ruleset_row('Protect release tags')['covered_by'], ['Tags'])
+        next(rule for rule in tags['rules'] if rule['type'] == 'update')['parameters'] = {
+            'update_allows_fetch_and_merge': True}
+        self.assertEqual(self.ruleset_row('Protect release tags')['status'], 'missing')
 
 
 class VersionGuardTests(unittest.TestCase):
