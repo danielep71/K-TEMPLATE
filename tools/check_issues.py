@@ -206,7 +206,9 @@ def audit(issues: Sequence[Issue], states: Mapping[int, str], repository: str,
 
 
 def catalogue_labels(root: Path) -> set[str]:
-    # Use the same schema validator as synchronization; never silently ignore overlays.
+    """The resolved catalogue: the core labels plus those of every selected overlay."""
+    # Use the same schema validator as synchronization, so that an unknown or
+    # duplicated overlay selection is refused here too, never silently ignored.
     result = subprocess.run(
         ["node", str(root / ".github/scripts/labels-sync.mjs"), "--mode", "validate",
          "--manifest", str(root / ".github/labels.json")],
@@ -215,7 +217,8 @@ def catalogue_labels(root: Path) -> set[str]:
     if result.returncode:
         raise ValueError(result.stderr.strip() or result.stdout.strip())
     data = json.loads((root / ".github" / "labels.json").read_text(encoding="utf-8"))
-    return {str(label["name"]) for label in data["labels"]}
+    sections = [data["core"], *(data["overlays"][name] for name in data["selected_overlays"])]
+    return {str(label["name"]) for section in sections for label in section}
 
 
 def configured_assignee(root: Path) -> str:

@@ -397,6 +397,17 @@ milestones and their pull requests.
   the protection options that default to `false`. It states one failure
   behaviour: no new result, the result areas cleared and marked `FAILED`
   (#118, #286, #301, #319).
+- The label catalogue `.github/labels.json` (schema 3) has a `core` list and
+  optional `overlays`: named label sets that `selected_overlays` enables, for
+  example one per regulatory regime in a generated repository. Synchronization,
+  drift detection and the triage check resolve the core plus the selected
+  overlays, refuse an unknown or duplicated selection or a name repeated across
+  the core and an overlay, and show the core, overlay, selection and resolved
+  counts; the template defines no overlay, so its live labels are unchanged.
+  `labels-sync.mjs --mode plan --plan-output PATH` writes the planned changes
+  as JSON, and every drift report, live or on a fixture, is cross-checked
+  against that plan on the same snapshot: the run fails and the evidence
+  carries both plans under `cross_check` if they differ (#354, #355).
 
 ### Changed
 

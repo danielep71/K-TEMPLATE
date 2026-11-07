@@ -2,14 +2,14 @@
 
 ![Labels](https://img.shields.io/badge/labels-20-1D76DB)
 
-This repository defines 20 issue labels, each with a name, description, and colour. `.github/labels.json` is authoritative; edit it through a pull request. `prune: true` deletes live labels outside the catalogue, but only unused ones. Before it changes anything, synchronization checks every label it would delete against all issues and pull requests, open and closed. It stops if one still carries the label. A name that contains a comma cannot be passed to the API's label filter, so for that name it reads the labels of every issue and pull request, up to 10,000, and stops if a response is malformed or the limit is reached. Remove a label that is still used from its issues and pull requests, or add it to the catalogue, then rerun. A dry run, `node .github/scripts/labels-sync.mjs --mode reconcile --dry-run`, changes nothing and makes no such check: it previews the plan, including the deletion of a label still in use. `tests/test_labels_sync.py` runs both against a local fake API.
+This repository defines 20 issue labels, each with a name, description, and colour. `.github/labels.json` is authoritative; edit it through a pull request. Its catalogue has a `core` list and optional `overlays`: named label sets that `selected_overlays` enables. Synchronization and drift detection resolve the core plus the selected overlays; every name is unique across the core and every overlay, and an unknown or duplicated selection is a validation error. In this repository the overlays are empty and none is selected, so the resolved catalogue is the core. `prune: true` deletes live labels outside the catalogue, but only unused ones. Before it changes anything, synchronization checks every label it would delete against all issues and pull requests, open and closed. It stops if one still carries the label. A name that contains a comma cannot be passed to the API's label filter, so for that name it reads the labels of every issue and pull request, up to 10,000, and stops if a response is malformed or the limit is reached. Remove a label that is still used from its issues and pull requests, or add it to the catalogue, then rerun. A dry run, `node .github/scripts/labels-sync.mjs --mode reconcile --dry-run`, changes nothing and makes no such check: it previews the plan, including the deletion of a label still in use. `tests/test_labels_sync.py` runs both against a local fake API.
 
 ## ⚙️ Automation
 
 | Workflow | Purpose |
 | --- | --- |
 | Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Refuses to delete a label in use. Verifies the exact live result. |
-| Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. |
+| Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. Each report is cross-checked against the reconciler's plan on the same snapshot: the script writes the live labels it read to a temporary file, runs `labels-sync.mjs --mode plan` on it, and fails (status `fail`) if the two plans differ; the evidence then carries both plans under `cross_check`. |
 | Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, target end date or dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; invalid labels; and inconsistent blocked status. |
 | Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. It reads each pull request again after the change and fails if the milestone is still set; its job summary lists each pull request and the milestone removed. If GitHub gives a pull-request run a read-only token, the run warns instead of failing, and the next daily or manual scan removes the milestone. It never checks out pull-request code. |
 | Dependabot (`.github/dependabot.yml`) | Opens weekly grouped pull requests for the SHA-pinned GitHub Actions, the hash-locked configuration parser, and the hash-locked Python quality tools, labelled `ci` and `P3` and assigned to me. Nothing merges automatically. |
@@ -19,7 +19,7 @@ Among these workflows, only synchronization has `issues: write` and only *Keep m
 ## 🚀 New repository
 
 1. Enable Actions and run **Sync issue labels** from the default branch. GitHub template creation copies files; run synchronization to establish the live labels.
-2. To add labels for a generated repository, such as one per regulatory regime, add them to the `labels` list in `.github/labels.json`, sorted case-insensitively by name, then add each one to the catalogue and usage tables below and update the label counts. **Repository integrity** checks all three.
+2. To add labels for a generated repository, add them as an overlay in `.github/labels.json`, such as one overlay per regulatory regime: an entry of `overlays` whose name maps to a label array sorted case-insensitively by name, with the same fields as the core. List the overlay's name in `selected_overlays`, sorted case-insensitively; an overlay that is not selected adds nothing. Then add each selected label to the catalogue and usage tables below and update the label counts, the badge included, to the resolved total. Leave the `core` list as it is. **Repository integrity** checks all three; `tools/initialize_repository.py` does not change the manifest, so the selection stays as you set it.
 3. My GitHub account, `danielep71`, is the assignee in the four issue forms (`assignees`) and in `.github/dependabot.yml`; the triage check reads it from `bug.yml`. If someone else maintains a generated repository, replace my account in those five files. **Repository integrity** fails if they disagree.
 4. Create project milestones with due dates, give each open issue exactly one priority, an open milestone, and a target end date before that milestone's due date, and assign it to me (or the account configured for a generated repository). Use `blocked` only for a named open prerequisite or `External condition:`. P1 is reserved for confirmed calculation bugs.
 5. Label validation runs on pull requests to any branch that change the label manifest, the synchronization script or its workflow. Live synchronization runs only on the current default branch, including after a rename.
@@ -108,7 +108,7 @@ Close for another reason (duplicate, not planned, or superseded) only with an ex
 
 ## 🎨 Catalogue
 
-The table below lists the descriptions defined in `.github/labels.json`, which synchronization uses as its source of truth.
+The table below lists the descriptions defined in `.github/labels.json`, which synchronization uses as its source of truth: the `core` list plus every selected overlay.
 
 | Label | Colour | Description |
 | --- | --- | --- |
@@ -147,4 +147,4 @@ To audit an export instead, pass a JSON array of issues and pull requests, open 
 python tools/check_issues.py --input issues.json --repo-name OWNER/REPOSITORY
 ```
 
-Triage accepts only the labels defined in `.github/labels.json`.
+Triage accepts only the labels that `.github/labels.json` resolves: the core plus the selected overlays.
