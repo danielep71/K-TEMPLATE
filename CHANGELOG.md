@@ -397,6 +397,17 @@ milestones and their pull requests.
   the protection options that default to `false`. It states one failure
   behaviour: no new result, the result areas cleared and marked `FAILED`
   (#118, #286, #301, #319).
+- The label catalogue `.github/labels.json` (schema 3) has a `core` list and
+  optional `overlays`: named label sets that `selected_overlays` enables, for
+  example one per regulatory regime in a generated repository. Synchronization,
+  drift detection and the triage check resolve the core plus the selected
+  overlays, refuse an unknown or duplicated selection or a name repeated across
+  the core and an overlay, and show the core, overlay, selection and resolved
+  counts; the template defines no overlay, so its live labels are unchanged.
+  `labels-sync.mjs --mode plan --plan-output PATH` writes the planned changes
+  as JSON, and every drift report, live or on a fixture, is cross-checked
+  against that plan on the same snapshot: the run fails and the evidence
+  carries both plans under `cross_check` if they differ (#354, #355).
 
 ### Changed
 
@@ -418,7 +429,17 @@ milestones and their pull requests.
   JSON with the configuration's SHA-256, a `{date}` in the path becoming the
   UTC date. Five GitHub Actions settings are checked and never written: an
   apply whose read-back finds one different names it, to set in
-  **Settings → Actions → General** (#332, #333, #334, #335).
+  **Settings → Actions → General**. The plan ends with its SHA-256 over the
+  repository, the configuration, the observed managed values and the exact
+  writes, recorded in the evidence; `--apply` requires `--approve-plan` with
+  that digest, refusing a plan that changed since the review, and `--journal`
+  with a new path, written atomically before the first write and after each,
+  with each write's status and the read-back result. A configured ruleset
+  with no ruleset of its name that active rulesets without bypass actors or
+  excluded refs enforce at least as strictly, under any names and as the
+  plan leaves them, is `covered`, as is a named one with stronger
+  parameters: not drift, and never written. Missing rulesets are created
+  before differing ones are replaced (#332, #333, #334, #335, #352, #353).
 - The label guide states the dependency-section syntax that **Issue
   triage** reads: an issue link or URL, an `External condition:` line in any
   letter case after an optional list bullet, and a pull request reference,

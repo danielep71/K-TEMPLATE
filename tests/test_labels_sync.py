@@ -74,8 +74,12 @@ def serve(api: FakeGitHub) -> ThreadingHTTPServer:
 @unittest.skipIf(NODE is None and not os.environ.get("GITHUB_ACTIONS"), "Node.js is not on PATH")
 class ReconcileOrderTests(unittest.TestCase):
     def setUp(self) -> None:
-        catalogue = json.loads(MANIFEST.read_text(encoding="utf-8"))["labels"]
-        self.assertTrue(json.loads(MANIFEST.read_text(encoding="utf-8"))["prune"])
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        self.assertTrue(manifest["prune"])
+        # The resolved catalogue: the core plus the labels of every selected overlay.
+        catalogue = list(manifest["core"])
+        for name in manifest["selected_overlays"]:
+            catalogue += manifest["overlays"][name]
         # Every catalogue label, plus one outside it that an issue still carries.
         live = [dict(label) for label in catalogue] + [
             {"name": "legacy", "color": "ABCDEF", "description": "outside the catalogue"}]
@@ -84,16 +88,40 @@ class ReconcileOrderTests(unittest.TestCase):
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
 
-    def run_script(self, *extra: str) -> subprocess.CompletedProcess[str]:
+    def run_script(self, *extra: str, manifest: Path = MANIFEST) -> subprocess.CompletedProcess[str]:
         with tempfile.TemporaryDirectory() as directory:
             env = {key: value for key, value in os.environ.items()
                    if key not in {"GITHUB_STEP_SUMMARY", "GITHUB_REPOSITORY"}}
             env.update(GITHUB_API_URL=f"http://127.0.0.1:{self.server.server_port}",
                        GITHUB_TOKEN="test-token", HOME=directory)
             return subprocess.run(
-                [NODE or "node", str(SCRIPT), "--manifest", str(MANIFEST), "--mode", "reconcile",
+                [NODE or "node", str(SCRIPT), "--manifest", str(manifest), "--mode", "reconcile",
                  "--repository", "example/project", *extra],
                 capture_output=True, text=True, encoding="utf-8", env=env, timeout=60, check=False)
+
+    def test_a_selected_overlay_is_reconciled_with_the_core(self) -> None:
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        manifest["overlays"] = {"regime": [
+            {"name": "zz-regime", "color": "ABCDEF", "description": "overlay label"}]}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "labels.json"
+            manifest["selected_overlays"] = ["regime"]
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            selected = self.run_script("--dry-run", manifest=path)
+            manifest["selected_overlays"] = []
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            unselected = self.run_script("--dry-run", manifest=path)
+        self.assertEqual(selected.returncode, 0, selected.stderr)
+        self.assertIn("| create | `zz-regime` | missing live label |", selected.stdout)
+        core = len(manifest["core"])
+        self.assertIn(f"- Core / overlays defined / selected / resolved: **{core} / 1 / 1 / {core + 1}**",
+                      selected.stdout)
+        self.assertIn("- Selected overlays (1): `regime`", selected.stdout)
+        self.assertEqual(unselected.returncode, 0, unselected.stderr)
+        self.assertNotIn("zz-regime", unselected.stdout)
+        self.assertIn(f"- Core / overlays defined / selected / resolved: **{core} / 1 / 0 / {core}**",
+                      unselected.stdout)
+        self.assertEqual(self.api.writes, [])
 
     def test_a_dry_run_previews_the_deletion_of_a_label_in_use(self) -> None:
         result = self.run_script("--dry-run")
