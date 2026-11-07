@@ -484,11 +484,27 @@ def assess_ruleset(desired: dict[str, Json], state: dict[str, Json]) -> Row:
         if rule_spec(actual) != rule_spec(desired) and not found:
             found = ['rules: observed and configured differ']
         row.update(status='differs' if found else 'matches', differences=found)
-    if row['status'] != 'matches':
-        names = covered_by(desired, state['rulesets'], str(state['metadata'].get('default_branch', '')))
+    if row['status'] == 'differs' and actual is not None:
+        # The named ruleset counts for itself: stronger parameters cover the configured ones.
+        # A weaker one is replaced, whatever other rulesets enforce; a missing one is judged
+        # in assess() against the rulesets as the plan leaves them.
+        names = covered_by(desired, [actual], str(state['metadata'].get('default_branch', '')))
         if names:
             row.update(status='covered', covered_by=names)
     return row
+
+
+def effective_rulesets(config: dict[str, Json], state: dict[str, Json], rows: list[Row]) -> list[Json]:
+    """The live rulesets as the plan leaves them.
+
+    A named ruleset that the plan replaces counts with its configured definition, not
+    the live one: what the live definition enforces beyond the configuration is gone
+    once it is replaced, so it cannot cover a missing ruleset.
+    """
+    replaced = {row['name'] for row in rows if row['status'] == 'differs'}
+    desired = {r['name']: r for r in config['rulesets']}
+    return [dict(desired[live['name']], id=live.get('id')) if live.get('name') in replaced else live
+            for live in state['rulesets']]
 
 
 def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
@@ -507,6 +523,12 @@ def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
     actions = [compare('setting', key, config['actions'][key], state['actions'][key])
                for key in ACTIONS_SOURCES]
     rulesets = [assess_ruleset(desired, state) for desired in config['rulesets']]
+    effective = effective_rulesets(config, state, rulesets)
+    for row, desired in zip(rulesets, config['rulesets']):
+        if row['status'] == 'missing':
+            names = covered_by(desired, effective, str(metadata.get('default_branch', '')))
+            if names:
+                row.update(status='covered', covered_by=names)
     managed = {r['name'] for r in config['rulesets']}
     drift = (not visibility['matches']
              or any(row['matches'] is False for row in settings + security + actions)
@@ -543,7 +565,8 @@ def plan(config: dict[str, Json], report: dict[str, Json], repo: str) -> Plan:
     """The writes that would make the repository match. Visibility and Actions are never written.
 
     Order matters. The merge methods come first, because GitHub may reject a ruleset
-    that allows a merge method the repository disables. The other general settings
+    that allows a merge method the repository disables. Missing rulesets are created
+    before differing ones are replaced. The other general settings
     come last, after the rulesets and security features: automatic deletion of merged
     branches must not start before the deletion rulesets protect the retained branches.
     """
@@ -554,10 +577,13 @@ def plan(config: dict[str, Json], report: dict[str, Json], repo: str) -> Plan:
     if merge:
         steps.append(('PATCH', root, merge))
     desired = {r['name']: r for r in config['rulesets']}
+    # Missing rulesets are created before differing ones are replaced, so that a
+    # replacement never narrows protection that only the replaced definition gave.
     for row in report['rulesets']:
         if row['status'] == 'missing':
             steps.append(('POST', root + '/rulesets', desired[row['name']]))
-        elif row['status'] == 'differs':
+    for row in report['rulesets']:
+        if row['status'] == 'differs':
             steps.append(('PUT', f'{root}/rulesets/{row["id"]}', desired[row['name']]))
     analysis: dict[str, dict[str, str]] = {}
     for row in report['security']:

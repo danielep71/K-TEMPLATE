@@ -435,9 +435,11 @@ milestones and their pull requests.
   that digest, refusing a plan that changed since the review, and `--journal`
   with a new path, written atomically before the first write and after each,
   with each write's status and the read-back result. A configured ruleset
-  that active rulesets without bypass actors or excluded refs enforce at least
-  as strictly, under any names, is `covered`: not drift, and never written
-  (#332, #333, #334, #335, #352, #353).
+  with no ruleset of its name that active rulesets without bypass actors or
+  excluded refs enforce at least as strictly, under any names and as the
+  plan leaves them, is `covered`, as is a named one with stronger
+  parameters: not drift, and never written. Missing rulesets are created
+  before differing ones are replaced (#332, #333, #334, #335, #352, #353).
 - The label guide states the dependency-section syntax that **Issue
   triage** reads: an issue link or URL, an `External condition:` line in any
   letter case after an optional list bullet, and a pull request reference,

@@ -58,18 +58,22 @@ DIFF ruleset "Protect main" (12345) rules.pull_request.allowed_merge_methods: ob
 A security feature or Actions setting that GitHub does not report to your token is
 `null`, with the endpoint and status in brackets; it counts as drift.
 
-A configured ruleset that other active rulesets already enforce at least as
-strictly, under any names, is **covered**: the preview prints a `NOTE` line that
-names them instead of a `DIFF`, it is not drift, and nothing is planned or written
-for it. A ruleset counts towards coverage only when it has the same target, a
-reported and empty bypass list, no excluded refs and every configured ref in its
-include (`~ALL`, or `~DEFAULT_BRANCH` for the default branch); each configured
-rule must be present in one of them with parameters at least as strict: more
-required approvals, fewer allowed merge methods, a superset of the required
-checks. Different rules may be covered by different rulesets, and the ruleset with
-the configured name counts too, so a named ruleset with stronger parameters is
-`covered`, not `differs`. Otherwise the named ruleset is `matches`, `differs`,
-`missing` or `unknown`, as the `DIFF` lines show.
+A configured ruleset that no ruleset of its name exists for, but that other
+active rulesets already enforce at least as strictly, under any names, is
+**covered**: the preview prints a `NOTE` line that names them instead of a `DIFF`,
+it is not drift, and nothing is planned or written for it. A ruleset counts
+towards coverage only when it has the same target, a reported and empty bypass
+list, no excluded refs and every configured ref in its include (`~ALL`, or
+`~DEFAULT_BRANCH` for the default branch); each configured rule must be present in
+one of them with parameters at least as strict: more required approvals, fewer
+allowed merge methods, a superset of the required checks. Different rules may be
+covered by different rulesets. Coverage is judged on the rulesets as the plan
+leaves them: a named ruleset that the plan replaces counts with its configured
+definition, not with what its live definition enforces beyond it, and missing
+rulesets are created before differing ones are replaced. A named ruleset with
+stronger parameters covers itself and is `covered`, not `differs`; a weaker one
+is `differs` and is replaced whatever other rulesets enforce. Otherwise the named
+ruleset is `matches`, `missing` or `unknown`, as the `DIFF` lines show.
 
 The plan ends with its digest, `PLAN SHA-256: <hex>`: the SHA-256 of the
 repository name, the configuration's SHA-256, every observed managed value and
@@ -168,8 +172,8 @@ named ruleset that is `covered` is never replaced. Rulesets with other names and
 inherited organization rules remain unchanged. Duplicate managed names are rejected.
 
 When you adopt an existing repository, its rulesets may protect the same branches
-and tags under other names. One that enforces a configured ruleset at least as
-strictly covers it, and the preview says so. The preview also names every unmanaged
+and tags under other names. One that enforces a configured ruleset with no ruleset
+of its name at least as strictly covers it, and the preview says so. The preview also names every unmanaged
 ruleset with its target, ref patterns and enforcement. It stays active after
 apply, with its own rules and bypasses, so delete the ones that a managed ruleset
 replaces in **Settings → Rules → Rulesets**. The script never edits or deletes an

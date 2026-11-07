@@ -109,7 +109,8 @@ class FakeAPI:
         self.check_write_order(method, endpoint, payload)
         self.writes.append((method, endpoint, copy.deepcopy(payload)))
         if method == 'POST':
-            self.rules.append(dict(copy.deepcopy(payload), id=len(self.rules) + 1, source_type='Repository'))
+            self.rules.append(dict(copy.deepcopy(payload), source_type='Repository',
+                                   id=max((r['id'] for r in self.rules), default=0) + 1))
         elif method == 'PUT':
             i = int(endpoint.rsplit('/', 1)[1])
             self.rules = [dict(copy.deepcopy(payload), id=i, source_type='Repository') if r['id'] == i else r
@@ -1113,6 +1114,49 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(self.ruleset_row('Protect main')['status'], 'differs')
         self.assertIn(f'DIFF ruleset "Protect main" ({main["id"]}) bypass_actors: observed', output)
+        self.assertIn(f'PUT {REPO}/rulesets/{main["id"]}', output)
+
+    def test_coverage_is_judged_against_the_rulesets_the_plan_leaves(self) -> None:
+        # Live "Protect main" reaches every branch and differs from the configuration, so
+        # the plan replaces it with the default-branch definition: the live reach is not
+        # coverage for a missing "Protect traffic history", which must be created, first.
+        self.configure()
+        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        main['conditions']['ref_name']['include'] = ['~ALL']
+        next(rule for rule in main['rules'] if rule['type'] == 'pull_request')['parameters'][
+            'required_review_thread_resolution'] = False
+        self.assertEqual(self.ruleset_row('Protect main')['status'], 'differs')
+        history = self.ruleset_row('Protect traffic history')
+        self.assertEqual((history['status'], history['covered_by']), ('missing', []))
+        self.args.update_existing = True
+        self.approve()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual([(method, endpoint) for method, endpoint, _ in self.api.writes],
+                         [('POST', f'{REPO}/rulesets'), ('PUT', f'{REPO}/rulesets/{main["id"]}')])
+        self.assertEqual(self.api.writes[0][2]['name'], 'Protect traffic history')
+        # Once the plan would leave main matching, a live reach it keeps does cover.
+        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        main['conditions']['ref_name']['include'] = ['~ALL']
+        self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Protect main'])
+        self.assertEqual(self.ruleset_row('Protect traffic history')['covered_by'], ['Protect main'])
+
+    def test_a_weaker_named_ruleset_is_replaced_whatever_else_enforces_it(self) -> None:
+        self.configure()
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        next(rule for rule in main['rules'] if rule['type'] == 'pull_request')['parameters'][
+            'required_review_thread_resolution'] = False
+        other = copy.deepcopy(next(r for r in setup.load_config(self.args.config)['rulesets']
+                                   if r['name'] == 'Protect main'))
+        other.update(name='Every branch', id=77, source_type='Repository')
+        other['conditions']['ref_name']['include'] = ['~ALL']
+        self.api.rules.append(other)
+        row = self.ruleset_row('Protect main')
+        self.assertEqual((row['status'], row['covered_by']), ('differs', []))
+        self.args.check = True
+        code, output = self.run_output()
+        self.assertEqual(code, 1)
         self.assertIn(f'PUT {REPO}/rulesets/{main["id"]}', output)
 
     def test_a_weaker_ruleset_does_not_cover(self) -> None:
