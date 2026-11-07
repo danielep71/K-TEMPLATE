@@ -591,18 +591,31 @@ async function runSelfTest(manifestPath) {
   expectFailure(() => validateManifest(unsorted), /core must be sorted/);
 
   // Overlays: an overlay is a sorted label array; the selection resolves core plus the selected ones.
+  // The fixtures start from the core alone, so that the overlays a repository configures
+  // do not change what they assert; the configured catalogue is checked by its own selection.
+  const coreOnly = { ...structuredClone(baseline), overlays: {}, selected_overlays: [] };
+  const core = resolveDesired(coreOnly);
+  assert.deepEqual(core, [...manifest.core].sort((left, right) => compareNames(left.name, right.name)));
   const overlayLabel = { name: "zz-regime", color: "ABCDEF", description: "overlay label" };
   const secondLabel = { name: "zz-regime-review", color: "ABCDEF", description: "second overlay label" };
-  const overlaid = structuredClone(baseline);
+  const overlaid = structuredClone(coreOnly);
   overlaid.overlays = { regime: [overlayLabel, secondLabel], unused: [{ name: "zz-unused", color: "ABCDEF", description: "d" }] };
   overlaid.selected_overlays = ["regime"];
   const resolved = resolveDesired(overlaid);
-  assert.deepEqual(resolved, [...desired, overlayLabel, secondLabel], "resolved set is core plus the selected overlay");
-  assert.deepEqual(catalogueCounts(overlaid), { core: desired.length, overlays: 2, selected: 1, resolved: desired.length + 2 });
+  assert.deepEqual(resolved, [...core, overlayLabel, secondLabel], "resolved set is core plus the selected overlay");
+  assert.deepEqual(catalogueCounts(overlaid), { core: core.length, overlays: 2, selected: 1, resolved: core.length + 2 });
   const unselected = structuredClone(overlaid);
   unselected.selected_overlays = [];
-  assert.deepEqual(resolveDesired(unselected), desired, "an overlay that is not selected adds nothing");
-  assert.deepEqual(catalogueCounts(manifest), { core: desired.length, overlays: 0, selected: 0, resolved: desired.length });
+  assert.deepEqual(resolveDesired(unselected), core, "an overlay that is not selected adds nothing");
+  const configured = {
+    core: manifest.core.length,
+    overlays: Object.keys(manifest.overlays).length,
+    selected: manifest.selected_overlays.length,
+    resolved: desired.length
+  };
+  assert.deepEqual(catalogueCounts(manifest), configured, "counts follow the configured selection");
+  assert.equal(configured.resolved, configured.core
+    + manifest.selected_overlays.reduce((sum, name) => sum + manifest.overlays[name].length, 0));
 
   const unknownSelection = structuredClone(overlaid);
   unknownSelection.selected_overlays = ["missing"];
@@ -697,17 +710,19 @@ async function runSelfTest(manifestPath) {
   assert.match(failureSummary, /some changes may already be applied/);
   assert.match(summary, new RegExp(`Labels \\(${desired.length}\\):`));
   for (const label of desired) assert.ok(summary.includes(inlineCode(label.name)), label.name);
-  assert.match(summary, new RegExp(`Core / overlays defined / selected / resolved: \\*\\*${desired.length} / 0 / 0 / ${desired.length}\\*\\*`));
-  assert.match(summary, /Selected overlays \(0\): none/);
+  assert.ok(summary.includes(`Core / overlays defined / selected / resolved: **${configured.core} / `
+    + `${configured.overlays} / ${configured.selected} / ${configured.resolved}**`), summary);
+  assert.ok(summary.includes(`Selected overlays (${configured.selected}): ${configured.selected === 0
+    ? "none" : manifest.selected_overlays.map(name => inlineCode(name)).join(", ")}`), summary);
   assert.match(failureSummary, /Core \/ overlays defined \/ selected \/ resolved: \*\*unavailable\*\*/);
   const overlaidSummary = renderSummary({
     mode: "plan",
     manifest: validateManifest(overlaid),
     manifestPath: "fixture-labels.json",
     desiredLabels: resolved,
-    changes: planChanges(resolved, desired)
+    changes: planChanges(resolved, core)
   });
-  assert.match(overlaidSummary, new RegExp(`Core / overlays defined / selected / resolved: \\*\\*${desired.length} / 2 / 1 / ${desired.length + 2}\\*\\*`));
+  assert.match(overlaidSummary, new RegExp(`Core / overlays defined / selected / resolved: \\*\\*${core.length} / 2 / 1 / ${core.length + 2}\\*\\*`));
   assert.match(overlaidSummary, /Selected overlays \(1\): `regime`/);
   assert.ok(overlaidSummary.includes("| create | `zz-regime` | missing live label |"), overlaidSummary);
 
