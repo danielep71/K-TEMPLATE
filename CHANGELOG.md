@@ -424,11 +424,13 @@ milestones and their pull requests.
   letter case after an optional list bullet, and a pull request reference,
   which never counts as a prerequisite. A test reads its example as triage
   does (#329).
-- *Keep milestones issue-only* writes a job summary with its scope and each
-  pull request and milestone it removed, or says that nothing was removed.
+- *Keep milestones issue-only* reads each pull request again after removing
+  its milestone and fails if GitHub still reports one, then writes a job
+  summary with its scope and each pull request and milestone it removed, or
+  says that nothing was removed.
   When GitHub gives the run of one pull request a read-only token, it warns
   and passes, because the next daily or manual scan removes the milestone; a
-  scan still fails on any error (#328).
+  scan still fails on any error (#328, #345).
 - The **Traffic alert** job reads the `traffic-history` commit that its
   collection pushed, or merged onto when nothing changed, which the collect
   job outputs as `history-sha`, not the branch's current tip; it stops when
