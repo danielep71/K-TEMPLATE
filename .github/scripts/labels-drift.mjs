@@ -1,13 +1,21 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
-import { appendFile, mkdir, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { appendFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 
 // The synchronization script owns validation, planning and the GitHub client;
-// importing them keeps the drift report and the reconciler on one plan.
+// importing them keeps the drift report and the reconciler on one plan. The
+// cross-check then runs that script as a separate process, in plan mode on the
+// same live snapshot, and fails if the two plans differ.
 import {
   MAX_RETRY_DELAY_MS,
+  catalogueCounts,
   compareNames,
   inlineCode,
   listLiveLabels,
@@ -22,6 +30,8 @@ import {
 
 const TOOL_NAME = "Repository label drift";
 const DEFAULT_MANIFEST = ".github/labels.json";
+const DEFAULT_RECONCILER = fileURLToPath(new URL("./labels-sync.mjs", import.meta.url));
+const run = promisify(execFile);
 
 function parseArguments(argv) {
   const parsed = {
@@ -30,6 +40,7 @@ function parseArguments(argv) {
     repository: process.env.GITHUB_REPOSITORY || null,
     output: null,
     summary: null,
+    reconciler: DEFAULT_RECONCILER,
     selfTest: false
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -38,7 +49,7 @@ function parseArguments(argv) {
       parsed.selfTest = true;
       continue;
     }
-    if (["--manifest", "--live", "--repository", "--output", "--summary"].includes(argument)) {
+    if (["--manifest", "--live", "--repository", "--output", "--summary", "--reconciler"].includes(argument)) {
       const value = argv[index + 1];
       if (!value || value.startsWith("--")) throw new Error(`${argument} requires a value`);
       parsed[argument.slice(2)] = value;
@@ -74,14 +85,18 @@ function buildReport({ repository, manifestPath, manifest, desiredLabels, liveLa
     action,
     differences.filter(item => item.action === action).length
   ]));
+  const catalogue = catalogueCounts(manifest);
   return {
-    schema_version: 2,
+    schema_version: 3,
     tool: TOOL_NAME,
     status: differences.length === 0 ? "pass" : "drift",
     repository,
     manifest: manifestPath,
     prune: manifest.prune,
     counts: {
+      core: catalogue.core,
+      overlays: catalogue.overlays,
+      selected_overlays: catalogue.selected,
       desired: desired.length,
       observed: observed.length,
       differences: differences.length,
@@ -89,11 +104,68 @@ function buildReport({ repository, manifestPath, manifest, desiredLabels, liveLa
       update: counts.update,
       delete: counts.delete
     },
+    selected_overlays: [...manifest.selected_overlays],
     desired,
     observed,
     differences,
-    // The plan comes from the synchronization script's own planner.
-    canonical_plan_verified: true
+    // The plan comes from the synchronization script's own planner; the
+    // cross-check below confirms it against that script run as a process.
+    canonical_plan_verified: true,
+    cross_check: null
+  };
+}
+
+// What the two plans are compared on: the action, the label and the fields
+// to update, in the planner's order.
+function planKey(change) {
+  return { action: change.action, name: change.name, fields: [...(change.fields ?? [])] };
+}
+
+function orderedKeys(changes) {
+  const order = { update: 0, create: 1, delete: 2 };
+  return changes.map(planKey)
+    .sort((left, right) => order[left.action] - order[right.action] || compareNames(left.name, right.name));
+}
+
+// Run the reconciler in plan mode on the live labels this report read and
+// compare its plan with the report's differences. The child inherits the
+// environment without GITHUB_STEP_SUMMARY, so its own summary stays out of
+// the job summary.
+export async function crossCheck(report, { reconciler, manifestPath, liveLabels }) {
+  const directory = await mkdtemp(join(tmpdir(), "labels-drift-"));
+  try {
+    const livePath = join(directory, "live.json");
+    const planPath = join(directory, "plan.json");
+    await writeFile(livePath, `${JSON.stringify(liveLabels)}\n`, "utf8");
+    const { GITHUB_STEP_SUMMARY: _ignored, ...env } = process.env;
+    try {
+      await run(process.execPath, [reconciler, "--manifest", manifestPath, "--mode", "plan",
+        "--live", livePath, "--plan-output", planPath], { env, maxBuffer: 16 * 1024 * 1024 });
+    } catch (error) {
+      const detail = String(error.stderr || error.message).trim().split("\n")[0];
+      throw new Error(`Reconciler plan failed (${reconciler}): ${detail}`);
+    }
+    const plan = await loadJson(planPath);
+    if (!Array.isArray(plan?.changes)) throw new Error(`Reconciler plan in ${planPath} has no changes array`);
+    const reported = orderedKeys(report.differences);
+    const planned = orderedKeys(plan.changes);
+    const agree = JSON.stringify(reported) === JSON.stringify(planned);
+    return agree
+      ? { status: "agree" }
+      : { status: "disagree", reconciler, report_plan: reported, reconciler_plan: planned };
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+// The report with its cross-check: a disagreement fails the run, whatever the drift.
+export async function crossCheckedReport(report, options) {
+  const result = await crossCheck(report, options);
+  return {
+    ...report,
+    status: result.status === "agree" ? report.status : "fail",
+    canonical_plan_verified: result.status === "agree",
+    cross_check: result
   };
 }
 
@@ -110,12 +182,40 @@ function markdownReport(report) {
     `- Status: **${String(report.status).toUpperCase()}**`,
     `- Repository: ${inlineCode(report.repository ?? "fixture")}`,
     `- Manifest: ${inlineCode(report.manifest)}`,
+    `- Core / overlays defined / selected / resolved: **${report.counts.core} / ${report.counts.overlays} / `
+    + `${report.counts.selected_overlays} / ${report.counts.desired}**`,
     `- Desired / observed: **${report.counts.desired} / ${report.counts.observed}**`,
     `- Differences: **${report.counts.differences}**`,
     `- Create / update / delete: **${report.counts.create} / ${report.counts.update} / ${report.counts.delete}**`,
     "- Plan: computed by the synchronization script's planner",
+    `- Cross-check against the reconciler's plan on the same snapshot: **${
+      report.cross_check === null ? "not run" : report.cross_check.status === "agree" ? "agree" : "DISAGREE"}**`,
     ""
   ];
+  if (report.cross_check !== null && report.cross_check.status !== "agree") {
+    lines.push(
+      "## Cross-check",
+      "",
+      "The drift report and the reconciler planned different changes on the same live labels. "
+      + "Neither plan can be trusted until the scripts agree.",
+      ""
+    );
+    for (const [title, plan] of [["This report", report.cross_check.report_plan],
+      ["Reconciler", report.cross_check.reconciler_plan]]) {
+      lines.push(`### ${title} (${plan.length})`, "");
+      if (plan.length === 0) {
+        lines.push("No changes planned.", "");
+        continue;
+      }
+      lines.push("| Action | Label | Fields |", "| --- | --- | --- |");
+      for (const change of plan) {
+        lines.push(`| ${change.action} | ${inlineCode(change.name, { table: true })} | `
+          + `${change.fields.length > 0 ? change.fields.join(", ") : "—"} |`);
+      }
+      lines.push("");
+    }
+    lines.push("## Differences", "");
+  }
   if (report.differences.length === 0) {
     lines.push("No live label drift detected.");
   } else {
@@ -153,7 +253,7 @@ async function prepareContract(manifestPath) {
   return { manifest, desiredLabels: resolveDesired(manifest) };
 }
 
-async function runSelfTest(manifestPath) {
+async function runSelfTest(manifestPath, reconciler) {
   for (const [header, attempt, expected] of [
     [null, 0, 1000], [null, 2, 4000], ["", 1, 2000],
     ["invalid", 1, 2000], ["-1", 1, 2000], ["0", 2, 0],
@@ -242,15 +342,84 @@ async function runSelfTest(manifestPath) {
   const hostileRow = markdownReport(hostile).split("\n").find(line => line.startsWith("| delete |"));
   assert.equal(hostileRow, "| delete | `x` | — | `x` / `` AB\\|`  `` / line break \\| pipe | — |");
 
+  // Counts and the selection are reported before the cross-check runs.
+  assert.deepEqual(
+    [cleanFirst.counts.core, cleanFirst.counts.overlays, cleanFirst.counts.selected_overlays, cleanFirst.counts.desired],
+    [manifest.core.length, Object.keys(manifest.overlays).length, manifest.selected_overlays.length, desiredLabels.length]);
+  assert.deepEqual(cleanFirst.selected_overlays, manifest.selected_overlays);
+  assert.equal(cleanFirst.cross_check, null);
+  assert.match(markdownReport(cleanFirst), /Cross-check against the reconciler's plan on the same snapshot: \*\*not run\*\*/);
+
+  // The reconciler, run in plan mode on the same snapshot, plans the same changes.
+  assert.equal(parseArguments(["--reconciler", "other.mjs"]).reconciler, "other.mjs");
+  assert.equal(parseArguments([]).reconciler, DEFAULT_RECONCILER);
+  for (const [report, liveLabels, status] of [[cleanFirst, baseline, "pass"], [driftFirst, drifted, "drift"],
+    [specialReport, special, "drift"]]) {
+    const checked = await crossCheckedReport(report, { reconciler, manifestPath, liveLabels });
+    assert.equal(checked.status, status);
+    assert.deepEqual(checked.cross_check, { status: "agree" });
+    assert.equal(checked.canonical_plan_verified, true);
+    assert.equal(JSON.stringify(report.differences), JSON.stringify(checked.differences));
+    assert.match(markdownReport(checked), /Cross-check against the reconciler's plan on the same snapshot: \*\*agree\*\*/);
+    assert.doesNotMatch(markdownReport(checked), /## Cross-check/);
+  }
+  assert.equal(cleanFirst.cross_check, null, "the cross-check must not mutate the report it was given");
+
+  // A reconciler that plans something else fails the run, and both plans are reported.
+  const fakeDirectory = await mkdtemp(join(tmpdir(), "labels-fake-reconciler-"));
+  try {
+    const fake = join(fakeDirectory, "fake-reconciler.mjs");
+    await writeFile(fake, [
+      "import { writeFileSync } from \"node:fs\";",
+      "const path = process.argv[process.argv.indexOf(\"--plan-output\") + 1];",
+      "writeFileSync(path, JSON.stringify({ changes: [{ action: \"delete\", name: \"phantom\", currentName: \"phantom\" }] }));",
+      ""
+    ].join("\n"), "utf8");
+    const disagreed = await crossCheckedReport(cleanFirst, { reconciler: fake, manifestPath, liveLabels: baseline });
+    assert.equal(disagreed.status, "fail");
+    assert.equal(disagreed.canonical_plan_verified, false);
+    assert.deepEqual(disagreed.cross_check, {
+      status: "disagree",
+      reconciler: fake,
+      report_plan: [],
+      reconciler_plan: [{ action: "delete", name: "phantom", fields: [] }]
+    });
+    const disagreedMarkdown = markdownReport(disagreed);
+    assert.match(disagreedMarkdown, /- Status: \*\*FAIL\*\*/);
+    assert.match(disagreedMarkdown, /Cross-check against the reconciler's plan on the same snapshot: \*\*DISAGREE\*\*/);
+    assert.match(disagreedMarkdown, /## Cross-check\n\n[^\n]+\n\n### This report \(0\)\n\nNo changes planned\.\n\n### Reconciler \(1\)\n/);
+    assert.ok(disagreedMarkdown.includes("| delete | `phantom` | — |"), disagreedMarkdown);
+    assert.match(disagreedMarkdown, /## Differences\n\nNo live label drift detected\./);
+    // Drift that the reconciler also plans, with a field more, is a disagreement too.
+    const driftChecked = await crossCheckedReport(driftFirst, { reconciler: fake, manifestPath, liveLabels: drifted });
+    assert.equal(driftChecked.status, "fail");
+    assert.equal(driftChecked.cross_check.report_plan.length, 3);
+
+    // A reconciler that fails or writes no plan stops the run as an error, not as agreement.
+    await writeFile(fake, "process.exit(3);\n", "utf8");
+    await assert.rejects(crossCheck(cleanFirst, { reconciler: fake, manifestPath, liveLabels: baseline }),
+      /Reconciler plan failed/);
+    await writeFile(fake, [
+      "import { writeFileSync } from \"node:fs\";",
+      "writeFileSync(process.argv[process.argv.indexOf(\"--plan-output\") + 1], \"{}\");",
+      ""
+    ].join("\n"), "utf8");
+    await assert.rejects(crossCheck(cleanFirst, { reconciler: fake, manifestPath, liveLabels: baseline }),
+      /has no changes array/);
+  } finally {
+    await rm(fakeDirectory, { recursive: true, force: true });
+  }
+
   process.stdout.write(
-    "SELF-TEST PASS: retry delays and deterministic no-drift, create/update/delete and special-name drift fixtures are read-only.\n"
+    "SELF-TEST PASS: retry delays and deterministic no-drift, create/update/delete and special-name drift fixtures are read-only; "
+    + "the reconciler's plan agrees on them and an injected disagreement fails.\n"
   );
 }
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
   if (options.selfTest) {
-    await runSelfTest(options.manifest);
+    await runSelfTest(options.manifest, options.reconciler);
     return;
   }
 
@@ -269,13 +438,13 @@ async function main() {
     liveLabels = await listLiveLabels(options.repository, process.env.GITHUB_TOKEN);
   }
 
-  const report = buildReport({
+  const report = await crossCheckedReport(buildReport({
     repository: options.repository,
     manifestPath: options.manifest,
     manifest,
     desiredLabels,
     liveLabels
-  });
+  }), { reconciler: options.reconciler, manifestPath: options.manifest, liveLabels });
   const json = `${JSON.stringify(report, null, 2)}\n`;
   const markdown = markdownReport(report);
   await writeEvidence(options.output, json);

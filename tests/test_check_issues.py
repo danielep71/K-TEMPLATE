@@ -210,14 +210,42 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(check_issues.config_findings(root),
                              ["enhancement.yml has no target end date field"])
 
-    def test_unsupported_overlays_are_rejected_instead_of_ignored(self) -> None:
+    @staticmethod
+    def catalogue_with_overlay(root: Path, selected: list[str]) -> set[str]:
+        """The resolved catalogue of a copy of the manifest with one overlay, ``regime``."""
+        shutil.copytree(ROOT / ".github/scripts", root / ".github/scripts")
+        manifest = json.loads((ROOT / ".github/labels.json").read_text(encoding="utf-8"))
+        manifest["overlays"] = {"regime": [
+            {"name": "zz-regime", "color": "ABCDEF", "description": "overlay label"}]}
+        manifest["selected_overlays"] = selected
+        (root / ".github/labels.json").write_text(json.dumps(manifest), encoding="utf-8")
+        return check_issues.catalogue_labels(root)
+
+    def test_catalogue_is_the_core_plus_the_selected_overlays(self) -> None:
+        core = {label["name"] for label in
+                json.loads((ROOT / ".github/labels.json").read_text(encoding="utf-8"))["core"]}
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(self.catalogue_with_overlay(Path(directory), ["regime"]),
+                             core | {"zz-regime"})
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertEqual(self.catalogue_with_overlay(Path(directory), []), core)
+
+    def test_an_unknown_or_duplicated_overlay_selection_is_rejected(self) -> None:
+        for selected, message in ((["missing"], 'selects unknown overlay "missing"'),
+                                  (["regime", "regime"], 'selects overlay "regime" again')):
+            with self.subTest(selected=selected), tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(ValueError, message):
+                    self.catalogue_with_overlay(Path(directory), selected)
+
+    def test_the_previous_manifest_schema_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             shutil.copytree(ROOT / ".github/scripts", root / ".github/scripts")
-            manifest = json.loads((ROOT / ".github/labels.json").read_text())
-            manifest["overlays"] = {"selected": [{"name": "extra"}]}
-            (root / ".github/labels.json").write_text(json.dumps(manifest))
-            with self.assertRaisesRegex(ValueError, "root must contain exactly"):
+            manifest = json.loads((ROOT / ".github/labels.json").read_text(encoding="utf-8"))
+            previous = {"schema_version": 2, "prune": manifest["prune"], "labels": manifest["core"]}
+            (root / ".github/labels.json").write_text(json.dumps(previous), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "schema_version 2 with a labels list is no "
+                                                    "longer supported"):
                 check_issues.catalogue_labels(root)
 
     def test_assignee_comes_from_configuration_not_repository_identity(self) -> None:

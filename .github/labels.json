@@ -1,7 +1,7 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "prune": true,
-  "labels": [
+  "core": [
     {
       "name": "behavior-change",
       "color": "C24E00",
@@ -102,5 +102,7 @@
       "color": "6E7781",
       "description": "I have decided not to implement or continue this work"
     }
-  ]
+  ],
+  "overlays": {},
+  "selected_overlays": []
 }
