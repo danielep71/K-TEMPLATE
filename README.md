@@ -34,6 +34,8 @@
 [Documentation](#-documentation)
 &nbsp;·&nbsp;
 [Status](#-status)
+&nbsp;·&nbsp;
+[Template wiki](https://github.com/danielep71/MyTemplate/wiki)
 
 ---
 
@@ -223,6 +225,7 @@ The full layout and its rules are in
 | [`SECURITY.md`](SECURITY.md) | Private vulnerability reporting, runtime risk surface and data handling |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Participant behaviour and conduct reporting |
 | [`CHANGELOG.md`](CHANGELOG.md) | Change history |
+| [Template wiki](https://github.com/danielep71/MyTemplate/wiki) | A guided tour of the template, page by page; the documents above govern where it differs |
 
 ## 📌 Status
 
