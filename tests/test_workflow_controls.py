@@ -599,14 +599,18 @@ def milestone_script():
 
 
 class FakeGitHub:
-    def __init__(self, pulls, issues=(), *, read_only=False, sticky=False):
+    def __init__(self, pulls, issues=(), *, read_only=False, sticky=False, unpersisted=False):
         self.items = {pull['number']: dict(pull, pull_request={}) for pull in pulls}
         self.items.update({issue['number']: dict(issue) for issue in issues})
         self.patches = []
+        self.requests = []
         self.read_only = read_only  # every PATCH is refused with HTTP 403
         self.sticky = sticky  # a PATCH succeeds but the milestone stays
+        # A PATCH whose response reports the change, which a later read does not show.
+        self.unpersisted = unpersisted
 
     def __call__(self, method, path, data=None):
+        self.requests.append((method, path))
         if path.startswith('/repos/o/r/pulls?'):
             match = re.search(r'[?&]page=(\d+)', path)
             assert match, path
@@ -618,6 +622,8 @@ class FakeGitHub:
             if self.read_only:
                 raise HTTPError(path, 403, 'Resource not accessible by integration', Message(), None)
             self.patches.append(number)
+            if self.unpersisted:
+                return dict(self.items[number], milestone=data['milestone'])
             if not self.sticky:
                 self.items[number]['milestone'] = data['milestone']
         return dict(self.items[number])
@@ -670,6 +676,19 @@ class MilestoneScriptTests(unittest.TestCase):
         api = FakeGitHub([{'number': 4, 'milestone': {'title': 'v1'}}], sticky=True)
         with self.assertRaisesRegex(ValueError, 'PR #4 still has a milestone'):
             self.reconcile()(api, 'o/r', {'number': 4, 'pull_request': {}})
+
+    def test_a_removal_is_read_back_after_the_change(self):
+        api = FakeGitHub([{'number': 8, 'milestone': {'title': 'v1'}}])
+        self.assertEqual(self.reconcile()(api, 'o/r', {'number': 8, 'pull_request': {}}), [(8, 'v1')])
+        self.assertEqual(api.requests, [('GET', '/repos/o/r/issues/8'), ('PATCH', '/repos/o/r/issues/8'),
+                                        ('GET', '/repos/o/r/issues/8')])
+
+    def test_a_change_the_response_reports_but_github_does_not_keep_fails(self):
+        api = FakeGitHub([{'number': 9, 'milestone': {'title': 'v1'}}], unpersisted=True)
+        published: list[str] = []
+        with self.assertRaisesRegex(ValueError, 'PR #9 still has a milestone after the change'):
+            self.script()['run'](api, 'o/r', {'number': 9, 'pull_request': {}}, published.append)
+        self.assertEqual(published, [], 'no removal may be recorded')
 
     def test_the_summary_lists_each_removal_with_its_scope(self):
         api = FakeGitHub([{'number': 1, 'milestone': {'title': 'v1 | first\nrelease'}},
