@@ -123,14 +123,28 @@ class ReconcileOrderTests(unittest.TestCase):
                       unselected.stdout)
         self.assertEqual(self.api.writes, [])
 
-    def test_a_dry_run_previews_the_deletion_of_a_label_in_use(self) -> None:
+    def test_a_dry_run_previews_the_deletion_a_real_run_would_refuse(self) -> None:
         result = self.run_script("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("(dry run)", result.stdout)
-        self.assertIn("| delete | `legacy` |", result.stdout)
+        self.assertIn("- Deletions still in use: **1**", result.stdout)
+        self.assertIn("| delete | `legacy` | outside the manifest; still in use, a real run would refuse it |",
+                      result.stdout)
+        self.assertIn('A real run would refuse every change. Refusing to prune labels still used by an issue '
+                      'or pull request: "legacy". No change was applied.', result.stdout)
         self.assertEqual(self.api.writes, [])
-        self.assertFalse([target for _, target in self.api.requests if "/issues" in target],
-                         "a dry run must not query label usage")
+        self.assertEqual([target for _, target in self.api.requests if "/issues" in target],
+                         ["/repos/example/project/issues?state=all&per_page=1&labels=legacy"],
+                         "a dry run reads the usage of each planned deletion, once")
+
+    def test_a_dry_run_without_a_deletion_reads_no_usage(self) -> None:
+        self.api.labels = [label for label in self.api.labels if label["name"] != "legacy"]
+        result = self.run_script("--dry-run")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("- Deletions still in use: **0**", result.stdout)
+        self.assertNotIn("would refuse", result.stdout)
+        self.assertEqual(self.api.writes, [])
+        self.assertFalse([target for _, target in self.api.requests if "/issues" in target])
 
     def test_reconcile_refuses_to_prune_a_label_in_use_before_any_write(self) -> None:
         result = self.run_script()
