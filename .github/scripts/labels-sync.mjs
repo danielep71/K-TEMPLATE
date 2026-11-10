@@ -403,20 +403,27 @@ export async function labelInUse(repository, token, name, request = githubReques
   throw new Error(`GitHub issue pagination exceeded ${MAX_ISSUE_PAGES} pages while checking ${JSON.stringify(name)}`);
 }
 
-// Deleting a label removes it from every issue and pull request, closed ones
-// included, and cannot be undone: refuse before any change is applied.
-export async function assertSafeDeletions(changes, isInUse) {
+// The planned deletions that an issue or pull request still carries, read
+// without any change: a dry run previews them, a real run refuses on them.
+export async function deletionsInUse(changes, isInUse) {
   const inUse = [];
   for (const change of changes) {
     if (change.action !== "delete") continue;
     if (await isInUse(change.currentName)) inUse.push(change.currentName);
   }
-  if (inUse.length > 0) {
-    throw new Error(
-      `Refusing to prune labels still used by an issue or pull request: ${inUse.map(name => JSON.stringify(name)).join(", ")}. `
-      + "No change was applied. Remove each label from its issues and pull requests, or add it to the manifest."
-    );
-  }
+  return inUse;
+}
+
+export function deletionRefusal(inUse) {
+  return `Refusing to prune labels still used by an issue or pull request: ${inUse.map(name => JSON.stringify(name)).join(", ")}. `
+    + "No change was applied. Remove each label from its issues and pull requests, or add it to the manifest.";
+}
+
+// Deleting a label removes it from every issue and pull request, closed ones
+// included, and cannot be undone: refuse before any change is applied.
+export async function assertSafeDeletions(changes, isInUse) {
+  const inUse = await deletionsInUse(changes, isInUse);
+  if (inUse.length > 0) throw new Error(deletionRefusal(inUse));
 }
 
 async function applyChanges(repository, token, changes) {
@@ -468,6 +475,7 @@ function renderSummary({
   changes = [],
   verified = null,
   dryRun = false,
+  inUse = null,
   error = null,
   partial = false
 }) {
@@ -490,7 +498,8 @@ function renderSummary({
       : "unavailable"}**`,
     `- Prune: **${manifest ? (manifest.prune ? "enabled" : "disabled") : "unavailable"}**`,
     `- Planned changes: **${planned ? changes.length : "not computed (live labels not read)"}**`,
-    `- Create / update / delete: **${counts.create} / ${counts.update} / ${counts.delete}**`
+    `- Create / update / delete: **${counts.create} / ${counts.update} / ${counts.delete}**`,
+    `- Deletions still in use: **${inUse === null ? "not checked (no repository read)" : inUse.length}**`
   ];
   if (verified !== null) lines.push(`- Post-run exact match: **${verified ? "yes" : "no"}**`);
   lines.push(
@@ -513,9 +522,16 @@ function renderSummary({
     lines.push("", "No label changes are required.");
   } else {
     lines.push("", "| Action | Label | Detail |", "|---|---|---|");
+    const refused = new Set((inUse ?? []).map(name => name.toLowerCase()));
     for (const change of changes) {
-      const detail = change.action === "update" ? change.fields.join(", ") : change.action === "delete" ? "outside the manifest" : "missing live label";
+      const detail = change.action === "update" ? change.fields.join(", ")
+        : change.action === "delete" ? (refused.has(change.currentName.toLowerCase())
+          ? "outside the manifest; still in use, a real run would refuse it" : "outside the manifest")
+          : "missing live label";
       lines.push(`| ${change.action} | ${inlineCode(change.name, { table: true })} | ${markdownEscape(detail)} |`);
+    }
+    if (dryRun && inUse !== null && inUse.length > 0) {
+      lines.push("", `A real run would refuse every change. ${markdownEscape(deletionRefusal(inUse))}`);
     }
   }
   return `${lines.join("\n")}\n`;
@@ -824,11 +840,33 @@ async function runSelfTest(manifestPath) {
   await assertSafeDeletions(planChanges(desired, desired.slice(1)), usage(["anything"]));
   assert.deepEqual(asked, [], "a plan without deletions makes no query");
 
+  // A dry run previews the deletions a real run would refuse; a plan checks none.
+  assert.deepEqual(await deletionsInUse(pruned, usage(["in-use"])), ["in-use"]);
+  const previewed = renderSummary({
+    mode: "reconcile",
+    manifest,
+    manifestPath: "fixture-labels.json",
+    desiredLabels: desired,
+    changes: pruned,
+    inUse: ["in-use"],
+    dryRun: true
+  });
+  assert.ok(previewed.includes("- Deletions still in use: **1**"), previewed);
+  assert.ok(previewed.includes("| delete | `in-use` | outside the manifest; still in use, a real run would refuse it |"), previewed);
+  assert.ok(previewed.includes("| delete | `unused` | outside the manifest |"), previewed);
+  assert.ok(previewed.includes('A real run would refuse every change. Refusing to prune labels still used by an issue or pull request: "in-use". No change was applied.'), previewed);
+  const unchecked = renderSummary({ mode: "plan", manifest, manifestPath: "fixture-labels.json", desiredLabels: desired, changes: pruned });
+  assert.ok(unchecked.includes("- Deletions still in use: **not checked (no repository read)**"), unchecked);
+  assert.doesNotMatch(unchecked, /would refuse/);
+  const clean = renderSummary({ mode: "reconcile", manifest, manifestPath: "fixture-labels.json", desiredLabels: desired, changes: pruned, inUse: [], dryRun: true });
+  assert.ok(clean.includes("- Deletions still in use: **0**"), clean);
+  assert.doesNotMatch(clean, /would refuse/);
+
   process.stdout.write("SELF-TEST PASS: retry delays, validation, overlays, reconciliation, safe pruning, plan output and summary fixtures\n");
 }
 
 // What the run knew before a failure, so that the failure summary reports it.
-const runState = { summaryBase: null, changes: null, applying: false, verified: null };
+const runState = { summaryBase: null, changes: null, applying: false, verified: null, inUse: null };
 
 async function main() {
   const options = parseArguments(process.argv.slice(2));
@@ -867,15 +905,21 @@ async function main() {
 
   const changes = planChanges(desired, live, { prune: manifest.prune });
   runState.changes = changes;
+  // A plan reads no repository, so its deletions are not checked. Reconciliation,
+  // a dry run included, reads the usage of every planned deletion before anything
+  // else: the dry run previews the deletions a real run would refuse.
+  const inUse = options.mode === "reconcile"
+    ? await deletionsInUse(changes, name => labelInUse(options.repository, process.env.GITHUB_TOKEN, name))
+    : null;
+  runState.inUse = inUse;
   if (options.mode === "plan" || options.dryRun) {
     if (options.planOutput) await writePlan(options.planOutput, changes);
-    await publishSummary(renderSummary({ mode: options.mode, ...summaryBase, changes, dryRun: options.dryRun }));
+    await publishSummary(renderSummary({ mode: options.mode, ...summaryBase, changes, inUse, dryRun: options.dryRun }));
     return;
   }
 
-  // Only a run that applies changes checks its deletions: a plan or a dry run
-  // changes nothing, and must preview the deletion of a label still in use.
-  await assertSafeDeletions(changes, name => labelInUse(options.repository, process.env.GITHUB_TOKEN, name));
+  // Deleting a label cannot be undone: refuse before any change is applied.
+  if (inUse.length > 0) throw new Error(deletionRefusal(inUse));
   runState.applying = true;
   await applyChanges(options.repository, process.env.GITHUB_TOKEN, changes);
   const after = await listLiveLabels(options.repository, process.env.GITHUB_TOKEN);
@@ -885,7 +929,7 @@ async function main() {
     runState.verified = false;
     throw new Error(`Post-run verification found ${remaining.length} remaining difference(s)`);
   }
-  await publishSummary(renderSummary({ mode: "reconcile", ...summaryBase, changes, verified }));
+  await publishSummary(renderSummary({ mode: "reconcile", ...summaryBase, changes, verified, inUse }));
 }
 
 // Run only when executed directly, so that labels-drift.mjs can import the planner.
@@ -902,6 +946,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         }),
         changes: runState.changes,
         verified: runState.verified,
+        inUse: runState.inUse,
         partial: runState.applying,
         error: message
       }));
