@@ -164,5 +164,16 @@ class DerivationTest(unittest.TestCase):
         self.assertIn("no derivation script named", printed.getvalue())
 
 
+class MalformedOutputTest(unittest.TestCase):
+    def test_an_output_without_a_value_or_tolerance_is_left_to_the_format_check(self) -> None:
+        # check_test_cases.py reports these; comparing them must not raise.
+        no_relative = output(tolerance={"absolute": 0.01})
+        no_value = {key: item for key, item in output().items() if key != "value"}
+        no_tolerance = {key: item for key, item in output().items() if key != "tolerance"}
+        for malformed in (no_relative, no_value, no_tolerance):
+            with self.subTest(output=malformed):
+                self.assertEqual(run(printing([output()]), [malformed]), ([], 0))
+
+
 if __name__ == "__main__":
     unittest.main()

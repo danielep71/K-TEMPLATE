@@ -91,14 +91,30 @@ def run_script(root: Path, script: str, fixture: Path) -> tuple[dict[Key, Any] |
     return {key(item): item for item in outputs}, ""
 
 
+def finite(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def comparable(output: Mapping[str, Any]) -> bool:
+    """A text output, or a number with an absolute and a relative tolerance."""
+    if "text" in output:
+        return True
+    tolerance = output.get("tolerance")
+    return finite(output.get("value")) and isinstance(tolerance, dict) \
+        and finite(tolerance.get("absolute")) and finite(tolerance.get("relative"))
+
+
 def compare(root: Path, where: str, outputs: object, fixture: Path) -> tuple[list[str], int]:
     """Run the scripts that one list of outputs names on one fixture, and compare."""
     by_script: dict[str, list[dict[str, Any]]] = {}
     for output in outputs if isinstance(outputs, list) else []:
         reference = output.get("reference") if isinstance(output, dict) else None
         script = reference.get("script") if isinstance(reference, dict) else None
-        if isinstance(script, str):
-            by_script.setdefault(script, []).append(output)
+        if not isinstance(script, str):
+            continue
+        if not comparable(output):
+            continue  # check_test_cases.py reports an output without a value or tolerance
+        by_script.setdefault(script, []).append(output)
     findings: list[str] = []
     compared = 0
     for script, wanted in sorted(by_script.items()):

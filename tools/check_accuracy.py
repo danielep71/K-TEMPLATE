@@ -140,19 +140,23 @@ def case_outputs(root: Path, case: str, report: Report) -> tuple[str | None, lis
     if not isinstance(data, dict) or not isinstance(expected, dict):
         return None, []
     calculation = data.get("calculation")
+    variants = expected.get("variants")
+    # A malformed file gives no outputs here: check_test_cases.py reports it.
     groups: dict[str | None, Any] = {None: expected.get("outputs")} if "outputs" in expected \
-        else dict(expected.get("variants") or {})
+        else dict(variants) if isinstance(variants, dict) else {}
     outputs = []
     for variant, items in groups.items():
         for item in items if isinstance(items, list) else []:
             tolerance = item.get("tolerance") if isinstance(item, dict) else None
             if not isinstance(item, dict) or not is_number(item.get("value")) or \
-                    not isinstance(tolerance, dict):
+                    not isinstance(tolerance, dict) or not is_number(tolerance.get("absolute")) or \
+                    not is_number(tolerance.get("relative")):
                 continue
+            reference = item.get("reference")
             key = (case, variant, str(item.get("quantity")), scope_text(item.get("scope")))
             outputs.append(Output(key, float(item["value"]), float(tolerance["absolute"]),
                                   float(tolerance["relative"]),
-                                  str((item.get("reference") or {}).get("class"))))
+                                  str(reference.get("class") if isinstance(reference, dict) else None)))
     return calculation if isinstance(calculation, str) else None, outputs
 
 

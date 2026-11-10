@@ -294,8 +294,8 @@ milestones and their pull requests.
   the names of its logs and results file from the evidence policy. It exits
   2 for an unknown option, a missing workbook or a missing or malformed
   policy before it starts LibreOffice, and 1 without a traceback when
-  LibreOffice cannot run the workbook. The build leaves forms out (#100,
-  #285, #299, #316).
+  LibreOffice cannot run the workbook. A form stops the build: import it by
+  hand (#100, #285, #299, #316, #366).
 - A VBA test harness and an example suite in `tests/modules/`, with a
   certification entry point. It refuses state left by an earlier run,
   reports completeness apart from the verdict, and checks that Excel's state,
@@ -472,8 +472,8 @@ milestones and their pull requests.
   newer commit replaces; a push run is never cancelled. CI runs
   `tools/check_repository.py` with `--ci`, which fails when, after the
   checks, the working tree differs from the commit. mypy checks `tests/` as
-  well as `tools/`; four unannotated test files need no annotations, but their
-  code is checked. The bug form has an optional field for evidence, a
+  well as `tools/`; three unannotated test files need no annotations, but
+  their code is checked (#366). The bug form has an optional field for evidence, a
   workaround and recovery, and the enhancement form one for alternatives
   considered (#251).
 - `tools/check_excel_run.py` compares the modules exported by hand with the
@@ -572,6 +572,12 @@ milestones and their pull requests.
 - A backtick, pipe or line break in a label name, colour or API error no
   longer breaks the code span or table row of the label synchronization and
   drift summaries (#189).
+- A malformed expected file, evidence policy or suite entry point is reported
+  as a finding by the derivation, accuracy and generated-documentation
+  checks, instead of stopping them with a traceback; the Excel-run check
+  then still prints its report. Without Node.js, a local run of
+  **Repository integrity** skips `issue-configuration`, as it skips the label
+  checks, instead of failing it (#367).
 
 ### Validation
 
