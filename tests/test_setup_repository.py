@@ -252,7 +252,7 @@ class SetupTests(unittest.TestCase):
             self.run_setup()
         self.assertEqual(self.api.writes, [])
 
-    # General settings (#332).
+    # General settings.
 
     def test_configuration_manages_every_general_setting(self) -> None:
         config = setup.load_config(setup.CONFIG)
@@ -391,7 +391,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.run_setup(), 0)
         self.assertEqual(len(self.api.rules), 1)
 
-    # Read-only modes and tolerant reads (#333).
+    # Read-only modes and tolerant reads.
 
     def test_preview_and_check_run_without_administrator_access(self) -> None:
         self.configure()
@@ -661,7 +661,7 @@ class SetupTests(unittest.TestCase):
         steps = setup.plan(config, setup.assess(config, state), 'example/project')
         self.assertEqual(steps, [('DELETE', 'repos/example/project/automated-security-fixes', None)])
 
-    # Actions settings, reported and never written (#335).
+    # Actions settings, reported and never written.
 
     def test_actions_settings_are_reported_never_written(self) -> None:
         self.configure()
@@ -729,7 +729,7 @@ class SetupTests(unittest.TestCase):
         self.assertIn('DIFF actions fork_pr_approval_policy: observed "first_time_contributors", '
                       'configured "all_external_contributors"', output)
 
-    # Records: Markdown (--report) and JSON (--evidence, #334).
+    # Records: Markdown (--report) and JSON (--evidence).
 
     def test_report_records_drift_then_verification(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -883,7 +883,7 @@ class SetupTests(unittest.TestCase):
         self.assertIn('HTTP 403', str(caught.exception))
         self.assertNotIn('secret token', str(caught.exception))
 
-    # Apply only against an approved plan digest, with a journal before each write (#352).
+    # Apply only against an approved plan digest, with a journal before each write.
 
     def test_plan_digest_is_deterministic_and_recorded(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -995,7 +995,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((record['writes'], record['readback']), ([], 'VERIFIED'))
         self.assertEqual(record['plan_sha256'], self.args.approve_plan)
 
-    # A configured ruleset covered by content, not only by name (#353).
+    # A configured ruleset covered by content, not only by name.
 
     def rename(self, name: str, new: str) -> dict[str, Any]:
         ruleset = next(r for r in self.api.rules if r['name'] == name)

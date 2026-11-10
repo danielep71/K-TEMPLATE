@@ -1,4 +1,9 @@
-"""Tests for tools/check_workbook_protection.py, with synthetic layout templates."""
+"""Tests for tools/check_workbook_protection.py, with synthetic layout templates.
+
+The fixtures pair tests/workbook_template.py's template and build configuration
+with a matrix of their sheets; only the repository tests read this repository's
+own configuration, matrix and template.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,6 @@ import contextlib
 import copy
 import io
 import json
-import shutil
 import sys
 import tempfile
 import time
@@ -35,11 +39,13 @@ MATRIX: dict[str, Any] = {
 
 def run(matrix: object = MATRIX, template: bytes | None = b"default",
         ) -> tuple[list[str], str]:
-    """Check a repository with this one's build configuration and the given files."""
+    """Check a repository with the synthetic template's build configuration and the
+    given files."""
     with tempfile.TemporaryDirectory(prefix="protection-") as directory:
         root = Path(directory)
         (root / "tools/devbuild").mkdir(parents=True)
-        shutil.copy(ROOT / "tools/devbuild/workbook.json", root / "tools/devbuild/workbook.json")
+        (root / "tools/devbuild/workbook.json").write_bytes(
+            workbook_template.build_configuration_bytes())
         if matrix is not None:
             path = root / check_workbook_protection.MATRIX
             path.parent.mkdir(parents=True)
