@@ -3,7 +3,7 @@
 Notable changes to this repository, from a user's point of view. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). It is
-neither a commit log nor release evidence. **No version has been released.**
+neither a commit log nor release evidence.
 
 ## 🧭 Maintenance policy
 
@@ -60,6 +60,8 @@ in review.
 Use only the categories an entry needs.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-10
 
 Changes made before this changelog existed are described by the closed
 milestones and their pull requests.
@@ -579,4 +581,5 @@ milestones and their pull requests.
   worst error 0.0, `compile=ON_DEMAND`. The host behaviours `HB-02` to `HB-04`
   of the validation plan are measured on that host (#204, #211).
 
-[Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
+[Unreleased]: https://github.com/danielep71/MyTemplate/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/danielep71/MyTemplate/releases/tag/v1.0.0
