@@ -243,6 +243,18 @@ class RunTest(RepositoryTest):
         self.assertIn("duplicate key", log)
         self.assertIn("codeql-default-branch: FAIL (raised an error)", printed)
 
+    def test_every_check_that_runs_node_is_skipped_without_it(self) -> None:
+        # check_issues.py --check-config validates the catalogue with the label script.
+        with mock.patch("shutil.which",
+                        side_effect=lambda name: None if name == "node" else name):
+            listed = check_repository.checks(self.context())
+        needs_node = {check.name: check.missing for check in listed
+                      if check.command and (check.command[0] == "node"
+                                            or "tools/check_issues.py" in check.command)}
+        self.assertEqual(set(needs_node), {"labels-sync-self-test", "labels-catalogue",
+                                           "labels-drift-self-test", "issue-configuration"})
+        self.assertEqual(set(needs_node.values()), {"node is not on PATH"})
+
     def test_missing_context_is_skipped_unless_strict(self) -> None:
         self.commit()
         listed = [Check("needs-node", ["node"], missing="node is not on PATH")]

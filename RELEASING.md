@@ -149,14 +149,18 @@ of its checklist. Records made on an earlier commit do not count.
 Copy the [release certification](docs/release/RELEASE_CERTIFICATION.md)
 into an issue for the release, in the next milestone
 ([release records](#release-records)), build the workbook from the candidate as
-[INSTALLATION.md](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
-describes, run the regression cases of the
+described below, run the regression cases of the
 [validation plan](docs/methodology/VALIDATION_PLAN.md), and fill in the
 record from the runs themselves.
 
 Build the development workbook from the candidate with
 `tools/devbuild/build_workbook.py`
 ([building a workbook from source](INSTALLATION.md#building-a-workbook-from-source)).
+[Importing VBA into Excel](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
+by hand is only for a project with forms, which the build does not write, or
+when the build fails: such a workbook has no build stamp, so its run checks
+the source identity but not the `VERIFIED` binding of invariant 4; record
+that as a deviation.
 Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md)
 as [recording an Excel run](INSTALLATION.md#recording-an-excel-run)
 describes: with `python tools/devbuild/excel_run.py`, which builds, runs,

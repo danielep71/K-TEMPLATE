@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import check_accuracy  # noqa: E402
+from check_test_cases import Report  # noqa: E402
 
 QUANTITY = "total_exposure_amount"
 CANDIDATE = "a" * 40
@@ -378,6 +379,32 @@ class WideningTest(unittest.TestCase):
                 found = check_accuracy.check(root)[0]
                 self.assertEqual(any("ACC-02 was frozen at v1.0.0" in item for item in found),
                                  dropped, found)
+
+
+class MalformedExpectedTest(unittest.TestCase):
+    def outputs(self, expected: dict[str, Any]) -> list[Any]:
+        with repository(None) as root:
+            (root / "tests/expected/demo-calibration.json").write_text(json.dumps(expected), "utf-8")
+            return check_accuracy.case_outputs(root, "demo-calibration", Report())[1]
+
+    def test_malformed_outputs_give_no_measurement_and_no_error(self) -> None:
+        # check_test_cases.py reports each of these forms; the accuracy check skips them.
+        item = {"quantity": QUANTITY, "scope": None, "value": 1.0, "unit": "EUR",
+                "tolerance": {"absolute": 0.01, "relative": 0}, "reference": {"class": "independent"}}
+        base = {"schema_version": 1, "kind": "test-expected", "fixture": "demo-calibration"}
+        cases = {
+            "variants as a list": {**base, "variants": [[item]]},
+            "no relative tolerance": {**base, "outputs": [{**item, "tolerance": {"absolute": 0.01}}]},
+            "a tolerance that is not a number": {**base, "outputs": [
+                {**item, "tolerance": {"absolute": "0.01", "relative": 0}}]},
+        }
+        for name, expected in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.outputs(expected), [])
+        reference = self.outputs({**base, "outputs": [{**item, "reference": "independent"}]})
+        self.assertEqual([output.reference for output in reference], ["None"])
+        self.assertEqual([output.reference for output in self.outputs({**base, "outputs": [item]})],
+                         ["independent"])
 
 
 if __name__ == "__main__":
