@@ -12,6 +12,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -261,14 +262,19 @@ class PowerShellTest(unittest.TestCase):
         self.assertLess(first, second)
         # Each call has its own catch, and only the first failure is kept.
         self.assertEqual(script.count("if (-not $failure) { $failure = "), 2)
-        policy = check_excel_run.parse_policy(
-            (ROOT / check_excel_run.POLICY).read_text(encoding="utf-8").replace(
-                '"suites": []', '"suites": [{"name": "project", "source": '
-                '"tests/modules/TEST_Project.bas", "certification_entry_point": '
-                '"CertifyProject", "expected_cases": 1, "expected_assertions": 1, '
-                '"log": "project.log", "certification_log": "project-certification.log"}]'))
+        # Added after the suites the working policy already lists, whatever they are.
+        data = json.loads((ROOT / check_excel_run.POLICY).read_text(encoding="utf-8"))
+        listed = [f"{Path(item['source']).stem}.{item['certification_entry_point']}"
+                  for item in data["suites"]]
+        data["suites"].append({
+            "name": "added-project", "source": "tests/modules/TEST_AddedProject.bas",
+            "certification_entry_point": "CertifyAddedProject", "expected_cases": 1,
+            "expected_assertions": 1, "log": "added-project.log",
+            "certification_log": "added-project-certification.log"})
+        policy = check_excel_run.parse_policy(json.dumps(data))
         self.assertEqual(excel_run.entry_points(policy),
-                         [f"TEST_Examples.{POLICY.entry_point}", "TEST_Project.CertifyProject"])
+                         [f"{Path(POLICY.suite_source).stem}.{POLICY.entry_point}", *listed,
+                          "TEST_AddedProject.CertifyAddedProject"])
 
     def test_the_command_is_encoded_and_skips_the_profile(self) -> None:
         text = excel_run.encoded(self.script)

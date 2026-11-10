@@ -590,7 +590,7 @@ milestones and their pull requests.
   with the outputs that the example suite's results case records. The tests
   of a tool use synthetic cases, contracts, modules and build configuration
   of their own, and the tests of the repository derive their expected values
-  from its files. No test comment cites a template issue (#368, #371).
+  from its files. No test comment cites a template issue (#368, #371, #373).
 
 ### Validation
 
