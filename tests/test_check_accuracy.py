@@ -2,8 +2,10 @@
 
 Each test builds a throw-away repository from this one's methodology guides
 and test cases, adds a non-illustrative calculation CALC-02 with synthetic
-cases whose values are marked independent, and writes a registry. The values
-are fixtures for the check only: no contract here guarantees anything.
+cases whose values are marked independent and an illustrative calculation
+CALC-03 with synthetic cases, and writes a registry. The values are fixtures
+for the check only: no contract here guarantees anything, and none depends on
+the cases or contracts this repository holds.
 """
 
 from __future__ import annotations
@@ -30,11 +32,11 @@ from check_test_cases import Report  # noqa: E402
 QUANTITY = "total_exposure_amount"
 CANDIDATE = "a" * 40
 ILLUSTRATIVE = {
-    "id": "ACC-01", "calculation": "CALC-01", "regime": "illustrative",
-    "quantities": ["illustrative_total_notional_amount"], "metric": "absolute",
-    "threshold": 0.000001, "provenance": "Format example", "status": "draft",
-    "decision": None, "calibration_cases": ["illustrative-format-example"],
-    "holdout_cases": ["illustrative-file-import-example"],
+    "id": "ACC-01", "calculation": "CALC-03", "regime": "illustrative",
+    "quantities": [QUANTITY], "metric": "absolute",
+    "threshold": 0.000001, "provenance": "Synthetic fixture", "status": "draft",
+    "decision": None, "calibration_cases": ["demo-illustrative-calibration"],
+    "holdout_cases": ["demo-illustrative-holdout"],
 }
 FROZEN = {
     "id": "ACC-02", "calculation": "CALC-02", "regime": "CRR3", "quantities": [QUANTITY],
@@ -49,13 +51,14 @@ def registry(*contracts: dict[str, Any], minimum: int = 2) -> dict[str, Any]:
             "contracts": [copy.deepcopy(item) for item in contracts]}
 
 
-def demo_case(root: Path, case: str, value: float, reference: str = "independent") -> None:
+def demo_case(root: Path, case: str, value: float, reference: str = "independent",
+              calculation: str = "CALC-02") -> None:
     fixture = {"schema_version": 1, "kind": "test-fixture", "id": case, "synthetic": True,
-               "description": "Synthetic", "category": "nominal", "calculation": "CALC-02",
+               "description": "Synthetic", "category": "nominal", "calculation": calculation,
                "reporting_date": "2026-01-02", "reporting_currency_code": "EUR",
                "datasets": {"DS-01": [{"id": "P1", "inputs": {"currency_code": "EUR"}}]}}
     expected = {"schema_version": 1, "kind": "test-expected", "fixture": case, "outputs": [
-        {"quantity": QUANTITY, "scope": None, "rule": "CALC-02.1", "value": value,
+        {"quantity": QUANTITY, "scope": None, "rule": f"{calculation}.1", "value": value,
          "unit": "EUR", "tolerance": {"absolute": 0.01, "relative": 0},
          "reference": {"class": reference}}]}
     (root / "tests/fixtures" / f"{case}.json").write_text(json.dumps(fixture), "utf-8")
@@ -70,16 +73,21 @@ def git(root: Path, *args: str) -> None:
 
 @contextlib.contextmanager
 def repository(content: dict[str, Any] | None) -> Iterator[Path]:
-    """This repository's guides and cases, CALC-02 and its three cases, and ``content``."""
+    """This repository's guides and cases, CALC-02 and its three cases, CALC-03 and its
+    two cases, and ``content``. The two calculations are declared last, so they
+    replace any of the same ID."""
     with tempfile.TemporaryDirectory(prefix="accuracy-") as temporary:
         root = Path(temporary)
         for name in ("docs/methodology", "tests/fixtures", "tests/expected"):
             shutil.copytree(ROOT / name, root / name)
         contracts = root / "docs/methodology/CALCULATION_CONTRACTS.md"
-        contracts.write_text(contracts.read_text("utf-8") + "\n### `CALC-02` Demo\n", "utf-8")
+        contracts.write_text(contracts.read_text("utf-8") + "\n### `CALC-02` Demo\n"
+                             "\n### *Illustrative:* `CALC-03` Illustrative demo\n", "utf-8")
         demo_case(root, "demo-calibration", 100.0)
         demo_case(root, "demo-holdout-1", 200.0)
         demo_case(root, "demo-holdout-2", 0.0)
+        for case in ("demo-illustrative-calibration", "demo-illustrative-holdout"):
+            demo_case(root, case, 50.0, reference="illustrative", calculation="CALC-03")
         if content is not None:
             (root / "tests/accuracy").mkdir(parents=True)
             (root / "tests/accuracy/contracts.json").write_text(json.dumps(content), "utf-8")
@@ -108,10 +116,14 @@ class RegistryTest(unittest.TestCase):
         self.assertTrue(any(text in item for item in found), found)
 
     def test_the_repository_registry_passes(self) -> None:
-        self.assertEqual(check_accuracy.check(ROOT)[:2], ([], 1))
+        # Whatever contracts this repository's registry holds, if it has one.
+        registry = ROOT / check_accuracy.REGISTRY
+        count = len(json.loads(registry.read_text("utf-8"))["contracts"]) \
+            if registry.is_file() else 0
+        self.assertEqual(check_accuracy.check(ROOT)[:2], ([], count))
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(check_accuracy.main(["--root", str(ROOT)]), 0)
-        self.assertIn("accuracy: PASS (1 contract(s); registry only", output.getvalue())
+        self.assertIn(f"accuracy: PASS ({count} contract(s); registry only", output.getvalue())
 
     def test_valid_draft_and_frozen_contracts_pass(self) -> None:
         self.assertEqual(findings(registry(ILLUSTRATIVE, FROZEN)), [])
@@ -152,8 +164,8 @@ class RegistryTest(unittest.TestCase):
         cases: dict[str, dict[str, Any]] = {
             "calculation CALC-09 is not declared": {"calculation": "CALC-09"},
             "case missing-case has no fixture": {"calibration_cases": ["missing-case"]},
-            "case illustrative-format-example tests CALC-01, not CALC-02":
-                {"calibration_cases": ["illustrative-format-example"]},
+            "case demo-illustrative-calibration tests CALC-03, not CALC-02":
+                {"calibration_cases": ["demo-illustrative-calibration"]},
             "case demo-calibration has no expected number for other_amount":
                 {"quantities": [QUANTITY, "other_amount"]},
             "case demo-holdout-1 is both calibration and holdout":
@@ -177,7 +189,7 @@ class RegistryTest(unittest.TestCase):
                            "a frozen contract needs at least 3 holdout case(s), has 2")
         self.assertFinding(findings(registry({**ILLUSTRATIVE, "status": "frozen",
                                               "decision": "#1"}, minimum=1)),
-                           "calculation CALC-01 is illustrative, so the contract stays draft")
+                           "calculation CALC-03 is illustrative, so the contract stays draft")
         with repository(registry(FROZEN)) as root:
             demo_case(root, "demo-holdout-2", 0.0, reference="illustrative")
             self.assertTrue(any("holdout output demo-holdout-2 total_exposure_amount is not "

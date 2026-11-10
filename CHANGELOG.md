@@ -578,6 +578,15 @@ milestones and their pull requests.
   then still prints its report. Without Node.js, a local run of
   **Repository integrity** skips `issue-configuration`, as it skips the label
   checks, instead of failing it (#367).
+- The tests that a generated repository keeps no longer depend on the
+  template's illustrative content: they still pass once the setup guide's
+  steps replace the illustrative cases and the contract `ACC-01`, change the
+  example suite's counts, delete or replace the relation tests, or rename the
+  illustrative sheets, and once `docs/PUBLIC_API.txt` lists a declaration. The
+  tests of a tool use synthetic cases, contracts, modules and build
+  configuration of their own, and the tests of the repository derive their
+  expected values from its files. No test comment cites a template issue
+  (#368).
 
 ### Validation
 

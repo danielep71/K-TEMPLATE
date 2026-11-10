@@ -718,9 +718,15 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(self.findings(VALID), [])
         self.assertEqual(self.findings(api_files()), [])
 
-    def test_repository_inventory_matches_empty_source(self) -> None:
+    def test_repository_inventory_matches_its_source(self) -> None:
+        # The inventory and the source of this repository together, so the test holds
+        # whether or not the inventory lists a declaration yet.
+        findings, _, declarations = check_vba_public_api.check(ROOT)
+        self.assertEqual([str(finding) for finding in findings], [])
         inventory = (ROOT / "docs/PUBLIC_API.txt").read_text(encoding="utf-8")
-        self.assertEqual(self.findings({"docs/PUBLIC_API.txt": inventory}), [])
+        listed = [line for line in inventory.splitlines()
+                  if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(declarations, len(listed))
 
     def test_implicit_visibility_is_rejected_everywhere(self) -> None:
         self.assertFinding(api_files(API_FACADE.replace("Public Function DEMO_Echo",

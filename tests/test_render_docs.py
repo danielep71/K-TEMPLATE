@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -21,6 +22,28 @@ import check_excel_run  # noqa: E402
 import check_repository  # noqa: E402
 import render_docs  # noqa: E402
 from render_docs import Block  # noqa: E402
+
+
+def suite_counts() -> tuple[int, int, int]:
+    """The example suite's expected cases and assertions, read from its source as
+    tests/test_vba_harness.py reads them, and the assertions of the last case its
+    runner calls."""
+    policy = json.loads((ROOT / ".github/excel-evidence-policy.json").read_text("utf-8"))
+    source = (ROOT / policy["suite"]["source"]).read_text("ascii").replace("\r\n", "\n")
+
+    def constant(name: str) -> int:
+        match = re.search(rf"^\s*Private Const {name}\s+As Long = (\d+)\b", source, re.M)
+        assert match, name
+        return int(match.group(1))
+
+    def body(name: str) -> str:
+        match = re.search(rf"^Private Sub {name}\(.*?^End Sub$", source, re.M | re.S)
+        assert match, name
+        return match.group(0)
+
+    last = re.findall(r"^\s+(Case\w+)$", body("RunSuite"), re.M)[-1]
+    return (constant("EXPECTED_CASES"), constant("EXPECTED_ASSERTIONS"),
+            len(re.findall(r"TEST_Harness\.Assert\w+ ", body(last))))
 
 
 def begin(name: str) -> str:
@@ -211,12 +234,16 @@ class RepositoryTest(unittest.TestCase):
             self.assertEqual(render_docs.run(ROOT, write=False), [])
 
     def test_the_suite_results_follow_the_suite(self) -> None:
+        cases, assertions, last = suite_counts()
         text = render_docs.example_suite_results(ROOT)
         self.assertIn("RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; "
-                      "cases=14; assertions=34; failures=0; cleanup=PASS; recovery=NONE", text)
+                      f"cases={cases}; assertions={assertions}; failures=0; cleanup=PASS; "
+                      "recovery=NONE", text)
+        # The skipped-case run leaves out the last case and its assertions.
         self.assertIn("`TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, "
-                      "`operation=PASS`, `completeness=INCOMPLETE`, `cases=13`, "
-                      "`assertions=32`, `failures=1`", text)
+                      "`operation=PASS`, `completeness=INCOMPLETE`, "
+                      f"`cases={cases - 1}`, `assertions={assertions - last}`, `failures=1`",
+                      text)
         self.assertIn("Two more entry points", text)
 
     def test_every_check_is_listed_once_and_described(self) -> None:
