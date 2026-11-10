@@ -557,7 +557,7 @@ milestones and their pull requests.
   table covers every tracked file, names both traffic tests and
   `tests/test_excel_run.py`, and describes each test of
   `tests/test_repository_consistency.py`; the structure guide covers the
-  root files, the reserved `VERSION`, all of `.github/`, `docs/release/`,
+  root files, `VERSION`, all of `.github/`, `docs/release/`,
   `docs/licenses/` and the harness guide. The label guide matches the
   workflows' write-permission list. `.gitattributes`, `.editorconfig` and the
   guides name the source register in `SOURCES.md`. The calculation
@@ -565,28 +565,32 @@ milestones and their pull requests.
   rules hold the default tolerances, and a contract lists its `_status`
   quantities and their texts under *Failure behaviour*. The rules for filling
   in the guides name the guides with a *Decisions* table and the two tables
-  that differ (#286, #287, #301, #302, #318, #319).
+  that differ (#286, #287, #301, #302, #318, #319, #366, #371).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).
 - A backtick, pipe or line break in a label name, colour or API error no
   longer breaks the code span or table row of the label synchronization and
   drift summaries (#189).
-- A malformed expected file, evidence policy or suite entry point is reported
-  as a finding by the derivation, accuracy and generated-documentation
-  checks, instead of stopping them with a traceback; the Excel-run check
-  then still prints its report. Without Node.js, a local run of
-  **Repository integrity** skips `issue-configuration`, as it skips the label
-  checks, instead of failing it (#367).
+- A malformed expected file no longer stops the derivation, accuracy and
+  Excel-run checks with a traceback: they leave its malformed outputs out,
+  and the test-case check reports them. A malformed evidence policy, a suite
+  entry point the suite source lacks, or a suite source that does not exist
+  is reported as a finding by the generated-documentation check instead of a
+  traceback. Without Node.js, a local run of **Repository integrity** skips
+  `issue-configuration`, as it skips the label checks, instead of failing it
+  (#367, #371).
 - The tests that a generated repository keeps no longer depend on the
   template's illustrative content: they still pass once the setup guide's
   steps replace the illustrative cases and the contract `ACC-01`, change the
-  example suite's counts, delete or replace the relation tests, or rename the
-  illustrative sheets, and once `docs/PUBLIC_API.txt` lists a declaration. The
-  tests of a tool use synthetic cases, contracts, modules and build
-  configuration of their own, and the tests of the repository derive their
-  expected values from its files. No test comment cites a template issue
-  (#368).
+  example suite's counts, delete or replace the relation tests, rename the
+  illustrative sheets or list a project suite in the evidence policy, once
+  `docs/PUBLIC_API.txt` lists a declaration, including one declared in both
+  branches of an `#If`, and once `tests/accuracy/contracts.json` is removed
+  with the outputs that the example suite's results case records. The tests
+  of a tool use synthetic cases, contracts, modules and build configuration
+  of their own, and the tests of the repository derive their expected values
+  from its files. No test comment cites a template issue (#368, #371).
 
 ### Validation
 

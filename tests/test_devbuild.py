@@ -274,14 +274,16 @@ class Layout(unittest.TestCase):
 
     def test_invalid_layouts_are_refused(self) -> None:
         base = self.layout
+        # A sheet of the configuration, whatever the repository names it.
+        sheet = base.sheets[0].code_name
         cases = {
             "no sheet": build_workbook.Layout(base.workbook_code_name, (), base.names,
                                               base.stamp, base.configurations),
             "code name is used twice": build_workbook.Layout(
-                "shReadme", base.sheets, base.names, base.stamp, base.configurations),
+                sheet, base.sheets, base.names, base.stamp, base.configurations),
             "not one cell": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
-                (*base.names, build_workbook.DefinedName("cfg_x", "shInputs", "C5:C6", "")),
+                (*base.names, build_workbook.DefinedName("cfg_x", sheet, "C5:C6", "")),
                 base.stamp, base.configurations),
             "unknown sheet": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
@@ -301,7 +303,7 @@ class Layout(unittest.TestCase):
                 {**base.stamp, "commit": "test_commit"}, base.configurations),
             "not a valid name": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
-                (*base.names, build_workbook.DefinedName("AB12", "shInputs", "A1", "")),
+                (*base.names, build_workbook.DefinedName("AB12", sheet, "A1", "")),
                 base.stamp, base.configurations),
         }
         for expected, layout in cases.items():
