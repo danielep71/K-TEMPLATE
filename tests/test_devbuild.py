@@ -7,7 +7,9 @@ defect fails here without Excel. They also check that
 tools/devbuild/build_workbook.py builds the sheets, code names, defined names
 and stamp of tools/devbuild/workbook.json, that this configuration matches
 docs/methodology/WORKBOOK_CONTRACT.md, and that a rebuild is byte-identical,
-from blank sheets and from a synthetic layout template.
+from blank sheets and from a synthetic layout template. The builds of a
+project's own modules and of the template use the template's synthetic build
+configuration (tests/workbook_template.py), not this repository's sheets.
 """
 
 from __future__ import annotations
@@ -272,14 +274,16 @@ class Layout(unittest.TestCase):
 
     def test_invalid_layouts_are_refused(self) -> None:
         base = self.layout
+        # A sheet of the configuration, whatever the repository names it.
+        sheet = base.sheets[0].code_name
         cases = {
             "no sheet": build_workbook.Layout(base.workbook_code_name, (), base.names,
                                               base.stamp, base.configurations),
             "code name is used twice": build_workbook.Layout(
-                "shReadme", base.sheets, base.names, base.stamp, base.configurations),
+                sheet, base.sheets, base.names, base.stamp, base.configurations),
             "not one cell": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
-                (*base.names, build_workbook.DefinedName("cfg_x", "shInputs", "C5:C6", "")),
+                (*base.names, build_workbook.DefinedName("cfg_x", sheet, "C5:C6", "")),
                 base.stamp, base.configurations),
             "unknown sheet": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
@@ -299,7 +303,7 @@ class Layout(unittest.TestCase):
                 {**base.stamp, "commit": "test_commit"}, base.configurations),
             "not a valid name": build_workbook.Layout(
                 base.workbook_code_name, base.sheets,
-                (*base.names, build_workbook.DefinedName("AB12", "shInputs", "A1", "")),
+                (*base.names, build_workbook.DefinedName("AB12", sheet, "A1", "")),
                 base.stamp, base.configurations),
         }
         for expected, layout in cases.items():
@@ -345,9 +349,11 @@ class Components(unittest.TestCase):
     layout = build_workbook.load_layout(ROOT)
 
     def test_standard_and_class_modules_by_configuration(self) -> None:
+        # A document module of one of the configuration's sheets is not a component.
+        document = f"src/workbook/{self.layout.sheets[0].code_name}.cls"
         files = {"src/core/CORE_A.bas": b"x", "src/classes/CPair.cls": b"x",
                  "src/workbook/M_Run.bas": b"x", "tests/modules/TEST_A.bas": b"x",
-                 "src/workbook/shInputs.cls": b"x", "docs/notes.bas": b"x"}
+                 document: b"x", "docs/notes.bas": b"x"}
         with source_tree(files) as root:
             names = {configuration: [path.relative_to(root).as_posix() for path in
                                      build_workbook.components(root, self.layout, configuration)]
@@ -489,10 +495,15 @@ def git_tree(files: dict[str, bytes]) -> Any:
         yield root
 
 
+# The synthetic build configuration, whose sheets the project and template builds use.
+SYNTHETIC_CONFIG = {build_workbook.CONFIG: workbook_template.build_configuration_bytes()}
+
+
 class ProjectSource(unittest.TestCase):
     """Builds of a project with its own standard, class and document modules."""
 
-    files = {"src/core/CORE_Demo.bas": b'Attribute VB_Name = "CORE_Demo"\r\nOption Explicit\r\n',
+    files = {**SYNTHETIC_CONFIG,
+             "src/core/CORE_Demo.bas": b'Attribute VB_Name = "CORE_Demo"\r\nOption Explicit\r\n',
              "src/classes/CPair.cls": CLASS_SOURCE,
              "src/workbook/shInputs.cls": SHEET_SOURCE}
 
@@ -512,7 +523,7 @@ class ProjectSource(unittest.TestCase):
         self.assertTrue(sheet.startswith('Attribute VB_Name = "shInputs"'))
 
     def test_a_test_sheet_module_is_left_out_of_production_only(self) -> None:
-        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config = workbook_template.build_configuration()
         config["sheets"].append({"tab": "Checks", "code_name": "shChecks", "role": "Test"})
         checks = (b'Attribute VB_Name = "shChecks"\r\nOption Explicit\r\n'
                   b"Private Sub Worksheet_Activate()\r\nEnd Sub\r\n")
@@ -530,7 +541,8 @@ class ProjectSource(unittest.TestCase):
         self.assertIn("Document=shChecks/&H00000000", projects["development"])
 
     def test_a_document_module_in_the_wrong_case_stops_the_build(self) -> None:
-        files = {"src/workbook/shINPUTS.cls": SHEET_SOURCE.replace(b"shInputs", b"shINPUTS")}
+        files = {**SYNTHETIC_CONFIG,
+                 "src/workbook/shINPUTS.cls": SHEET_SOURCE.replace(b"shInputs", b"shINPUTS")}
         with git_tree(files) as root, tempfile.TemporaryDirectory() as temporary, \
                 self.assertRaisesRegex(build_workbook.BuildError,
                                        r"shINPUTS\.cls \(code name shInputs\) differs"):
@@ -547,7 +559,8 @@ class TemplateBuild(unittest.TestCase):
     def build(self, files: dict[str, bytes], configuration: str = "production"
               ) -> tuple[bytes, bytes, build_workbook.Build]:
         """Two builds of one commit, and what the first holds."""
-        with git_tree({build_workbook.TEMPLATE: workbook_template.template(), **files}) as root, \
+        with git_tree({**SYNTHETIC_CONFIG, build_workbook.TEMPLATE: workbook_template.template(),
+                       **files}) as root, \
                 tempfile.TemporaryDirectory() as temporary:
             first, second = Path(temporary) / "first.xlsm", Path(temporary) / "second.xlsm"
             result = build_workbook.build(root, configuration, first)
@@ -597,7 +610,7 @@ class TemplateBuild(unittest.TestCase):
                                 ("configuration", "production")):
                 with self.subTest(stamp=role):
                     self.assertEqual(check_excel_run.read_stamp(
-                        path, build_workbook.load_layout(ROOT).stamp[role]), value)
+                        path, workbook_template.build_configuration()["stamp"][role]), value)
 
     def test_a_stamp_cell_takes_the_style_of_its_row_or_column(self) -> None:
         sheet = workbook_template.Sheet("Readme", {"A1": (0, 0)}, columns=((2, 2, 1),))
@@ -613,7 +626,7 @@ class TemplateBuild(unittest.TestCase):
                       build_workbook.set_cell(row, 1, 3, "c"))
 
     def test_development_appends_the_test_sheets_blank(self) -> None:
-        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config = workbook_template.build_configuration()
         config["sheets"].append({"tab": "Checks", "code_name": "shChecks", "role": "Test"})
         config["names"].append({"name": "Checks_Results", "sheet": "shChecks", "cell": "B3",
                                 "label": "Results"})
@@ -639,7 +652,7 @@ class TemplateBuild(unittest.TestCase):
             self.assertNotIn("xl/worksheets/sheet3.xml", built.namelist())
 
     def test_a_template_that_differs_from_the_configuration_stops_the_build(self) -> None:
-        config = json.loads((ROOT / build_workbook.CONFIG).read_text(encoding="utf-8"))
+        config = workbook_template.build_configuration()
         config["sheets"].insert(0, {"tab": "Checks", "code_name": "shChecks", "role": "Test"})
         names = dict(workbook_template.DEFAULT_NAMES)
         moved = {**names, "cfg_reporting_date": "Inputs!$C$6"}
@@ -655,7 +668,7 @@ class TemplateBuild(unittest.TestCase):
         }
         for expected, data in cases.items():
             with self.subTest(expected=expected), git_tree(
-                    {build_workbook.TEMPLATE: data}) as root, \
+                    {**SYNTHETIC_CONFIG, build_workbook.TEMPLATE: data}) as root, \
                     tempfile.TemporaryDirectory() as temporary, \
                     self.assertRaisesRegex(build_workbook.BuildError, expected):
                 build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
@@ -672,13 +685,14 @@ class TemplateBuild(unittest.TestCase):
             for name in template.namelist():
                 copy.writestr(name, template.read(name))
             copy.writestr("xl/vbaProject.bin", b"project")
-        with git_tree({build_workbook.TEMPLATE: buffer.getvalue()}) as root, \
+        with git_tree({**SYNTHETIC_CONFIG, build_workbook.TEMPLATE: buffer.getvalue()}) as root, \
                 tempfile.TemporaryDirectory() as temporary, \
                 self.assertRaisesRegex(build_workbook.BuildError, "carries macros"):
             build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
 
     def test_main_names_the_layout(self) -> None:
-        with git_tree({build_workbook.TEMPLATE: workbook_template.template()}) as root, \
+        with git_tree({**SYNTHETIC_CONFIG,
+                       build_workbook.TEMPLATE: workbook_template.template()}) as root, \
                 tempfile.TemporaryDirectory() as temporary, \
                 contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(build_workbook.main([str(Path(temporary) / "W.xlsm"), "--root",

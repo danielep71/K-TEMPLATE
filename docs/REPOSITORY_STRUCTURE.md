@@ -14,7 +14,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | Location | Holds | In the template |
 | --- | --- | --- |
 | Repository root | The README; the contribution, conduct, security, installation and release guides (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `INSTALLATION.md`, `RELEASING.md`); `CHANGELOG.md`, `AGENTS.md` and `LICENSE`; the Ruff and mypy settings in `pyproject.toml`; and the Git and editor rules in `.gitattributes`, `.gitignore` and `.editorconfig` | Present |
-| `VERSION` | The newest released version, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md)) | Reserved |
+| `VERSION` | The newest released version, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md)) | Present: the newest released version, which [current status](../RELEASING.md#current-status) also states; `tools/initialize_repository.py` deletes it in a new repository |
 | `.github/` | Workflows (`workflows/`) and the label scripts they run (`scripts/`); issue forms (`ISSUE_TEMPLATE/`) and the pull request template; the label catalogue `labels.json`; the Dependabot configuration and the hash-locked configuration parser of the workflow tests (`requirements.txt`); the binary allowlist `binary-allowlist.json`; the Excel evidence policy `excel-evidence-policy.json`; and, when needed, the expiring link exceptions `link-exceptions.json` | Present, without `link-exceptions.json` |
 | `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
 | `docs/methodology/` | The [index](methodology/README.md) of the guides: sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format, [workbook contract](methodology/WORKBOOK_CONTRACT.md) and [VBA test harness](methodology/TEST_HARNESS.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
@@ -100,6 +100,10 @@ Each supported declaration is recorded as two tab-separated lines:
   `Total(ByVal Amount As Double)`. An `Enum` or `Type` is recorded with its
   whole block, each line normalized and joined with ` | `, for example
   `Public Enum DemoMode | dmFirst = 1 | End Enum`.
+- **Conditional compilation:** a declaration compiled in several `#If`
+  branches has one row. Its `# SIG` lines give each distinct signature once,
+  so a declaration whose parameters differ between branches has one `# SIG`
+  line per branch signature.
 - Blank lines and other lines starting with `#` are ignored. Public members of
   a class follow the same format once the class is supported.
 

@@ -61,7 +61,10 @@ class Block:
 def example_suite_results(root: Path) -> str:
     """The passing RESULT line and the expected end of each failure mode."""
     policy = check_excel_run.working_policy(root)
-    source = (root / policy.suite_source).read_bytes()
+    path = root / policy.suite_source
+    if not path.is_file():
+        raise ValueError(f"{policy.suite_source}: missing")
+    source = path.read_bytes()
     suite = check_excel_run.read_suite(source, policy.office)
     text = source.decode("ascii", errors="replace").replace("\r\n", "\n")
     entry_points = {mode: name for name, mode in ENTRY_POINT.findall(text)}
@@ -78,6 +81,8 @@ def example_suite_results(root: Path) -> str:
                   if plan.result[key] != passing.result[key]]
         shown.append("failures")
         fields = ", ".join(f"`{key}={plan.result[key]}`" for key in shown)
+        if plan.mode not in entry_points:
+            raise ValueError(f"{policy.suite_source} has no entry point for {plan.mode}")
         rows.append(f"| `{module}.{entry_points[plan.mode]}` | {fields}, then *Suite "
                     f"{policy.suite} did not pass* |")
     return "\n".join([
@@ -243,7 +248,7 @@ def run(root: Path, write: bool) -> list[str]:
             begin, end = spans[name]
             try:
                 fresh = "\n" + BLOCKS[name].render(root) + "\n"
-            except ValueError as error:
+            except (OSError, ValueError, check_excel_run.PolicyError) as error:
                 problems.append(f"{path}: block {name} cannot be rendered: {error}")
                 continue
             if updated[begin:end] != fresh:

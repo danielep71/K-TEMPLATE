@@ -4,12 +4,15 @@ The checked commit is made in a temporary Git repository from the working
 tree's tests/modules/, so the tests follow the suite as it is edited. Each
 fixture is an evidence folder built in a temporary directory: that commit's
 VBA components as the VBE exports them (CRLF), the three logs and the
-certification log the harness would write for its example suite, the results
+certification log the harness would write for its example suite, the log and
+certification log of each project suite the commit's policy lists, the results
 file of its normal run, and host.txt. The commit also holds the working
-tree's test cases and accuracy contracts, which the results are measured
-against. The logs and results are synthetic: they follow
+tree's test cases and accuracy contracts, if any, which the results are
+measured against. The logs and results are synthetic: they follow
 docs/methodology/TEST_HARNESS.md and TEST_Examples.bas, not a recorded Excel
-run.
+run. The tests of the measurement itself, and of a project or relation suite,
+use synthetic contracts, cases and modules written into their own commit, so
+they hold whatever contracts, cases and suites this repository has.
 """
 
 from __future__ import annotations
@@ -44,7 +47,10 @@ from check_excel_run import Suite, components, read_suite  # noqa: E402
 # The policy of the working tree; make_repository commits it with the modules.
 POLICY = check_excel_run.working_policy(SOURCE)
 
-MODULES = sorted((SOURCE / "tests/modules").glob("*.bas"))
+# The VBA test modules, with the source of each project suite of the policy.
+MODULES = sorted({*(SOURCE / "tests/modules").glob("*.bas"),
+                  *(path for path in (SOURCE / item.source for item in POLICY.project_suites)
+                    if path.is_file())})
 # A synthetic form and its binary resources, which the VBE exports as a pair.
 FORM = {"src/forms/frmFixture.frm": b'VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} '
                                     b'frmFixture\n   OleObjectBlob   =   "frmFixture.frx":0000\n'
@@ -183,14 +189,17 @@ def certification_log(name: str = "examples",
     return lines
 
 
-def results_document(commit: str = COMMIT) -> dict[str, Any]:
-    """The results file a correct normal run writes: every output of the contracts'
-    quantities in their cases, equal to its expected value."""
-    registry = json.loads((SOURCE / check_accuracy.REGISTRY).read_text(encoding="utf-8"))
+def results_document(commit: str = COMMIT, root: Path = ROOT) -> dict[str, Any]:
+    """The results file a correct normal run writes for the commit checked out in
+    ``root``: every output of its contracts' quantities in their cases, equal to its
+    expected value, and no result when it has no accuracy registry."""
+    path = root / check_accuracy.REGISTRY
+    registry = json.loads(path.read_text(encoding="utf-8")) if path.is_file() \
+        else {"contracts": []}
     results = []
     for contract in registry["contracts"]:
         for case in [*contract["calibration_cases"], *contract["holdout_cases"]]:
-            expected = json.loads((SOURCE / "tests/expected" / f"{case}.json")
+            expected = json.loads((root / "tests/expected" / f"{case}.json")
                                   .read_text(encoding="utf-8"))
             groups = [(None, expected["outputs"])] if "outputs" in expected \
                 else sorted(expected["variants"].items())
@@ -201,27 +210,41 @@ def results_document(commit: str = COMMIT) -> dict[str, Any]:
     return {"schema_version": 1, "kind": "test-results", "commit": commit, "results": results}
 
 
-def write_results(folder: Path, document: dict[str, Any]) -> None:
-    (folder / POLICY.results).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+def write_results(folder: Path, document: dict[str, Any], name: str = POLICY.results) -> None:
+    (folder / name).write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+
+
+def write_log(folder: Path, name: str, lines: list[str]) -> None:
+    (folder / name).write_bytes(("\r\n".join(lines) + "\r\n").encode())
 
 
 @contextlib.contextmanager
 def evidence(change: Callable[[Path], None] | None = None, root: Path = ROOT,
              commit: str = COMMIT) -> Iterator[Path]:
-    """A complete, valid evidence folder for the example suite of ``commit``, then
-    ``change`` applied to it."""
+    """A complete, valid evidence folder for the suites of ``commit``, then ``change``
+    applied to it. The example suite's results file holds every result; the results
+    file of a project suite that names one holds none, since the files are measured
+    together."""
+    policy = check_excel_run.policy_at(root, commit)
+    sources = components(root, commit)
     with tempfile.TemporaryDirectory(prefix="excel-run-") as temporary:
         folder = Path(temporary)
         (folder / "exported").mkdir()
-        for name, data in components(root, commit).items():
+        for name, data in sources.items():
             exported = data if name.endswith(".frx") else data.replace(b"\n", b"\r\n")
             (folder / "exported" / name).write_bytes(exported)
         for mode, filename in POLICY.logs.items():
-            (folder / filename).write_bytes(("\r\n".join(run_log(mode)) + "\r\n").encode())
-        (folder / POLICY.certification).write_bytes(
-            ("\r\n".join(certification_log()) + "\r\n").encode())
+            write_log(folder, filename, run_log(mode))
+        write_log(folder, POLICY.certification, certification_log())
+        for item in policy.project_suites:
+            project = read_suite(sources[Path(item.source).name], policy.office, item.runner)
+            write_log(folder, item.log, run_log("NORMAL", project, item.name))
+            write_log(folder, item.certification, certification_log(item.name, ("NORMAL",)))
+            if item.results is not None:
+                write_results(folder, dict(results_document(commit, root), results=[]),
+                              item.results)
         (folder / "host.txt").write_text(HOST, encoding="utf-8")
-        write_results(folder, results_document(commit))
+        write_results(folder, results_document(commit, root))
         if change:
             change(folder)
         yield folder
@@ -273,7 +296,7 @@ class RebuildTest(unittest.TestCase):
     def automated(self, folder: Path) -> None:
         """What tools/devbuild/excel_run.py leaves: no export, compile=ON_DEMAND."""
         shutil.rmtree(folder / POLICY.exported)
-        write_results(folder, results_document(self.commit))
+        write_results(folder, results_document(self.commit, self.root))
         (folder / POLICY.host).write_text(HOST.replace("compile=PASS", "compile=ON_DEMAND"),
                                           encoding="utf-8")
 
@@ -715,26 +738,96 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("excel-run: FAIL", output.getvalue())
 
 
+# A synthetic calculation, declared after the working tree's calculation contracts,
+# and the draft accuracy contracts on synthetic cases of it that the measurement
+# tests use in place of this repository's contracts.
+CALCULATION = "CALC-90"
+QUANTITY = "synthetic_total_amount"
+CALCULATIONS = "docs/methodology/CALCULATION_CONTRACTS.md"
+# By contract ID: its calibration cases and its holdout cases, each with its
+# one expected value.
+Contracts = dict[str, tuple[dict[str, float], dict[str, float]]]
+EXAMPLE_CONTRACTS: Contracts = {
+    "ACC-01": ({"synthetic-calibration": 1000000}, {"synthetic-holdout": 2500})}
+
+
+def accuracy_files(contracts: Contracts) -> dict[str, bytes]:
+    """The files of a commit whose registry holds only ``contracts``, with their
+    cases and the declaration of their calculation."""
+    files = {CALCULATIONS: (SOURCE / CALCULATIONS).read_bytes()
+             + f"\n### *Illustrative:* `{CALCULATION}` Synthetic total\n".encode()}
+    registry: dict[str, Any] = {"schema_version": 1, "kind": "accuracy-contracts",
+                                "min_holdout_cases": 1, "contracts": []}
+    for identifier, (calibration, holdout) in contracts.items():
+        registry["contracts"].append({
+            "id": identifier, "calculation": CALCULATION, "regime": "illustrative",
+            "quantities": [QUANTITY], "metric": "absolute", "threshold": 0.000001,
+            "provenance": "Synthetic fixture", "status": "draft", "decision": None,
+            "calibration_cases": list(calibration), "holdout_cases": list(holdout)})
+        for case, value in {**calibration, **holdout}.items():
+            fixture = {"schema_version": 1, "kind": "test-fixture", "id": case,
+                       "calculation": CALCULATION}
+            expected = {"schema_version": 1, "kind": "test-expected", "fixture": case,
+                        "outputs": [{"quantity": QUANTITY, "scope": None, "value": value,
+                                     "tolerance": {"absolute": 0.000001, "relative": 0},
+                                     "reference": {"class": "illustrative"}}]}
+            files[f"tests/fixtures/{case}.json"] = json.dumps(fixture).encode()
+            files[f"tests/expected/{case}.json"] = json.dumps(expected).encode()
+    files[check_accuracy.REGISTRY.as_posix()] = json.dumps(registry).encode()
+    return files
+
+
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
 class ResultsTest(unittest.TestCase):
+    """The results of a commit whose registry holds the synthetic EXAMPLE_CONTRACTS."""
+
+    root: ClassVar[Path]
+    commit: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root, cls.commit = make_repository(extra=accuracy_files(EXAMPLE_CONTRACTS))
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def findings(self, change: Callable[[Path], None] | None = None) -> list[str]:
+        with evidence(change, self.root, self.commit) as folder:
+            return check_excel_run.check(self.root, self.commit, folder).findings
+
     def changed(self, change: Callable[[dict[str, Any]], object]) -> list[str]:
         def apply(folder: Path) -> None:
-            document = results_document()
+            document = results_document(self.commit, self.root)
             change(document)
             write_results(folder, document)
-        return findings(apply)
+        return self.findings(apply)
 
     def test_the_contracts_are_measured_and_reported(self) -> None:
+        with evidence(None, self.root, self.commit) as folder:
+            result = check_excel_run.check(self.root, self.commit, folder)
+        self.assertEqual(result.findings, [])
+        self.assertEqual([line.split(":")[0] for line in result.accuracy],
+                         ["ACC-01 calibration", "ACC-01 holdout"])
+        self.assertIn("Accuracy: ACC-01 calibration: worst absolute error 0.0",
+                      check_excel_run.report(self.commit, result))
+
+    def test_the_repository_contracts_are_measured(self) -> None:
+        # One line for each split of this repository's contracts that lists a case.
+        registry = SOURCE / check_accuracy.REGISTRY
+        if registry.is_file():
+            contracts = json.loads(registry.read_text(encoding="utf-8"))["contracts"]
+            expected = [f"{contract['id']} {split}" for contract in contracts
+                        for split in ("calibration", "holdout") if contract[f"{split}_cases"]]
+        else:
+            expected = ["not measured"]
         with evidence() as folder:
             result = check_excel_run.check(ROOT, COMMIT, folder)
         self.assertEqual(result.findings, [])
-        self.assertTrue(result.accuracy, result.accuracy)
-        self.assertTrue(all(line.startswith("ACC-") for line in result.accuracy), result.accuracy)
-        self.assertIn("Accuracy: ACC-01 calibration: worst absolute error 0.0",
-                      check_excel_run.report(COMMIT, result))
+        self.assertEqual([line.split(":")[0] for line in result.accuracy], expected)
 
     def test_a_missing_results_file_fails_when_contracts_exist(self) -> None:
-        found = findings(lambda folder: (folder / POLICY.results).unlink())
+        found = self.findings(lambda folder: (folder / POLICY.results).unlink())
         self.assertEqual(len(found), 1, found)
         self.assertIn(f"{POLICY.results}: missing", found[0])
 
@@ -745,14 +838,14 @@ class ResultsTest(unittest.TestCase):
     def test_a_malformed_results_file_is_a_finding(self) -> None:
         def broken(folder: Path) -> None:
             (folder / POLICY.results).write_text("{broken", encoding="utf-8")
-        with evidence(broken) as folder:
-            result = check_excel_run.check(ROOT, COMMIT, folder)
+        with evidence(broken, self.root, self.commit) as folder:
+            result = check_excel_run.check(self.root, self.commit, folder)
         self.assertEqual(len(result.findings), 1, result.findings)
         self.assertIn(f"{POLICY.results}: {folder / POLICY.results}: not valid UTF-8 JSON",
                       result.findings[0])
 
     def test_a_marked_or_missing_stamp_fails(self) -> None:
-        for commit in (COMMIT + "+local-changes", ""):
+        for commit in (self.commit + "+local-changes", ""):
             with self.subTest(commit=commit):
                 found = self.changed(lambda document: document.update(commit=commit))
                 self.assertIn("commit is not a full lower-case commit SHA", " ".join(found))
@@ -765,6 +858,7 @@ class ResultsTest(unittest.TestCase):
         def wrong(document: dict[str, Any]) -> None:
             document["results"][0]["value"] += 1
         found = " ".join(self.changed(wrong))
+        self.assertIn("synthetic-calibration synthetic_total_amount is 1000001", found)
         self.assertIn("expected 1000000", found)
         self.assertIn("exceeds the threshold", found)
 
@@ -785,13 +879,13 @@ class ResultsTest(unittest.TestCase):
 
     def test_the_contracts_of_the_commit_judge_the_results(self) -> None:
         # A working-tree change to the registry does not change what the commit holds.
-        with evidence() as folder:
-            before = check_excel_run.check(ROOT, COMMIT, folder).accuracy
-            (ROOT / check_accuracy.REGISTRY).write_text("{}", encoding="utf-8")
+        with evidence(None, self.root, self.commit) as folder:
+            before = check_excel_run.check(self.root, self.commit, folder).accuracy
+            (self.root / check_accuracy.REGISTRY).write_text("{}", encoding="utf-8")
             try:
-                after = check_excel_run.check(ROOT, COMMIT, folder)
+                after = check_excel_run.check(self.root, self.commit, folder)
             finally:
-                subprocess.run(["git", "-C", str(ROOT), "checkout", "--",
+                subprocess.run(["git", "-C", str(self.root), "checkout", "--",
                                 check_accuracy.REGISTRY.as_posix()], check=True)
         self.assertEqual(after.findings, [])
         self.assertEqual(after.accuracy, before)
@@ -899,24 +993,37 @@ PROJECT_ENTRY: dict[str, Any] = {
 # The same suite when it records the output of an accuracy contract of its own.
 PROJECT_RESULTS_ENTRY: dict[str, Any] = dict(PROJECT_ENTRY, results="project-results.json")
 PROJECT_CASE = "project-total"
+# The example contract, and a second contract, ACC-02, whose one case only the
+# project suite computes.
+PROJECT_CONTRACTS: Contracts = {**EXAMPLE_CONTRACTS, "ACC-02": ({PROJECT_CASE: 250}, {})}
 
 
-def project_case_files() -> dict[str, bytes]:
-    """The registry with a second contract, ACC-02, whose one case only the project
-    suite computes, and that case's fixture and expected file."""
-    registry = json.loads((SOURCE / check_accuracy.REGISTRY).read_text(encoding="utf-8"))
-    contract = dict(registry["contracts"][0], id="ACC-02", calibration_cases=[PROJECT_CASE],
-                    holdout_cases=[])
-    registry["contracts"].append(contract)
-    fixture = {"schema_version": 1, "kind": "test-fixture", "id": PROJECT_CASE,
-               "calculation": contract["calculation"]}
-    expected = {"schema_version": 1, "kind": "test-expected", "fixture": PROJECT_CASE,
-                "outputs": [{"quantity": contract["quantities"][0], "scope": None, "value": 250,
-                             "tolerance": {"absolute": 0.000001, "relative": 0},
-                             "reference": {"class": "illustrative"}}]}
-    return {check_accuracy.REGISTRY.as_posix(): json.dumps(registry).encode(),
-            f"tests/fixtures/{PROJECT_CASE}.json": json.dumps(fixture).encode(),
-            f"tests/expected/{PROJECT_CASE}.json": json.dumps(expected).encode()}
+# A relation suite, whose public runner is the entry point that certifies it.
+RELATIONS = "tests/modules/TEST_Relations.bas"
+RELATIONS_SOURCE = b"""Attribute VB_Name = "TEST_Relations"
+Option Explicit
+Option Private Module
+
+Private Const EXPECTED_CASES As Long = 2
+Private Const EXPECTED_ASSERTIONS As Long = 4
+
+Public Sub RunRelationTests()
+        CaseAdditivity
+        CaseSymmetry
+End Sub
+
+Private Sub CaseAdditivity()
+        TEST_Harness.BeginCase "additivity"
+        TEST_Harness.AssertTrue "holds", True
+        TEST_Harness.AssertTrue "detects-corruption", Not False
+End Sub
+
+Private Sub CaseSymmetry()
+        TEST_Harness.BeginCase "symmetry"
+        TEST_Harness.AssertTrue "holds", True
+        TEST_Harness.AssertTrue "detects-corruption", Not False
+End Sub
+"""
 
 
 def policy_text(change: Change) -> str:
@@ -990,35 +1097,37 @@ class PolicyTest(unittest.TestCase):
             self.assertIn(text, str(raised.exception))
         accepted = check_excel_run.parse_policy(policy_text(
             lambda data: data["suites"].append(PROJECT_ENTRY)))
-        self.assertEqual([item.name for item in accepted.project_suites], ["project"])
-        self.assertIsNone(accepted.project_suites[0].results)
-        self.assertEqual(accepted.project_suites[0].runner, "RunSuite")
+        # The suites the working policy lists come first.
+        self.assertEqual([item.name for item in accepted.project_suites],
+                         [*(item.name for item in POLICY.project_suites), "project"])
+        self.assertIsNone(accepted.project_suites[-1].results)
+        self.assertEqual(accepted.project_suites[-1].runner, "RunSuite")
         named = check_excel_run.parse_policy(policy_text(
             lambda data: data["suites"].append(dict(PROJECT_ENTRY, runner="RunRelationTests"))))
-        self.assertEqual(named.project_suites[0].runner, "RunRelationTests")
+        self.assertEqual(named.project_suites[-1].runner, "RunRelationTests")
 
     def test_a_suite_is_read_through_the_runner_its_entry_names(self) -> None:
-        # The relation tests, as the harness guide says to certify them: their
-        # runner is RunRelationTests, not RunSuite.
-        source = (SOURCE / "tests/modules/TEST_Relations.bas").read_bytes()
-        suite = read_suite(source, "64-bit", "RunRelationTests")
-        self.assertEqual(suite.cases, ["zero-input", "additivity", "symmetry", "monotonicity"])
+        # Relation tests, as the harness guide says to certify them: their runner is
+        # RunRelationTests, not RunSuite.
+        suite = read_suite(RELATIONS_SOURCE, "64-bit", "RunRelationTests")
+        self.assertEqual(suite.cases, ["additivity", "symmetry"])
         self.assertEqual((len(suite.assertions), suite.expected_cases,
-                          suite.expected_assertions), (8, 4, 8))
-        self.assertIn("additivity/detects-corruption", suite.assertions)
+                          suite.expected_assertions), (4, 2, 4))
+        self.assertIn("symmetry/detects-corruption", suite.assertions)
         entry = check_excel_run.ProjectSuite(
-            "relations", "tests/modules/TEST_Relations.bas", "RunRelationTests", 4, 8,
+            "relations", RELATIONS, "RunRelationTests", 2, 4,
             "relations.log", "relations-certification.log", runner="RunRelationTests")
-        self.assertEqual(check_excel_run.suite_findings(entry, suite, source, "x"), [])
+        self.assertEqual(check_excel_run.suite_findings(entry, suite, RELATIONS_SOURCE, "x"), [])
         unread = check_excel_run.suite_findings(
-            dataclasses.replace(entry, runner="RunSuite"), read_suite(source, "64-bit"), source, "x")
+            dataclasses.replace(entry, runner="RunSuite"), read_suite(RELATIONS_SOURCE, "64-bit"),
+            RELATIONS_SOURCE, "x")
         self.assertEqual(len(unread), 1)
-        self.assertIn("no suite in tests/modules/TEST_Relations.bas at x: RunSuite calls no "
-                      "Case procedure", unread[0])
+        self.assertIn(f"no suite in {RELATIONS} at x: RunSuite calls no Case procedure",
+                      unread[0])
         saving = check_excel_run.parse_policy(policy_text(
             lambda data: data["suites"].append(PROJECT_RESULTS_ENTRY)))
         self.assertEqual(check_excel_run.results_files(saving),
-                         [POLICY.results, "project-results.json"])
+                         [*check_excel_run.results_files(POLICY), "project-results.json"])
         # A version 1 policy, as older commits hold it, is still read.
         old = check_excel_run.parse_policy(policy_text(
             lambda data: (data.update(schema_version=1), data.pop("suites"))))
@@ -1038,9 +1147,11 @@ class PolicyTest(unittest.TestCase):
         malformed = run(*make_repository(b"{}"))
         self.assertEqual(len(malformed), 1)
         self.assertIn(check_excel_run.POLICY, malformed[0])
+        stated = suite().expected_cases
         counts = run(*make_repository(policy_text(
-            lambda data: data["suite"].update(expected_cases=15)).encode()))
-        self.assertTrue(any("EXPECTED_CASES is 14, but" in item for item in counts), counts)
+            lambda data: data["suite"].update(expected_cases=stated + 1)).encode()))
+        self.assertTrue(any(f"EXPECTED_CASES is {stated}, but {check_excel_run.POLICY} "
+                            f"expects {stated + 1}" in item for item in counts), counts)
         entry = run(*make_repository(policy_text(
             lambda data: data["suite"].update(
                 certification_entry_point="CertifyOther")).encode()))
@@ -1061,15 +1172,6 @@ class PolicyTest(unittest.TestCase):
 
 
 
-def project_evidence(folder: Path) -> None:
-    """The two logs the project suite's certification entry point saves."""
-    project = read_suite(PROJECT_SOURCE, "64-bit")
-    (folder / "project.log").write_bytes(
-        ("\r\n".join(run_log("NORMAL", project, "project")) + "\r\n").encode())
-    (folder / "project-certification.log").write_bytes(
-        ("\r\n".join(certification_log("project", ("NORMAL",))) + "\r\n").encode())
-
-
 class ProjectSuiteTest(unittest.TestCase):
     """A project suite beside the example suite: its normal run and its certification."""
 
@@ -1088,14 +1190,18 @@ class ProjectSuiteTest(unittest.TestCase):
         shutil.rmtree(cls.root, ignore_errors=True)
 
     def findings(self, change: Callable[[Path], None] | None = None) -> list[str]:
-        def apply(folder: Path) -> None:
-            project_evidence(folder)
-            if change:
-                change(folder)
-        with evidence(apply, self.root, self.commit) as folder:
+        with evidence(change, self.root, self.commit) as folder:
             return check_excel_run.check(self.root, self.commit, folder).findings
 
     def test_both_suites_certified_pass(self) -> None:
+        # evidence() writes the two logs the project suite's certification entry
+        # point saves, as it does for each suite a working policy lists.
+        with evidence(None, self.root, self.commit) as folder:
+            self.assertTrue((folder / "project.log").read_bytes().endswith(
+                b"RESULT=PASS; suite=project; operation=PASS; completeness=COMPLETE; cases=3; "
+                b"assertions=4; failures=0; cleanup=PASS; recovery=NONE\r\n"))
+            self.assertIn(b"CERTIFICATION=PASS; suite=project; completeness=COMPLETE; modes=1",
+                          (folder / "project-certification.log").read_bytes())
         self.assertEqual(self.findings(), [])
 
     def test_a_missing_or_wrong_project_log_fails(self) -> None:
@@ -1117,7 +1223,7 @@ class ProjectSuiteTest(unittest.TestCase):
 
     def test_a_suite_that_names_no_results_file_saves_none(self) -> None:
         self.assertEqual(check_excel_run.results_files(check_excel_run.policy_at(
-            self.root, self.commit)), [POLICY.results])
+            self.root, self.commit)), check_excel_run.results_files(POLICY))
 
     def test_counts_follow_the_bitness_the_policy_supports(self) -> None:
         wide, narrow = read_suite(PROJECT_SOURCE, "64-bit"), read_suite(PROJECT_SOURCE, "32-bit")
@@ -1144,23 +1250,30 @@ class ProjectResultsTest(unittest.TestCase):
         if not shutil.which("git"):
             raise unittest.SkipTest("needs Git")
         policy = policy_text(lambda data: data["suites"].append(PROJECT_RESULTS_ENTRY)).encode()
-        cls.root, cls.commit = make_repository(policy, extra={PROJECT: PROJECT_SOURCE,
-                                                              **project_case_files()})
+        cls.root, cls.commit = make_repository(policy, extra={
+            PROJECT: PROJECT_SOURCE, **accuracy_files(PROJECT_CONTRACTS)})
 
     @classmethod
     def tearDownClass(cls) -> None:
         shutil.rmtree(cls.root, ignore_errors=True)
 
+    def both_suites(self, folder: Path) -> None:
+        """The example suite's results file with the outputs of every contract but
+        the project suite's."""
+        document = results_document(self.commit, self.root)
+        document["results"] = [item for item in document["results"]
+                               if item["case"] != PROJECT_CASE]
+        write_results(folder, document)
+
     def checked(self, results: list[dict[str, Any]] | None = None
                 ) -> check_excel_run.Evidence:
         """The evidence of both suites; the project suite's results file holds
         ``results``, by default the one output of its case."""
-        project = [{"case": PROJECT_CASE, "variant": None,
-                    "quantity": "illustrative_total_notional_amount", "scope": None,
-                    "value": 250}] if results is None else results
+        project = [{"case": PROJECT_CASE, "variant": None, "quantity": QUANTITY,
+                    "scope": None, "value": 250}] if results is None else results
 
         def apply(folder: Path) -> None:
-            project_evidence(folder)
+            self.both_suites(folder)
             (folder / "project-results.json").write_text(json.dumps(
                 {"schema_version": 1, "kind": "test-results", "commit": self.commit,
                  "results": project}), encoding="utf-8")
@@ -1177,21 +1290,25 @@ class ProjectResultsTest(unittest.TestCase):
         found = self.checked([]).findings
         self.assertTrue(any(f"no result for {PROJECT_CASE}" in item for item in found), found)
 
-        with evidence(project_evidence, self.root, self.commit) as folder:
+        def without_project_results(folder: Path) -> None:
+            self.both_suites(folder)
+            (folder / "project-results.json").unlink()
+        with evidence(without_project_results, self.root, self.commit) as folder:
             missing = check_excel_run.check(self.root, self.commit, folder).findings
         self.assertEqual(len(missing), 1, missing)
         self.assertIn("project-results.json: missing, but", missing[0])
 
     def test_a_result_held_by_two_files_is_rejected(self) -> None:
-        repeated = [*results_document(self.commit)["results"][:1],
-                    {"case": PROJECT_CASE, "variant": None,
-                     "quantity": "illustrative_total_notional_amount", "scope": None,
-                     "value": 250}]
+        repeated = [*results_document(self.commit, self.root)["results"][:1],
+                    {"case": PROJECT_CASE, "variant": None, "quantity": QUANTITY,
+                     "scope": None, "value": 250}]
         found = self.checked(repeated).findings
+        names = check_excel_run.results_files(check_excel_run.policy_at(self.root, self.commit))
+        self.assertEqual(names[-1], "project-results.json")
         self.assertEqual(len(found), 1, found)
-        self.assertIn("results.json, project-results.json: ", found[0])
-        self.assertIn("project-results.json: illustrative-format-example "
-                      "illustrative_total_notional_amount is also in ", found[0])
+        self.assertIn(f"{', '.join(names)}: ", found[0])
+        self.assertIn(f"project-results.json: synthetic-calibration {QUANTITY} is also in ",
+                      found[0])
         self.assertTrue(found[0].endswith("results.json"), found[0])
 
 

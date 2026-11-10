@@ -3,7 +3,7 @@
 Notable changes to this repository, from a user's point of view. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions
 follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html). It is
-neither a commit log nor release evidence. **No version has been released.**
+neither a commit log nor release evidence.
 
 ## 🧭 Maintenance policy
 
@@ -60,6 +60,8 @@ in review.
 Use only the categories an entry needs.
 
 ## [Unreleased]
+
+## [1.0.0] - 2026-11-10
 
 Changes made before this changelog existed are described by the closed
 milestones and their pull requests.
@@ -292,8 +294,8 @@ milestones and their pull requests.
   the names of its logs and results file from the evidence policy. It exits
   2 for an unknown option, a missing workbook or a missing or malformed
   policy before it starts LibreOffice, and 1 without a traceback when
-  LibreOffice cannot run the workbook. The build leaves forms out (#100,
-  #285, #299, #316).
+  LibreOffice cannot run the workbook. A form stops the build: import it by
+  hand (#100, #285, #299, #316, #366).
 - A VBA test harness and an example suite in `tests/modules/`, with a
   certification entry point. It refuses state left by an earlier run,
   reports completeness apart from the verdict, and checks that Excel's state,
@@ -470,8 +472,8 @@ milestones and their pull requests.
   newer commit replaces; a push run is never cancelled. CI runs
   `tools/check_repository.py` with `--ci`, which fails when, after the
   checks, the working tree differs from the commit. mypy checks `tests/` as
-  well as `tools/`; four unannotated test files need no annotations, but their
-  code is checked. The bug form has an optional field for evidence, a
+  well as `tools/`; three unannotated test files need no annotations, but
+  their code is checked (#366). The bug form has an optional field for evidence, a
   workaround and recovery, and the enhancement form one for alternatives
   considered (#251).
 - `tools/check_excel_run.py` compares the modules exported by hand with the
@@ -555,7 +557,7 @@ milestones and their pull requests.
   table covers every tracked file, names both traffic tests and
   `tests/test_excel_run.py`, and describes each test of
   `tests/test_repository_consistency.py`; the structure guide covers the
-  root files, the reserved `VERSION`, all of `.github/`, `docs/release/`,
+  root files, `VERSION`, all of `.github/`, `docs/release/`,
   `docs/licenses/` and the harness guide. The label guide matches the
   workflows' write-permission list. `.gitattributes`, `.editorconfig` and the
   guides name the source register in `SOURCES.md`. The calculation
@@ -563,13 +565,32 @@ milestones and their pull requests.
   rules hold the default tolerances, and a contract lists its `_status`
   quantities and their texts under *Failure behaviour*. The rules for filling
   in the guides name the guides with a *Decisions* table and the two tables
-  that differ (#286, #287, #301, #302, #318, #319).
+  that differ (#286, #287, #301, #302, #318, #319, #366, #371).
 - `tools/setup_repository.py` no longer reports paused Dependabot security
   updates as on: they count as drift, the setup record shows `on (paused)`,
   and an apply that leaves them paused fails its read-back (#190).
 - A backtick, pipe or line break in a label name, colour or API error no
   longer breaks the code span or table row of the label synchronization and
   drift summaries (#189).
+- A malformed expected file no longer stops the derivation, accuracy and
+  Excel-run checks with a traceback: they leave its malformed outputs out,
+  and the test-case check reports them. A malformed evidence policy, a suite
+  entry point the suite source lacks, or a suite source that does not exist
+  is reported as a finding by the generated-documentation check instead of a
+  traceback. Without Node.js, a local run of **Repository integrity** skips
+  `issue-configuration`, as it skips the label checks, instead of failing it
+  (#367, #371).
+- The tests that a generated repository keeps no longer depend on the
+  template's illustrative content: they still pass once the setup guide's
+  steps replace the illustrative cases and the contract `ACC-01`, change the
+  example suite's counts, delete or replace the relation tests, rename the
+  illustrative sheets or list a project suite in the evidence policy, once
+  `docs/PUBLIC_API.txt` lists a declaration, including one declared in both
+  branches of an `#If`, and once `tests/accuracy/contracts.json` is removed
+  with the outputs that the example suite's results case records. The tests
+  of a tool use synthetic cases, contracts, modules and build configuration
+  of their own, and the tests of the repository derive their expected values
+  from its files. No test comment cites a template issue (#368, #371, #373).
 
 ### Validation
 
@@ -579,4 +600,5 @@ milestones and their pull requests.
   worst error 0.0, `compile=ON_DEMAND`. The host behaviours `HB-02` to `HB-04`
   of the validation plan are measured on that host (#204, #211).
 
-[Unreleased]: https://github.com/danielep71/MyTemplate/commits/main
+[Unreleased]: https://github.com/danielep71/MyTemplate/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/danielep71/MyTemplate/releases/tag/v1.0.0

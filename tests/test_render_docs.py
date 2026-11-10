@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -17,9 +18,32 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import check_excel_run  # noqa: E402
 import check_repository  # noqa: E402
 import render_docs  # noqa: E402
 from render_docs import Block  # noqa: E402
+
+
+def suite_counts() -> tuple[int, int, int]:
+    """The example suite's expected cases and assertions, read from its source as
+    tests/test_vba_harness.py reads them, and the assertions of the last case its
+    runner calls."""
+    policy = json.loads((ROOT / ".github/excel-evidence-policy.json").read_text("utf-8"))
+    source = (ROOT / policy["suite"]["source"]).read_text("ascii").replace("\r\n", "\n")
+
+    def constant(name: str) -> int:
+        match = re.search(rf"^\s*Private Const {name}\s+As Long = (\d+)\b", source, re.M)
+        assert match, name
+        return int(match.group(1))
+
+    def body(name: str) -> str:
+        match = re.search(rf"^Private Sub {name}\(.*?^End Sub$", source, re.M | re.S)
+        assert match, name
+        return match.group(0)
+
+    last = re.findall(r"^\s+(Case\w+)$", body("RunSuite"), re.M)[-1]
+    return (constant("EXPECTED_CASES"), constant("EXPECTED_ASSERTIONS"),
+            len(re.findall(r"TEST_Harness\.Assert\w+ ", body(last))))
 
 
 def begin(name: str) -> str:
@@ -62,6 +86,42 @@ class RenderTest(unittest.TestCase):
                          f"Intro\n{begin('facts')}\n| fact |\n| --- |\n| one |\n{end('facts')}"
                          "\nOutro\n")
         self.assertEqual(self.problems(), [])
+
+    def test_a_block_that_cannot_be_rendered_is_a_problem(self) -> None:
+        def broken_policy(root: Path) -> str:
+            raise check_excel_run.PolicyError("policy: host office must be one of 64-bit, 32-bit")
+        self.write("GUIDE.md", f"Intro\n{begin('facts')}\nold\n{end('facts')}\nOutro\n")
+        with mock.patch.dict(render_docs.BLOCKS, {"facts": Block("GUIDE.md", broken_policy)}):
+            for write in (False, True):
+                with self.subTest(write=write):
+                    self.assertEqual(self.problems(write), [
+                        "GUIDE.md: block facts cannot be rendered: policy: host office must be "
+                        "one of 64-bit, 32-bit"])
+        self.assertIn("\nold\n", (self.root / "GUIDE.md").read_text(encoding="utf-8"))
+
+    def test_a_file_a_block_cannot_read_is_a_problem(self) -> None:
+        # The evidence policy names a suite source that does not exist, as after the
+        # module is renamed or deleted; or a renderer cannot read a file at all.
+        policy = json.loads((ROOT / check_excel_run.POLICY).read_text(encoding="utf-8"))
+        policy["suite"]["source"] = "tests/modules/TEST_Missing.bas"
+        (self.root / check_excel_run.POLICY).parent.mkdir(parents=True)
+        (self.root / check_excel_run.POLICY).write_text(json.dumps(policy), encoding="utf-8")
+
+        def unreadable(root: Path) -> str:
+            raise PermissionError(13, "Permission denied", "data.json")
+        blocks = {"results": Block("GUIDE.md", render_docs.example_suite_results),
+                  "facts": Block("GUIDE.md", unreadable)}
+        self.write("GUIDE.md", f"{begin('results')}\nold\n{end('results')}\n"
+                               f"{begin('facts')}\nold\n{end('facts')}\n")
+        with mock.patch.dict(render_docs.BLOCKS, blocks, clear=True):
+            for write in (False, True):
+                with self.subTest(write=write):
+                    self.assertEqual(sorted(self.problems(write)), [
+                        "GUIDE.md: block facts cannot be rendered: [Errno 13] Permission "
+                        "denied: 'data.json'",
+                        "GUIDE.md: block results cannot be rendered: "
+                        "tests/modules/TEST_Missing.bas: missing"])
+        self.assertEqual((self.root / "GUIDE.md").read_text(encoding="utf-8").count("\nold\n"), 2)
 
     def test_marker_problems(self) -> None:
         cases = {
@@ -198,12 +258,16 @@ class RepositoryTest(unittest.TestCase):
             self.assertEqual(render_docs.run(ROOT, write=False), [])
 
     def test_the_suite_results_follow_the_suite(self) -> None:
+        cases, assertions, last = suite_counts()
         text = render_docs.example_suite_results(ROOT)
         self.assertIn("RESULT=PASS; suite=examples; operation=PASS; completeness=COMPLETE; "
-                      "cases=14; assertions=34; failures=0; cleanup=PASS; recovery=NONE", text)
+                      f"cases={cases}; assertions={assertions}; failures=0; cleanup=PASS; "
+                      "recovery=NONE", text)
+        # The skipped-case run leaves out the last case and its assertions.
         self.assertIn("`TEST_Examples.RunExampleTestsWithSkippedCase` | `RESULT=FAIL`, "
-                      "`operation=PASS`, `completeness=INCOMPLETE`, `cases=13`, "
-                      "`assertions=32`, `failures=1`", text)
+                      "`operation=PASS`, `completeness=INCOMPLETE`, "
+                      f"`cases={cases - 1}`, `assertions={assertions - last}`, `failures=1`",
+                      text)
         self.assertIn("Two more entry points", text)
 
     def test_every_check_is_listed_once_and_described(self) -> None:

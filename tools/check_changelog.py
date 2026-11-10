@@ -65,7 +65,6 @@ UNCHECKED_TASK = re.compile(r"^\s*[-*+]\s+\[ \]\s", re.M)
 VERSION_TOKEN = re.compile(rf"(?<![\w.])v?({SEMVER})(?![\w-]|\.\d)")
 # The line that marks a reviewed change to a released section.
 CORRECTION = re.compile(r"^Corrected after release on (\d{4}-\d{2}-\d{2}): \S.*$")
-LINK_REFERENCE = re.compile(r"^\[[^\]]+\]: \S+$")
 STATUS_ROW = re.compile(r"^\|\s*(Released versions|`VERSION`)\s*\|(.*)\|\s*$", re.M)
 
 

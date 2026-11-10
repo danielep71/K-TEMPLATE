@@ -258,7 +258,9 @@ def checks(context: Context) -> list[Check]:
                                    "validate"], missing=node_missing),
         Check("labels-drift-self-test", [node or "node", ".github/scripts/labels-drift.mjs",
                                          "--self-test"], missing=node_missing),
-        Check("issue-configuration", [python, "tools/check_issues.py", "--check-config"]),
+        # check_issues.py validates the label catalogue with the label script, under Node.js.
+        Check("issue-configuration", [python, "tools/check_issues.py", "--check-config"],
+              missing=node_missing),
         Check("template-only-content", function=template_only,
               missing=None if context.is_template is not None
               else "whether this is the template is unknown (--template)"),

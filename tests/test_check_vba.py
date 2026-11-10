@@ -29,7 +29,13 @@ import check_vba_identifiers  # noqa: E402
 import check_vba_jumps  # noqa: E402
 import check_vba_public_api  # noqa: E402
 import check_vba_source  # noqa: E402
-from vba_lexer import Finding, logical_units, strip_code  # noqa: E402
+from vba_lexer import (  # noqa: E402
+    Finding,
+    logical_units,
+    read_component,
+    strip_code,
+    tracked_components,
+)
 
 CORE = '''Attribute VB_Name = "CORE_Validation"
 Option Explicit
@@ -718,9 +724,22 @@ class PublicApiTest(unittest.TestCase):
         self.assertEqual(self.findings(VALID), [])
         self.assertEqual(self.findings(api_files()), [])
 
-    def test_repository_inventory_matches_empty_source(self) -> None:
-        inventory = (ROOT / "docs/PUBLIC_API.txt").read_text(encoding="utf-8")
-        self.assertEqual(self.findings({"docs/PUBLIC_API.txt": inventory}), [])
+    def test_repository_inventory_matches_its_source(self) -> None:
+        # The inventory and the source of this repository together, so the test holds
+        # whether or not the inventory lists a declaration yet.
+        findings, _, _ = check_vba_public_api.check(ROOT)
+        self.assertEqual([str(finding) for finding in findings], [])
+        # Each row names a declaration of the facade, and each declaration has a row.
+        # One declaration may be compiled in several #If branches under one row.
+        facade = {declaration.key.casefold()
+                  for path in tracked_components(ROOT)
+                  if path.startswith(check_vba_public_api.PUBLIC_HOME)
+                  for declaration in check_vba_public_api.scan_component(
+                      path, read_component(ROOT, path))[0]}
+        inventory = (ROOT / check_vba_public_api.INVENTORY).read_text(encoding="utf-8")
+        listed = [line.casefold() for line in inventory.splitlines()
+                  if line.strip() and not line.lstrip().startswith("#")]
+        self.assertEqual(sorted(listed), sorted(facade))
 
     def test_implicit_visibility_is_rejected_everywhere(self) -> None:
         self.assertFinding(api_files(API_FACADE.replace("Public Function DEMO_Echo",

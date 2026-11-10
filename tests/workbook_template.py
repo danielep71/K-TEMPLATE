@@ -1,17 +1,21 @@
 """A synthetic, macro-free layout template, written as Excel writes one.
 
 The builder and protection tests write it to src/workbook/Template.xlsx of a
-temporary repository. Its parts declare the namespaces that Excel declares,
-including one that only mc:Ignorable names, so a test can see that the build
-keeps them. It carries no personal document metadata, so it passes
-tools/check_binaries.py.
+temporary repository, with its own build configuration, build_configuration(),
+as tools/devbuild/workbook.json: its sheets and names are synthetic, so these
+tests do not depend on the sheets of the repository's workbook contract. Its
+parts declare the namespaces that Excel declares, including one that only
+mc:Ignorable names, so a test can see that the build keeps them. It carries no
+personal document metadata, so it passes tools/check_binaries.py.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import zipfile
 from dataclasses import dataclass, field
+from typing import Any
 
 MAIN = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 RELATIONSHIPS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -53,7 +57,7 @@ class Sheet:
 
 
 def default_sheets() -> list[Sheet]:
-    """The sheets of tools/devbuild/workbook.json, laid out with styles and a title."""
+    """The sheets of build_configuration(), laid out with styles and a title."""
     return [Sheet("Readme", {"A1": (0, 0), "A3": (0, 1), "B3": (LOCKED, None), "A4": (0, 1)}),
             Sheet("Inputs", {"A1": (0, 2), "B5": (0, 3), "C5": (UNLOCKED, None)},
                   {"sheet": "1", "objects": "1", "scenarios": "1"})]
@@ -63,6 +67,38 @@ DEFAULT_NAMES = {"build_commit": "Readme!$B$3", "build_time": "Readme!$B$4",
                  "build_configuration": "Readme!$B$5", "cfg_reporting_date": "Inputs!$C$5",
                  "Inputs_Settings": "Inputs!$B$4"}
 STRINGS = ("Synthetic workbook", "Commit", "Inputs", "Reporting date")
+
+
+def build_configuration() -> dict[str, Any]:
+    """A build configuration whose sheets and names are those of default_sheets()
+    and DEFAULT_NAMES, in the format of tools/devbuild/workbook.json; a new copy
+    on each call, so a test may change it."""
+    return {
+        "schema_version": 1,
+        "description": "Synthetic build configuration of tests/workbook_template.py.",
+        "workbook_code_name": "ThisWorkbook",
+        "sheets": [{"tab": "Readme", "code_name": "shReadme", "role": "Reference"},
+                   {"tab": "Inputs", "code_name": "shInputs", "role": "Input"}],
+        "names": [
+            {"name": "build_commit", "sheet": "shReadme", "cell": "B3", "label": "Commit"},
+            {"name": "build_time", "sheet": "shReadme", "cell": "B4", "label": "Commit time"},
+            {"name": "build_configuration", "sheet": "shReadme", "cell": "B5",
+             "label": "Configuration"},
+            {"name": "cfg_reporting_date", "sheet": "shInputs", "cell": "C5",
+             "label": "Reporting date"},
+            {"name": "Inputs_Settings", "sheet": "shInputs", "cell": "B4"}],
+        "stamp": {"commit": "build_commit", "time": "build_time",
+                  "configuration": "build_configuration"},
+        "configurations": {
+            "production": ["src/core", "src/classes", "src/modules", "src/workbook"],
+            "development": ["src/core", "src/classes", "src/modules", "src/workbook",
+                            "tests/modules", "examples/modules"]},
+    }
+
+
+def build_configuration_bytes() -> bytes:
+    """build_configuration() as the file tools/devbuild/workbook.json holds it."""
+    return json.dumps(build_configuration(), indent=2).encode()
 
 
 def split(reference: str) -> tuple[str, int]:
@@ -94,7 +130,8 @@ def sheet_xml(sheet: Sheet) -> str:
 
 def template(sheets: list[Sheet] | None = None,
              names: dict[str, str] | None = None) -> bytes:
-    """The template package, by default with the sheets and names of workbook.json."""
+    """The template package, by default with the sheets and names of
+    build_configuration()."""
     sheets = default_sheets() if sheets is None else sheets
     names = DEFAULT_NAMES if names is None else names
     count = len(sheets)

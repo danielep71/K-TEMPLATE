@@ -27,6 +27,8 @@ GUIDE = ROOT / "docs/methodology/TEST_HARNESS.md"
 REGISTRY = ROOT / "tests/accuracy/contracts.json"
 BUILD_CONFIG = ROOT / "tools/devbuild/workbook.json"
 CASE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+# A RecordResult statement, not a comment that names it.
+RECORD = re.compile(r"^\s*TEST_Harness\.RecordResult ", re.M)
 
 
 def source(path: Path) -> str:
@@ -93,8 +95,12 @@ class ExampleSuiteTest(unittest.TestCase):
                       (ROOT / "INSTALLATION.md").read_text(encoding="utf-8"))
 
 
-    def test_the_results_case_records_every_output_of_the_contracts(self) -> None:
-        body = self.cases["CaseIllustrativeResults"]
+    def results_cases(self) -> dict[str, str]:
+        """The cases that record results, found by their RecordResult calls."""
+        return {name: body for name, body in self.cases.items() if RECORD.search(body)}
+
+    def recorded(self) -> list[tuple[str, str | None, str | None, str | None, str | None]]:
+        """Case, variant, quantity, dataset and record of every RecordResult call."""
         strings = dict(re.findall(r'^\s*Private Const (\w+)\s+As String = "([^"]*)"', self.text,
                                   re.M))
 
@@ -102,12 +108,22 @@ class ExampleSuiteTest(unittest.TestCase):
             if token == "vbNullString":
                 return None
             return token.strip('"') if token.startswith('"') else strings[token]
+        separator = r",\s*(?:_\s+)?"
+        calls = "".join(self.results_cases().values())
         recorded = [(case, value(variant), value(quantity), value(dataset), value(record))
                     for case, variant, quantity, dataset, record in re.findall(
-                        r'TEST_Harness\.RecordResult "([^"]+)", (vbNullString|"[^"]+"), _\s+'
-                        r'(\w+|"[^"]+"), (vbNullString|"[^"]*"), (vbNullString|"[^"]*"), Total',
-                        body)]
-        registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
+                        r'TEST_Harness\.RecordResult "([^"]+)"' + separator
+                        + r'(vbNullString|"[^"]+")' + separator + r'(\w+|"[^"]+")' + separator
+                        + r'(vbNullString|"[^"]*")' + separator + r'(vbNullString|"[^"]*")'
+                        + separator + r"\w+", calls)]
+        # Every call is read: none is skipped for a layout the pattern does not know.
+        self.assertEqual(len(recorded), len(RECORD.findall(calls)), recorded)
+        return recorded
+
+    def test_the_results_case_records_every_output_of_the_contracts(self) -> None:
+        recorded = self.recorded()
+        registry = json.loads(REGISTRY.read_text(encoding="utf-8")) if REGISTRY.is_file() \
+            else {"contracts": []}
         expected = []
         for contract in registry["contracts"]:
             for case in [*contract["calibration_cases"], *contract["holdout_cases"]]:
@@ -120,17 +136,20 @@ class ExampleSuiteTest(unittest.TestCase):
                                 if output["scope"] else (None, None)))
                              for variant, outputs in groups for output in outputs
                              if output["quantity"] in contract["quantities"]]
-        self.assertEqual(len(recorded), 3, recorded)
         self.assertEqual(sorted(recorded, key=str), sorted(expected, key=str))
         self.assertEqual(len(recorded), len(set(recorded)))
 
     def test_the_results_case_reads_files_that_exist(self) -> None:
-        body = self.cases["CaseIllustrativeResults"]
-        paths = re.findall(r'FixturePath\(\s*(?:_\s*)?"([^"]+)"\)', body)
-        self.assertEqual(len(paths), 3, paths)
+        paths = [path for body in self.results_cases().values()
+                 for path in re.findall(r'FixturePath\(\s*(?:_\s*)?"([^"]+)"\)', body)]
         for path in paths:
             with self.subTest(path=path):
                 self.assertTrue((ROOT / "tests/fixtures" / path).is_file())
+        # Each recorded case is computed from its own fixture file or folder.
+        for case in {item[0] for item in self.recorded()}:
+            with self.subTest(case=case):
+                self.assertTrue(any(path == f"{case}.json" or path.startswith(f"{case}/")
+                                    for path in paths), paths)
 
     def test_the_certification_saves_the_results_of_the_normal_run(self) -> None:
         body = self.bodies["CertifyExamples"]
