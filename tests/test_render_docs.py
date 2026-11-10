@@ -18,6 +18,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
+import check_excel_run  # noqa: E402
 import check_repository  # noqa: E402
 import render_docs  # noqa: E402
 from render_docs import Block  # noqa: E402
@@ -85,6 +86,18 @@ class RenderTest(unittest.TestCase):
                          f"Intro\n{begin('facts')}\n| fact |\n| --- |\n| one |\n{end('facts')}"
                          "\nOutro\n")
         self.assertEqual(self.problems(), [])
+
+    def test_a_block_that_cannot_be_rendered_is_a_problem(self) -> None:
+        def broken_policy(root: Path) -> str:
+            raise check_excel_run.PolicyError("policy: host office must be one of 64-bit, 32-bit")
+        self.write("GUIDE.md", f"Intro\n{begin('facts')}\nold\n{end('facts')}\nOutro\n")
+        with mock.patch.dict(render_docs.BLOCKS, {"facts": Block("GUIDE.md", broken_policy)}):
+            for write in (False, True):
+                with self.subTest(write=write):
+                    self.assertEqual(self.problems(write), [
+                        "GUIDE.md: block facts cannot be rendered: policy: host office must be "
+                        "one of 64-bit, 32-bit"])
+        self.assertIn("\nold\n", (self.root / "GUIDE.md").read_text(encoding="utf-8"))
 
     def test_marker_problems(self) -> None:
         cases = {
