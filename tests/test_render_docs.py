@@ -99,6 +99,30 @@ class RenderTest(unittest.TestCase):
                         "one of 64-bit, 32-bit"])
         self.assertIn("\nold\n", (self.root / "GUIDE.md").read_text(encoding="utf-8"))
 
+    def test_a_file_a_block_cannot_read_is_a_problem(self) -> None:
+        # The evidence policy names a suite source that does not exist, as after the
+        # module is renamed or deleted; or a renderer cannot read a file at all.
+        policy = json.loads((ROOT / check_excel_run.POLICY).read_text(encoding="utf-8"))
+        policy["suite"]["source"] = "tests/modules/TEST_Missing.bas"
+        (self.root / check_excel_run.POLICY).parent.mkdir(parents=True)
+        (self.root / check_excel_run.POLICY).write_text(json.dumps(policy), encoding="utf-8")
+
+        def unreadable(root: Path) -> str:
+            raise PermissionError(13, "Permission denied", "data.json")
+        blocks = {"results": Block("GUIDE.md", render_docs.example_suite_results),
+                  "facts": Block("GUIDE.md", unreadable)}
+        self.write("GUIDE.md", f"{begin('results')}\nold\n{end('results')}\n"
+                               f"{begin('facts')}\nold\n{end('facts')}\n")
+        with mock.patch.dict(render_docs.BLOCKS, blocks, clear=True):
+            for write in (False, True):
+                with self.subTest(write=write):
+                    self.assertEqual(sorted(self.problems(write)), [
+                        "GUIDE.md: block facts cannot be rendered: [Errno 13] Permission "
+                        "denied: 'data.json'",
+                        "GUIDE.md: block results cannot be rendered: "
+                        "tests/modules/TEST_Missing.bas: missing"])
+        self.assertEqual((self.root / "GUIDE.md").read_text(encoding="utf-8").count("\nold\n"), 2)
+
     def test_marker_problems(self) -> None:
         cases = {
             f"{begin('facts')}\n": "block facts is not closed",

@@ -158,9 +158,11 @@ Build the development workbook from the candidate with
 ([building a workbook from source](INSTALLATION.md#building-a-workbook-from-source)).
 [Importing VBA into Excel](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
 by hand is only for a project with forms, which the build does not write, or
-when the build fails: such a workbook has no build stamp, so its run checks
-the source identity but not the `VERIFIED` binding of invariant 4; record
-that as a deviation.
+when the build fails. Such a workbook has no build stamp, so its run cannot
+reach `Binding: VERIFIED`, and while the commit holds
+`tests/accuracy/contracts.json` it ends `excel-run: FAIL`, because its results
+name no commit ([recording an Excel run](INSTALLATION.md#recording-an-excel-run),
+steps 3 and 9 of *By hand*). Such a run cannot certify a release.
 Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md)
 as [recording an Excel run](INSTALLATION.md#recording-an-excel-run)
 describes: with `python tools/devbuild/excel_run.py`, which builds, runs,
