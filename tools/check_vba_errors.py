@@ -25,7 +25,10 @@ cleared or may have replaced the error it means to read:
   ``Module.RunStatus.rsFailed``), or a constant, Enum member or variable of
   a standard module that its name qualifies (``Module.LIMIT``). A variable
   of a class or object type, a class or document module and ``Me`` stay
-  member accesses.
+  member accesses. An index is an element only on a name declared as an
+  array (``Name() As T``, ``Name(1 To 3) As T``, a ``ReDim``): on an object,
+  a Variant or an undeclared type it may call a default property, as
+  ``Owner(1)`` does on a Collection, and it stays a member access.
   In the same way, an assignment (``=``, ``Let``, ``Set``, ``LSet``,
   ``RSet``) to anything but a variable, such a field or value, an array
   element or a statement target (``Date``, ``Mid(Text, 1, 1)``) sets a
@@ -230,14 +233,21 @@ VBA_CONSTANT = re.compile(rf"(?<![\w.!]){VBA_QUALIFIER}vb\w*", re.IGNORECASE)
 CHAIN = re.compile(r"(?<![\w.!#])[A-Za-z_]\w*[%&!#@$]?(?:\s*\([^()]*\))?"
                    r"(?:\s*\.\s*[A-Za-z_]\w*[%&!#@$]?(?:\s*\([^()]*\))?)+")
 CHAIN_PART = re.compile(r"([A-Za-z_]\w*)[%&!#@$]?|\(([^()]*)\)")
+# What a variable, parameter or field is declared as: its type, in lower
+# case and "" when undeclared, and whether it is an array, as Name() or
+# Name(1 To 3) declares it.
+Declared = tuple[str, bool]
+# A part of a dotted name, and whether an index follows it, as in Many(i).
+Link = tuple[str, bool]
 # A declared name and its type, in a variable or parameter list or a Type:
 # Name, Name(1 To 3) As Long, ByRef Name As Record, WithEvents Name As Thing.
 DECLARED = re.compile(r"^\s*(?:(?:Optional|ByVal|ByRef|ParamArray|WithEvents)\s+)*"
-                      r"(?P<name>[A-Za-z]\w*)[%&!#@$]?\s*(?:\(.*\))?\s*"
+                      r"(?P<name>[A-Za-z]\w*)[%&!#@$]?\s*(?P<array>\(.*\))?\s*"
                       r"(?:As\s+(?:New\s+)?(?P<type>[A-Za-z_][\w.]*))?", re.IGNORECASE)
 MODULE_VARIABLES = re.compile(r"^\s*(?P<vis>Dim|Public|Private|Global)\s+(?P<list>.*)$",
                               re.IGNORECASE)
-LOCAL_VARIABLES = re.compile(r"^\s*(?:Dim|Static)\s+(?P<list>.*)$", re.IGNORECASE)
+LOCAL_VARIABLES = re.compile(r"^\s*(?P<keyword>Dim|Static|ReDim(?:\s+Preserve)?)\s+"
+                             r"(?P<list>.*)$", re.IGNORECASE)
 NOT_VARIABLES = re.compile(r"^\s*(?:(?:Public|Private|Global|Friend)\s+)?(?:Static\s+)?"
                            r"(?:Const|Declare|Enum|Type|Event|Sub|Function|Property|Implements)\b",
                            re.IGNORECASE)
@@ -283,9 +293,10 @@ class Procedure:
     header: str = ""
     units: list[tuple[int, str | None, list[str]]] = field(default_factory=list)
 
-    def variables(self) -> dict[str, str]:
-        """Its parameters and the variables it declares, with their types."""
-        found: dict[str, str] = {}
+    def variables(self) -> dict[str, Declared]:
+        """Its parameters and the variables it declares, with their types;
+        ReDim declares an array, keeping the type a Dim gave it."""
+        found: dict[str, Declared] = {}
         opener = is_procedure(self.header)
         rest = self.header[opener.end():].lstrip("%&!#@$") if opener else ""
         end = closing_parenthesis(rest, 0) if rest.startswith("(") else None
@@ -294,7 +305,10 @@ class Procedure:
         for _, _, unit in self.units:
             for statement in unit:
                 local = LOCAL_VARIABLES.match(statement)
-                if local:
+                if local and local.group("keyword").casefold().startswith("redim"):
+                    for name, (kind, _) in declared(local.group("list")).items():
+                        found[name] = (kind or found.get(name, ("", True))[0], True)
+                elif local:
                     found.update(declared(local.group("list")))
         return found
 
@@ -331,21 +345,22 @@ class Declarations:
 
     standard: bool
     enums: dict[str, frozenset[str]] = field(default_factory=dict)
-    types: dict[str, dict[str, str]] = field(default_factory=dict)
-    variables: dict[str, str] = field(default_factory=dict)
+    types: dict[str, dict[str, Declared]] = field(default_factory=dict)
+    variables: dict[str, Declared] = field(default_factory=dict)
     public: set[str] = field(default_factory=set)
     values: frozenset[str] = frozenset()
     public_values: frozenset[str] = frozenset()
 
 
-def declared(items: str) -> dict[str, str]:
-    """Each name of a declaration or parameter list, with its type."""
+def declared(items: str) -> dict[str, Declared]:
+    """Each name of a declaration or parameter list, with what it is declared as."""
     found = {}
     for item in top_level_split(items):
         match = DECLARED.match(item)
         if match:
             found[match.group("name").casefold()] = \
-                (match.group("type") or "").rsplit(".", 1)[-1].casefold()
+                ((match.group("type") or "").rsplit(".", 1)[-1].casefold(),
+                 match.group("array") is not None)
     return found
 
 
@@ -354,7 +369,7 @@ def declarations(source: str, module: Module) -> Declarations:
     result = Declarations(module.standard, values=frozenset(module.names - module.callables),
                           public_values=frozenset(module.public - module.public_callables))
     block: tuple[str, str] | None = None
-    members: dict[str, str] = {}
+    members: dict[str, Declared] = {}
     inside = False
     for _, statement in statements(source):
         if is_procedure(statement):
@@ -371,7 +386,7 @@ def declarations(source: str, module: Module) -> Declarations:
                     result.types[block[1]] = members
                 block, members = None, {}
             elif block[0] == "enum":
-                members[statement.split("=")[0].strip().strip("[]").casefold()] = ""
+                members[statement.split("=")[0].strip().strip("[]").casefold()] = ("", False)
             else:
                 members.update(declared(statement))
         elif opened := BLOCK_START.match(statement):
@@ -394,12 +409,12 @@ class Scope:
     other components of the environment (``project``, by lower-case name)."""
 
     home: str
-    local: dict[str, str]
+    local: dict[str, Declared]
     project: dict[str, Declarations]
 
-    def variable(self, name: str, owner: str | None = None) -> str | None:
-        """The type of variable ``name``, or None when it is no variable;
-        with ``owner``, only a variable of that component."""
+    def variable(self, name: str, owner: str | None = None) -> Declared | None:
+        """What variable ``name`` is declared as, or None when it is no
+        variable; with ``owner``, only a variable of that component."""
         if owner is None and name in self.local:
             return self.local[name]
         # Another component's public variable is seen only in a standard module.
@@ -420,52 +435,68 @@ class Scope:
         return next((found.enums[name] for found in self.owners(name, owner)
                      if name in found.enums), None)
 
-    def fields(self, name: str) -> dict[str, str] | None:
+    def fields(self, name: str) -> dict[str, Declared] | None:
         """The fields of the user-defined Type ``name``, if this procedure sees one."""
         return next((found.types[name] for found in self.owners(name) if name in found.types),
                     None)
 
-    def walk(self, kind: str, segments: list[str]) -> str | None:
-        """The type that ``segments`` reach through the fields of the
-        user-defined Type ``kind``, or None when one is not such a field."""
-        for segment in segments:
-            fields = self.fields(kind)
-            if fields is None or segment not in fields:
+    def walk(self, declaration: Declared, links: list[Link]) -> Declared | None:
+        """What the dotted name ``links`` reaches, from its first part,
+        declared as ``declaration``, through the fields of user-defined Types;
+        None when a part is not such a field. An index is an element only on
+        an array: on anything else, an object or a Variant, it may call a
+        default property, as Owner(1) does on a Collection."""
+        for position, (_, indexed) in enumerate(links):
+            kind, array = declaration
+            if indexed != array and (indexed or position < len(links) - 1):
                 return None
-            kind = fields[segment]
-        return kind
+            if position == len(links) - 1:
+                return kind, array and not indexed
+            fields = self.fields(kind)
+            if fields is None or links[position + 1][0] not in fields:
+                return None
+            declaration = fields[links[position + 1][0]]
+        return None
 
-    def record(self, segments: list[str]) -> bool:
-        """Whether ``segments`` name a variable of a user-defined Type, or a
-        field of one that is itself such a variable, as With Saved needs."""
-        kind = self.variable(segments[0])
-        reached = self.walk(kind, segments[1:]) if kind else None
-        return reached is not None and self.fields(reached) is not None
+    def record(self, links: list[Link]) -> bool:
+        """Whether ``links`` name a variable of a user-defined Type, or a
+        field of one that is itself one, as With Saved needs."""
+        declaration = self.variable(links[0][0])
+        reached = self.walk(declaration, links) if declaration else None
+        return reached is not None and not reached[1] and self.fields(reached[0]) is not None
 
-    def value(self, segments: list[str], names: Names) -> bool:
-        """Whether the dotted name ``segments`` reads a value without a
-        call: a field of a variable of a user-defined Type (Saved.Number,
+    def value(self, links: list[Link], names: Names) -> bool:
+        """Whether the dotted name ``links`` reads a value without a call: a
+        field of a variable of a user-defined Type (Saved.Number,
         Saved(i).Inner.Field), an Enum member (Kind.kOne), or a value of a
         standard module named by it (Module.LIMIT, Module.Kind.kOne,
         Module.Saved.Number). Anything else is a member access."""
-        root, rest = segments[0], segments[1:]
-        kind = self.variable(root)
-        if kind is not None:
-            return bool(kind) and self.walk(kind, rest) is not None
-        if root in names.callables:
+        (root, indexed), rest = links[0], links[1:]
+        declaration = self.variable(root)
+        if declaration is not None:
+            return self.walk(declaration, links) is not None
+        if root in names.callables or indexed:
             return False
         home = self.project.get(root)
         if home is not None and home.standard and rest:
-            own = root == self.home
+            declaration = self.variable(rest[0][0], root)
+            if declaration is not None:
+                return self.walk(declaration, rest) is not None
             if len(rest) == 1:
-                return rest[0] in (home.values if own else home.public_values)
-            kind = self.variable(rest[0], root)
-            if kind:
-                return self.walk(kind, rest[1:]) is not None
-            members = self.members(rest[0], root)
-            return len(rest) == 2 and members is not None and rest[1] in members
+                own = root == self.home
+                return not rest[0][1] and rest[0][0] in (home.values if own else home.public_values)
+            members = self.members(rest[0][0], root)
+            return len(rest) == 2 and members is not None and not any(
+                link[1] for link in rest) and rest[1][0] in members
         members = self.members(root)
-        return len(rest) == 1 and members is not None and rest[0] in members
+        return len(rest) == 1 and members is not None and not rest[0][1] and rest[0][0] in members
+
+
+def links(text: str) -> list[Link]:
+    """The parts of the dotted name ``text``, each with whether an index follows it."""
+    parts = CHAIN_PART.findall(text)
+    return [(name.casefold(), position + 1 < len(parts) and bool(parts[position + 1][1]))
+            for position, (name, _) in enumerate(parts) if name]
 
 
 @dataclass(frozen=True)
@@ -486,11 +517,10 @@ class Names:
     def value_chain(self, text: str) -> list[str] | None:
         """The indices of the dotted name ``text`` when it reads a value
         without a call (Scope.value), or None."""
-        parts = CHAIN_PART.findall(text)
-        segments = [name.casefold() for name, _ in parts if name]
-        if self.scope is None or len(segments) < 2 or not self.scope.value(segments, self):
+        chain = links(text)
+        if self.scope is None or len(chain) < 2 or not self.scope.value(chain, self):
             return None
-        return [index for _, index in parts if index]
+        return [index for _, index in CHAIN_PART.findall(text) if index]
 
 
 @dataclass(frozen=True)
@@ -810,9 +840,8 @@ def with_object(statement: str, names: Names) -> str | None:
     if WITH_ERR.match(statement):
         return "Err."
     target = statement[4:].strip()
-    segments = [name.casefold() for name, _ in CHAIN_PART.findall(target) if name]
     chain = CHAIN.fullmatch(target) or re.fullmatch(r"[A-Za-z_]\w*(?:\s*\([^()]*\))?", target)
-    if chain and names.scope is not None and segments and names.scope.record(segments):
+    if chain and names.scope is not None and names.scope.record(links(target)):
         return target + "."
     return None
 

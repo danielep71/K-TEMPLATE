@@ -2063,8 +2063,8 @@ RESUME_NEXT_OPERATIONS = [
 
 
 # A standard module of public error codes and records, as the house style
-# prescribes, and a procedure whose handler runs a statement at line 22 and
-# then reads Err.Number at line 23.
+# prescribes, and a procedure whose handler runs a statement at line 23 and
+# then reads Err.Number at line 24.
 CODES = """Attribute VB_Name = "TEST_Codes"
 Option Explicit
 Option Private Module
@@ -2092,7 +2092,7 @@ End Function
 
 
 def qualified(statement: str) -> str:
-    """``statement`` in a handler at line 22, then a read of Err.Number."""
+    """``statement`` in a handler at line 23, then a read of Err.Number."""
     return module("""Private Const OWN As Long = 1
 Private Enum Kind
     kOne = 1
@@ -2101,13 +2101,14 @@ Private Type Record
     Count As Long
     Items(1 To 3) As Long
     Owner As Object
+    Data As Variant
 End Type
 Private mRecord As Record
 
 
-Private Sub First(ByRef Given As SavedError, ByVal Book As Object)
+Private Sub First(ByRef Given As SavedError, ByVal Book As Object, ByVal Loose As Variant)
         Dim Number As Long, Text As String, Saved As SavedError, Many(1 To 2) As SavedError
-        Dim Index As Long
+        Dim Index As Long, Grown() As SavedError
         On Error GoTo Handler
         Exit Sub
 Handler:
@@ -2129,12 +2130,17 @@ QUALIFIED_VALUES = [
     "mRecord.Count = Err.Number: mRecord.Items(1) = 2", "LastError.Source = Err.Source",
     "TEST_Codes.LastError.Number = Err.Number",
     "With Saved: .Number = Err.Number: .Source = Err.Source: End With",
+    "Number = mRecord.Items(2)", "ReDim Grown(1 To 2): Grown(1).Number = Err.Number",
 ]
 # Each is a member access or a call before the read: one finding.
 QUALIFIED_MEMBERS = [
     "Number = Book.Count", "Text = Application.Name", "Number = mRecord.Owner.Count",
     "Number = TEST_Codes.Describe", "Number = Kind.kTwo", "Number = Saved.Missing",
     "Number = TEST_Codes.mHidden", "Number = Many(TEST_Codes.Describe()).Number",
+    # An index on anything but an array may call a default property, as
+    # Owner(1) does on a Collection; a Variant that holds an array too.
+    "Number = mRecord.Owner(1)", "mRecord.Owner(1) = 3", "Number = mRecord.Data(1)",
+    "Number = Loose(1).Number", "Number = Saved(1).Number",
 ]
 
 
@@ -2199,7 +2205,7 @@ class ErrorTest(unittest.TestCase):
                 findings = run_check(check_vba_errors.check, files)
                 self.assertEqual(len(findings), 1, findings)
                 self.assertTrue(findings[0].startswith(
-                    "tests/modules/TEST_Fixture.bas:23: Err.Number read in First after line 22, "
+                    "tests/modules/TEST_Fixture.bas:24: Err.Number read in First after line 23, "
                     "which may have changed Err with a call or member access"), findings)
 
     def test_every_statement_can_fail_after_resume_next(self) -> None:

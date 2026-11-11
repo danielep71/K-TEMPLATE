@@ -251,7 +251,11 @@ What they cannot prove:
     qualifies (`Module.LIMIT`): a variable of a class or object type, a
     class or document module and `Me` stay member accesses, and a field
     whose index holds a parenthesis, as in `Saved(Count(1)).Number`, counts
-    as one too. An assignment to anything but a variable, such a field or
+    as one too. An index is an element only on a name declared as an array
+    (`Name() As T`, `Name(1 To 3) As T`, a `ReDim`): on an object, a
+    `Variant` or an undeclared type it may call a default property, as
+    `Owner(1)` does on a `Collection`, so it counts as a member access, even
+    on a `Variant` that holds an array. An assignment to anything but a variable, such a field or
     value, an array element, `Date`, `Time` or `Mid` counts as setting a
     property, and a statement
     that starts with a name the check does not list as a VBA statement
