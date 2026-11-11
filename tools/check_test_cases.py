@@ -9,9 +9,10 @@ IDs). It never computes or compares a value.
 
 It also checks the Traceability table of docs/methodology/VALIDATION_PLAN.md:
 each row's source is in the register, its rule is a step that the *Rules* table
-of a declared calculation lists, every VBA procedure it names exists in a component under src/,
-every test case it names exists and tests that calculation, and its status is
-one of the four the plan defines and consistent with what the row names.
+of a declared calculation lists, every VBA procedure it names exists in a
+standard module, class module or form under src/, every test case it names
+exists and tests that calculation, and its status is one of the four the plan
+defines and consistent with what the row names.
 
 A fixture is a JSON file, <case-id>.json, or a file-based case, a directory
 <case-id>/ with a case.json manifest and one subdirectory per variant holding
@@ -19,9 +20,10 @@ input files named as in the data contract. Outside an invalid case, each
 delimited text file of a variant is validated against the machine-readable
 data contract (docs/methodology/data-contract.json) by the reference validator
 of tools/check_data_contract.py. An invalid case may break any input rule,
-because that is what it tests: in a JSON fixture only the harness metadata is
-checked, and in a file-based case the manifest is checked in full, but not the
-content of its variant files.
+because that is what it tests: a JSON fixture keeps its harness metadata
+valid, and any of its calculation inputs may be invalid or missing, but a key
+outside the fixture keys fails; in a file-based case the manifest is checked in
+full, but not the content of its variant files.
 """
 
 from __future__ import annotations
@@ -50,14 +52,17 @@ DERIVATIONS = "tests/derivations/"
 MANIFEST = "case.json"
 DEFAULT_ENCODING = "UTF-8"
 
-CASE_ID = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-SNAKE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
-CURRENCY = re.compile(r"^[A-Z]{3}$")
-DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-CALCULATION_ID = re.compile(r"^CALC-\d+$")
-DATASET_ID = re.compile(r"^DS-\d+$")
+# Each pattern that checks a value must match the whole value (fullmatch): "$"
+# would also accept a trailing line break. Digits are ASCII: \d would also
+# accept other scripts' digits.
+CASE_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
+SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
+CURRENCY = re.compile(r"[A-Z]{3}")
+DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
+CALCULATION_ID = re.compile(r"CALC-[0-9]+")
+DATASET_ID = re.compile(r"DS-[0-9]+")
 # A rule is a step of the case's calculation contract: CALC-01.2 is step 2.
-RULE = re.compile(r"^(CALC-\d+)\.(\d+)$")
+RULE = re.compile(r"(CALC-[0-9]+)\.([0-9]+)")
 # A calculation contract's *Rules* table, under its ### heading, lists its steps.
 RULES_LABEL = "**Rules:**"
 STEP_COLUMN = "Step"
@@ -77,8 +82,8 @@ STATUSES = frozenset({"Validated", "Exercised", "Not validated", "Not implemente
 NOTHING = "\u2014"  # an em dash: the row names no procedure or no case
 ILLUSTRATIVE = re.compile(r"^\*Illustrative:\*\s*")
 SEPARATOR = re.compile(r"^:?-+:?$")
-SOURCE_ID = re.compile(r"^SRC-\d+$")
-PROCEDURE_NAME = re.compile(r"^([A-Za-z]\w*)\.([A-Za-z]\w*)$")
+SOURCE_ID = re.compile(r"SRC-[0-9]+")
+PROCEDURE_NAME = re.compile(r"([A-Za-z][A-Za-z0-9_]*)\.([A-Za-z][A-Za-z0-9_]*)")
 VBA_HOME = "src"
 VBA_DECLARATION = re.compile(r"^[ \t]*(?:(?:Public|Private|Friend)[ \t]+)?(?:Static[ \t]+)?"
                              r"(?:Sub|Function|Property[ \t]+(?:Get|Let|Set))[ \t]+(\w+)",
@@ -163,7 +168,7 @@ def is_text(value: object) -> bool:
 
 
 def is_date(value: object) -> bool:
-    if not isinstance(value, str) or not DATE.match(value):
+    if not isinstance(value, str) or not DATE.fullmatch(value):
         return False
     try:
         datetime.date.fromisoformat(value)
@@ -280,7 +285,7 @@ def calculation_steps(root: Path) -> dict[str, set[int]]:
                 header = row
             elif STEP_COLUMN in header and len(row) > header.index(STEP_COLUMN):
                 step = row[header.index(STEP_COLUMN)]
-                if step.isdigit():
+                if step.isascii() and step.isdigit():
                     steps[calculation].add(int(step))
         elif rules and header and text:
             rules = False  # The table has ended.
@@ -289,7 +294,7 @@ def calculation_steps(root: Path) -> dict[str, set[int]]:
 
 def step_problem(rule: str, method: Methodology) -> str | None:
     """Why a rule such as CALC-01.2 is not a step its calculation contract lists."""
-    match = RULE.match(rule)
+    match = RULE.fullmatch(rule)
     if match is None or match.group(1) not in method.steps:
         return None  # Not a step, or not a declared calculation: reported elsewhere.
     if int(match.group(2)) not in method.steps[match.group(1)]:
@@ -373,7 +378,7 @@ def input_value_problem(key: str, value: object) -> str | None:
     elif suffix == "_flag":
         valid = isinstance(value, bool)
     elif key.endswith("currency_code"):
-        valid = isinstance(value, str) and bool(CURRENCY.match(value))
+        valid = isinstance(value, str) and bool(CURRENCY.fullmatch(value))
     else:
         valid = is_text(value)
     return None if valid else f"input {key!r} has an invalid value for its suffix {suffix}"
@@ -384,7 +389,7 @@ def check_inputs(inputs: object, where: str, report: Report) -> None:
         report.add(where, "inputs is not an object")
         return
     for key, value in inputs.items():
-        if not SNAKE.match(key):
+        if not SNAKE.fullmatch(key):
             report.add(where, f"input {key!r} is not lower snake case")
         elif problem := input_value_problem(key, value):
             report.add(where, problem)
@@ -422,7 +427,7 @@ def harness_problems(data: dict[str, Any], stem: str, kind: str = "test-fixture"
         problems.append("schema_version is not 1")
     if data["kind"] != kind:
         problems.append(f"kind is not {kind!r}")
-    if data["id"] != stem or not CASE_ID.match(stem):
+    if data["id"] != stem or not CASE_ID.fullmatch(stem):
         problems.append("id is not the kebab-case file name" if kind == "test-fixture"
                         else "id is not the kebab-case directory name")
     if data["synthetic"] is not True:
@@ -439,8 +444,8 @@ def harness_problems(data: dict[str, Any], stem: str, kind: str = "test-fixture"
 def declared_problem(kind: str, value: object, known: Mapping[str, bool],
                      pattern: re.Pattern[str], case_id: str, guide: str) -> str | None:
     """An ID that the methodology declares; an illustrative one only in an illustrative case."""
-    if not isinstance(value, str) or not pattern.match(value):
-        return f"{kind} {value!r} is not an ID of the form {pattern.pattern.strip('^$')}"
+    if not isinstance(value, str) or not pattern.fullmatch(value):
+        return f"{kind} {value!r} is not an ID of the form {pattern.pattern}"
     if value not in known:
         return f"{kind} {value} is not declared in {guide}"
     if known[value] and not case_id.startswith("illustrative-"):
@@ -455,7 +460,7 @@ def check_calculation(data: dict[str, Any], case_id: str, method: Methodology,
                                    CALCULATION_ID, case_id, "CALCULATION_CONTRACTS.md"):
         report.add(where, problem)
     code = data["reporting_currency_code"]
-    if not isinstance(code, str) or not CURRENCY.match(code):
+    if not isinstance(code, str) or not CURRENCY.fullmatch(code):
         report.add(where, "reporting_currency_code is not a currency code")
 
 
@@ -487,7 +492,10 @@ def check_fixture(path: Path, root: Path, method: Methodology, report: Report) -
         report.add(where, "is not an object")
         return None
     invalid = data.get("category") == "invalid"
-    shown = {key: value for key, value in data.items() if key in HARNESS_KEYS} if invalid else data
+    # An invalid case may miss a calculation input, but holds no key outside the
+    # fixture keys.
+    shown = {key: value for key, value in data.items()
+             if key not in FIXTURE_KEYS - HARNESS_KEYS} if invalid else data
     if problem := keys_problem(shown, HARNESS_KEYS if invalid else FIXTURE_KEYS):
         report.add(where, problem)
         return None
@@ -567,7 +575,7 @@ def check_file_fixture(directory: Path, root: Path, method: Methodology,
             continue
         if not entry.is_dir():
             report.add(rel(entry, root), f"is not {MANIFEST} or a variant directory")
-        elif not CASE_ID.match(entry.name):
+        elif not CASE_ID.fullmatch(entry.name):
             report.add(rel(entry, root), "is not a kebab-case variant name")
         else:
             variants.add(entry.name)
@@ -619,7 +627,7 @@ def form_problems(output: dict[str, Any]) -> list[str]:
     if not is_number(output["value"]):
         problems.append("value is not a finite number")
     unit = output["unit"]
-    if not isinstance(unit, str) or not (unit in UNITS or CURRENCY.match(unit)):
+    if not isinstance(unit, str) or not (unit in UNITS or CURRENCY.fullmatch(unit)):
         problems.append(f"unit {unit!r} is not a currency code, 1 or years")
     if problem := tolerance_problem(output["tolerance"]):
         problems.append(problem)
@@ -679,7 +687,9 @@ def scope_problems(scope: object, case: Case) -> list[str]:
         return []
     if not isinstance(scope, dict) or set(scope) != SCOPE_KEYS:
         return ["scope is null or an object with exactly dataset and record"]
-    if case.category == "invalid":
+    if case.category == "invalid" and case.variants is None:
+        # The datasets of an invalid JSON fixture are inputs it may break; a
+        # file-based case's manifest is checked in every category.
         return [] if all(is_text(value) for value in scope.values()) else [
             "scope dataset and record are texts"]
     if case.variants is not None:
@@ -696,7 +706,7 @@ def scope_problems(scope: object, case: Case) -> list[str]:
 def rule_problem(rule: object, kind: object, case: Case, method: Methodology) -> str | None:
     if rule is None:
         return None if kind == "illustrative" else "only an illustrative value may have no rule"
-    match = RULE.match(rule) if isinstance(rule, str) else None
+    match = RULE.fullmatch(rule) if isinstance(rule, str) else None
     if match is None:
         return f"rule {rule!r} is not a calculation step such as CALC-01.1"
     if case.calculation is not None and match.group(1) != case.calculation:
@@ -712,7 +722,7 @@ def check_output(output: object, case_id: str, case: Case, method: Methodology,
     if problems:
         return problems
     quantity = output["quantity"]
-    if not isinstance(quantity, str) or not SNAKE.match(quantity):
+    if not isinstance(quantity, str) or not SNAKE.fullmatch(quantity):
         problems.append(f"quantity {quantity!r} is not lower snake case")
     elif quantity.startswith("illustrative_") and not case_id.startswith("illustrative-"):
         problems.append("an illustrative_ quantity outside an illustrative- case")
@@ -725,7 +735,7 @@ def check_output(output: object, case_id: str, case: Case, method: Methodology,
     if isinstance(kind, str):
         case.classes.add(kind)
         rule = output["rule"]
-        if isinstance(rule, str) and RULE.match(rule):
+        if isinstance(rule, str) and RULE.fullmatch(rule):
             case.step_classes.setdefault(rule, set()).add(kind)
     return problems
 
@@ -832,12 +842,12 @@ def traceability_rows(root: Path, report: Report) -> list[TraceRow]:
 
 
 def vba_procedures(root: Path) -> dict[str, set[str]]:
-    """The procedures of each standard and class module under src/, by module name.
-    VBA names ignore case, so both are folded."""
+    """The procedures of each standard module, class module and form under src/, by
+    module name. VBA names ignore case, so both are folded."""
     procedures: dict[str, set[str]] = {}
     home = root / VBA_HOME
     for path in sorted(home.rglob("*")) if home.is_dir() else []:
-        if path.suffix.lower() in (".bas", ".cls") and path.is_file():
+        if path.suffix.lower() in (".bas", ".cls", ".frm") and path.is_file():
             text = path.read_bytes().decode("ascii", errors="replace")
             procedures.setdefault(path.stem.casefold(), set()).update(
                 name.casefold() for name in VBA_DECLARATION.findall(text))
@@ -856,12 +866,12 @@ def guide_problems(row: TraceRow, method: Methodology) -> tuple[list[str], str |
     """What is wrong with a row's source, paragraph and step, and its calculation."""
     problems = []
     source = CODE_SPAN.findall(ILLUSTRATIVE.sub("", row.cells["Source"]))
-    if len(source) != 1 or not SOURCE_ID.match(source[0]) or source[0] not in method.sources:
+    if len(source) != 1 or not SOURCE_ID.fullmatch(source[0]) or source[0] not in method.sources:
         problems.append(f"source {row.cells['Source']!r} is not one SRC- ID of the register")
     if not row.cells["Paragraph"]:
         problems.append("names no paragraph of its source")
     step = CODE_SPAN.findall(row.cells["Calculation step"])
-    rule = RULE.match(step[0]) if len(step) == 1 else None
+    rule = RULE.fullmatch(step[0]) if len(step) == 1 else None
     calculation = rule.group(1) if rule else None
     if calculation is None or calculation not in method.calculations:
         problems.append(f"calculation step {row.cells['Calculation step']!r} is not a step "
@@ -878,7 +888,7 @@ def procedure_problems(names: list[str] | None,
         return [f"VBA procedure must name Module.Procedure in code spans, or be {NOTHING}"]
     problems = []
     for name in names:
-        match = PROCEDURE_NAME.match(name)
+        match = PROCEDURE_NAME.fullmatch(name)
         if not match:
             problems.append(f"VBA procedure {name!r} is not Module.Procedure")
         elif match.group(2).casefold() not in procedures.get(match.group(1).casefold(), set()):

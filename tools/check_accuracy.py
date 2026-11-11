@@ -69,13 +69,15 @@ CONTRACT_KEYS = frozenset({"id", "calculation", "regime", "quantities", "metric"
                            "holdout_cases"})
 RESULTS_KEYS = frozenset({"schema_version", "kind", "commit", "results"})
 RESULT_KEYS = frozenset({"case", "variant", "quantity", "scope", "value"})
-CONTRACT_ID = re.compile(r"^ACC-\d+$")
-SNAKE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+# Each pattern must match a whole value (fullmatch): "$" would also accept a
+# trailing line break. Digits are ASCII: \d would also accept other scripts' digits.
+CONTRACT_ID = re.compile(r"ACC-[0-9]+")
+SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 INDEPENDENT = frozenset({"published", "independent"})
 METRICS = frozenset({"absolute", "relative"})
 STATUSES = frozenset({"draft", "frozen"})
-TAG = re.compile(r"^v\d+\.\d+\.\d+$")
-SHA = re.compile(r"^[0-9a-f]{40}$")
+TAG = re.compile(r"v[0-9]+\.[0-9]+\.[0-9]+")
+SHA = re.compile(r"[0-9a-f]{40}")
 
 # A result's identity: case, variant (None for a JSON fixture), quantity and scope.
 Key = tuple[str, str | None, str, str | None]
@@ -163,13 +165,13 @@ def case_outputs(root: Path, case: str, report: Report) -> tuple[str | None, lis
 def contract_problems(data: Mapping[str, Any]) -> list[str]:
     """What is wrong with one contract's own fields."""
     problems = []
-    if not isinstance(data.get("id"), str) or not CONTRACT_ID.match(data["id"]):
+    if not isinstance(data.get("id"), str) or not CONTRACT_ID.fullmatch(data["id"]):
         problems.append("id is not ACC-<number>")
     if not isinstance(data.get("regime"), str) or not data["regime"].strip():
         problems.append("regime is not a text")
     quantities = data.get("quantities")
     if not isinstance(quantities, list) or not quantities or \
-            not all(isinstance(item, str) and SNAKE.match(item) for item in quantities):
+            not all(isinstance(item, str) and SNAKE.fullmatch(item) for item in quantities):
         problems.append("quantities is not a non-empty list of lower snake case names")
     elif len(set(quantities)) != len(quantities):
         problems.append("quantities lists a name twice")
@@ -306,7 +308,7 @@ def git(root: Path, *args: str) -> str | None:
 def newest_tag(root: Path) -> str | None:
     """The newest vX.Y.Z tag that HEAD contains, by version."""
     tags = [tag for tag in (git(root, "tag", "--merged", "HEAD") or "").split()
-            if TAG.match(tag)]
+            if TAG.fullmatch(tag)]
     return max(tags, key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
                default=None)
 
@@ -373,7 +375,7 @@ def read_results(path: Path, root: Path, candidate: str | None,
                           "and a results list")
         return None
     commit = data["commit"]
-    if not isinstance(commit, str) or not SHA.match(commit):
+    if not isinstance(commit, str) or not SHA.fullmatch(commit):
         report.add(where, "commit is not a full lower-case commit SHA")
         return None
     if candidate is None:
