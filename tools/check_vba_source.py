@@ -5,10 +5,11 @@ Applies the mechanical rules of docs/VBA_HOUSE_STYLE.md and the placement
 rules of docs/REPOSITORY_STRUCTURE.md to every tracked file: VBA components
 only in their homes, each with its role's name prefix and a VB_Name equal to
 its file name; ASCII only; Option Explicit, and Option Private Module where
-required; no Option Base, tab or trailing white space; string literals
-closed; forms beside their .frx; LF storage with CRLF checkout; no workbook
-committed except the macro-free src/workbook/Template.xlsx and the
-byte-preserved copies of regulatory sources under docs/methodology/sources/.
+required; no Option Base; no tab or trailing white space, except in the
+VBE header of a form; string literals closed; forms beside their .frx; LF
+storage with CRLF checkout; no workbook committed except the macro-free
+src/workbook/Template.xlsx and the byte-preserved copies of regulatory
+sources under docs/methodology/sources/.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from format_vba import header_length
 from vba_lexer import (
     Finding,
     facade_pattern,
@@ -140,9 +142,16 @@ def unclosed_literals(text: str) -> list[int]:
 
 
 def layout(path: str, text: str) -> list[Finding]:
-    """Tabs and trailing white space; docs/VBA_HOUSE_STYLE.md, Source representation."""
+    """Tabs and trailing white space; docs/VBA_HOUSE_STYLE.md, Source representation.
+
+    The VBE header of a form, as tools/format_vba.py finds it, keeps the bytes
+    the VBE writes, a trailing blank on its Begin line included, so its lines
+    are not checked; the code after it is.
+    """
+    lines = text.split("\n")
+    skip = header_length(lines) if Path(path).suffix.lower() == ".frm" else 0
     findings = []
-    for number, line in enumerate(text.split("\n"), 1):
+    for number, line in enumerate(lines[skip:], skip + 1):
         if "\t" in line:
             findings.append(Finding(path, number, "tab character; indent with spaces"))
         if line != line.rstrip(" \t"):

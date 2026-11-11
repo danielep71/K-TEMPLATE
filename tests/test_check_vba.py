@@ -304,6 +304,23 @@ class SourceTest(unittest.TestCase):
         self.assertFinding(changed("src/core/CORE_Validation.bas", "Exit Function",
                                    "Exit Function  "), "trailing white space")
 
+    def test_form_header_keeps_the_bytes_the_vbe_writes(self) -> None:
+        # The VBE ends a form's Begin line with a blank and may write other
+        # trailing blanks or a tab there; tools/format_vba.py keeps them.
+        header = changed("src/forms/frmRunOptions.frm", "frmRunOptions\n   Caption",
+                         "frmRunOptions \n\tClientHeight    =   3015\n   Caption")
+        header = changed("src/forms/frmRunOptions.frm", '"Run options"', '"Run options"   ',
+                         header)
+        self.assertEqual(self.findings(header), [])
+        code = changed("src/forms/frmRunOptions.frm", "Option Explicit\n",
+                       "Option Explicit \n\tPrivate X As Long\n", header)
+        self.assertEqual(self.findings(code), [
+            "src/forms/frmRunOptions.frm:12: trailing white space",
+            "src/forms/frmRunOptions.frm:13: tab character; indent with spaces"])
+        # A module's header has no such exemption.
+        self.assertFinding(changed("src/core/CORE_Validation.bas", '"CORE_Validation"',
+                                   '"CORE_Validation" '), "CORE_Validation.bas:1: trailing")
+
     def test_unclosed_string_literal(self) -> None:
         self.assertFinding(changed("tests/modules/TEST_Harness.bas", 'Debug.Print "It',
                                    'Debug.Print "Open\n        Debug.Print "It'),

@@ -218,6 +218,31 @@ class WhitespaceTest(RepositoryTest):
                      "data.bin": b"\x00binary \n"})
         self.assertEqual(set(self.outcomes().values()), {0})
 
+    def test_byte_preserved_files_pass_under_the_repository_attributes(self) -> None:
+        # Source copies keep their issuer's bytes; a form keeps the VBE header,
+        # whose Begin line ends with a blank (tools/check_vba_source.py checks
+        # the code after it).
+        header = ["VERSION 5.00", "Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmRun ",
+                  "   Caption         =   \"Run\"   ", "\tClientHeight    =   3015", "End",
+                  "Attribute VB_Name = \"frmRun\"", "Option Explicit"]
+        self.commit({".gitattributes": (ROOT / ".gitattributes").read_bytes(),
+                     "docs/methodology/sources/SRC-01_rules.csv": b"a,b \r\nc,d\t\r\n",
+                     "docs/methodology/sources/SRC-02_rules.txt": b"no final newline  ",
+                     "src/forms/frmRun.frm": "".join(f"{line}\r\n" for line in header)
+                     .encode("ascii")})
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.outcomes(), {"whitespace-committed": 0, "whitespace-local": 0})
+
+    def test_ordinary_text_beside_byte_preserved_files_is_checked(self) -> None:
+        self.commit({".gitattributes": (ROOT / ".gitattributes").read_bytes()})
+        for path in ("docs/methodology/sources/README.md", "docs/notes.md",
+                     "src/core/CORE_Probe.bas"):
+            with self.subTest(path=path):
+                self.commit({path: "trailing  \n"})
+                self.assertNotEqual(self.outcomes()["whitespace-committed"], 0)
+                self.git("rm", "-q", path)
+                self.commit()
+
     def test_local_white_space_fails(self) -> None:
         self.commit({"notes.txt": "clean\n"})
         self.write({"notes.txt": "bad\t\n"})
