@@ -2151,8 +2151,9 @@ QUALIFIED_MEMBERS = [
 ]
 
 
-# The same name declared at two scope levels, as a value at one and a
-# procedure at the other: the nearer level decides, as in VBA. Each case is
+# The same name declared at two scope levels, with a different kind at each:
+# a variable against a property or function, or an Enum against a variable.
+# The nearer level decides, as in VBA. Each case is
 # (module-level declarations, parameters, local declaration, declaration of
 # another standard module, statement in the handler, whether the read of
 # Err.Number after it is stale).
@@ -2265,6 +2266,35 @@ def shadowing_files(module_level: str, local: str, statement: str, second: bool
     return files
 
 
+# A Function or Property Get holds its result in its own name: a field of a
+# result of a user-defined Type is a value there. Each case is (procedure
+# header, its End keyword, statement in the handler, whether the read of
+# Err.Number after it is stale).
+OWN_RESULT = {
+    "function-result-written": ("Public Function TryRun() As SavedError", "Function",
+                                "TryRun.Number = Err.Number: TryRun.Source = Err.Source", False),
+    "function-result-read": ("Public Function TryRun() As SavedError", "Function",
+                             "Number = TryRun.Number", False),
+    "property-get-result-written": ("Public Property Get Last() As SavedError", "Property",
+                                    "Last.Number = Err.Number: Last.Source = Err.Source",
+                                    False),
+    "object-result-member": ("Public Function TryRun() As Object", "Function",
+                             "Number = TryRun.Owner", True),
+    "recursive-call": ("Public Function TryRun(ByVal Retry As Long) As Long", "Function",
+                       "Number = TryRun(1)", True),
+    "recursive-call-of-a-record": ("Public Function TryRun(ByVal Retry As Long) As SavedError",
+                                   "Function", "Number = TryRun(1).Number", True),
+}
+
+
+def own_result(header: str, end: str, statement: str) -> dict[str, str | bytes]:
+    """A procedure ``header`` whose handler runs ``statement``, then reads Err.Number."""
+    body = (f"{header}\n        Dim Number As Long\n        On Error GoTo Fail\n"
+            f"        Exit {end}\nFail:\n        {statement}\n        Number = Err.Number\n"
+            f"End {end}\n")
+    return {**standalone(module(body)), "tests/modules/TEST_Codes.bas": CODES}
+
+
 def resume_next_operation(statement: str) -> str:
     """``statement`` after On Error Resume Next, then a read of Err.Number."""
     return ("Private Sub First()\n"
@@ -2363,6 +2393,12 @@ class ErrorTest(unittest.TestCase):
             with self.subTest(name=name):
                 files = shadowing_files(module_level, local, statement, second)
                 findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(bool(findings), stale, findings)
+
+    def test_own_result_is_a_variable(self) -> None:
+        for name, (header, end, statement, stale) in OWN_RESULT.items():
+            with self.subTest(name=name):
+                findings = run_check(check_vba_errors.check, own_result(header, end, statement))
                 self.assertEqual(bool(findings), stale, findings)
 
     def test_every_statement_can_fail_after_resume_next(self) -> None:
