@@ -58,7 +58,10 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   SHA-256 of the workbook and of every exported file, and the workbook's
   build stamp names the commit. The binding is VERIFIED, FAIL, or UNVERIFIED
   when no workbook or manifest is given; --require-binding fails anything
-  but VERIFIED.
+  but VERIFIED;
+- a workbook built with tools/devbuild/build_workbook.py --override, which
+  its build stamp names, or a results file that such a workbook wrote: it is
+  never evidence for the commit, and the check names it as such.
 
 Without an exported folder, --workbook proves source identity instead by
 rebuild: the commit is checked out in a temporary worktree and built with
@@ -961,6 +964,15 @@ def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -
     if not workbook.is_file():
         evidence.findings.append(f"workbook {workbook}: missing")
         return
+    stamp_cell = stamp_name(root, commit)
+    try:
+        stamp = read_stamp(workbook, stamp_cell) if stamp_cell else None
+    except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
+            ElementTree.ParseError):
+        stamp = None
+    if overridden(stamp):
+        evidence.findings.append(f"workbook {workbook.name}: {not_evidence(stamp, commit)}")
+        return
     with tempfile.TemporaryDirectory(prefix="excel-run-rebuild-") as temporary:
         tree = Path(temporary) / "tree"
         target = Path(temporary) / "rebuilt.xlsm"
@@ -995,6 +1007,24 @@ def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -
     evidence.binding_notes.append(f"workbook parts byte-identical to the "
                                   f"{REBUILT_CONFIGURATION} build of {commit[:12]}; no export "
                                   "needed")
+
+
+def stamp_name(root: Path, commit: str) -> str | None:
+    """The defined name of the commit stamp in the commit's build configuration."""
+    try:
+        layout = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
+        return str(layout["stamp"]["commit"])
+    except (RuntimeError, ValueError, KeyError, TypeError):
+        return None
+
+
+def overridden(stamp: object) -> bool:
+    """Whether a commit stamp marks a build with --override."""
+    return isinstance(stamp, str) and build_workbook.OVERRIDDEN in stamp
+
+
+def not_evidence(stamp: object, commit: str) -> str:
+    return f"built with overrides, so not evidence for {commit} (build stamp {stamp!r})"
 
 
 def package_parts(data: bytes) -> list[tuple[str, bytes]]:
@@ -1062,17 +1092,17 @@ def workbook_findings(root: Path, commit: str, workbook: Path, digest: str,
     if actual != digest:
         findings.append(f"workbook {workbook.name}: sha256 {actual}, but {manifest} records "
                         f"{digest}")
-    try:
-        layout = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
-        name = str(layout["stamp"]["commit"])
-    except (RuntimeError, ValueError, KeyError, TypeError):
+    name = stamp_name(root, commit)
+    if name is None:
         return [*findings, f"{BUILD_CONFIG} at {commit[:12]} names no commit stamp"]
     try:
         stamp = read_stamp(workbook, name)
     except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
             ElementTree.ParseError) as error:
         return [*findings, f"workbook {workbook.name}: build stamp not readable: {error!r}"]
-    if stamp != commit:
+    if overridden(stamp):
+        findings.append(f"workbook {workbook.name}: {not_evidence(stamp, commit)}")
+    elif stamp != commit:
         findings.append(f"workbook {workbook.name}: build stamp {name} is {stamp!r}, expected "
                         f"{commit} from a clean build")
     return findings
@@ -1095,6 +1125,20 @@ def results_files(policy: Policy) -> list[str]:
     suite that names one. BeginRun clears the results, so each suite saves its own."""
     return [policy.results,
             *(item.results for item in policy.project_suites if item.results is not None)]
+
+
+def check_overridden_results(commit: str, folder: Path, evidence: Evidence,
+                             policy: Policy) -> None:
+    """A results file whose commit is the stamp of a build with --override names it,
+    whether or not the commit holds accuracy contracts."""
+    for name in results_files(policy):
+        try:
+            stamp = json.loads((folder / name).read_text(encoding="utf-8")).get("commit")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if overridden(stamp):
+            evidence.findings.append(f"{name}: written by a workbook "
+                                     f"{not_evidence(stamp, commit)}")
 
 
 def check_results(root: Path, commit: str, folder: Path, evidence: Evidence,
@@ -1188,6 +1232,7 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     check_logs(folder, runs, evidence)
     check_host(folder, evidence, policy, rebuilt)
     check_results(root, commit, folder, evidence, policy)
+    check_overridden_results(commit, folder, evidence, policy)
     if not rebuilt:
         check_binding(root, commit, folder, workbook, evidence, policy)
     if require_binding and evidence.binding == "UNVERIFIED":

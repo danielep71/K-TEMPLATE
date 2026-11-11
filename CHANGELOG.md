@@ -63,6 +63,20 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- `tools/devbuild/build_workbook.py --override DIR` builds a workbook in which
+  each `.bas` or `.cls` file of `DIR` and its subfolders replaces the module
+  with the same `Attribute VB_Name`, for the negative control of a VBA fix. A
+  file that names no module or the same module as another, a file without one
+  `VB_Name` or outside the source rules, and a `.frm` stop the build. The build
+  prints each replaced module with its SHA-256, and the stamp's commit records
+  the folder and those SHA-256 values as *NOT evidence-grade*.
+  `tools/check_excel_run.py` reports a workbook built this way, or a results
+  file it wrote, as not evidence for the commit, never as
+  `Binding: VERIFIED`. [INSTALLATION.md](INSTALLATION.md#building-a-workbook-from-source)
+  describes the option and its limits (#406).
+
 ### Fixed
 
 - The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims
