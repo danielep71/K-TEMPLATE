@@ -1864,9 +1864,15 @@ ERRORS_INVALID = {
                                     "Err.Number read in First after line 8, which cleared Err"),
     "resume-next-before-any-operation": (guarded("        Report Err.Description\n"), 7,
                                          "Err.Description read in First after line 6"),
-    "resume-next-flag-is-no-operation": (guarded("        Flag = False\n"
-                                                 "        Number = Err.Number\n"), 8,
-                                         "Err.Number read in First after line 6"),
+    "resume-next-declaration-blank-line-and-comment-run-nothing": (
+        guarded("        Dim Local As Long\n\n        ' a comment\n        Number = Err.Number\n"),
+        10, "Err.Number read in First after line 6"),
+    "resume-next-err-write-runs-nothing": (
+        guarded("        Err.Number = 0\n        Number = Err.Number\n"), 8,
+        "Err.Number read in First after line 6"),
+    "resume-next-err-clear": (
+        guarded("        Helper\n        Err.Clear\n        Text = Err.Description\n"), 9,
+        "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
     "select-case-after-on-error": (guarded("        Helper\n        On Error GoTo 0\n"
                                            "        Select Case Err.Number\n"
                                            "        End Select\n"), 9,
@@ -1987,6 +1993,24 @@ LIBRARY_STATEMENTS = [
 ]
 
 
+# Statements that run code, so that after On Error Resume Next each can fail
+# and be the error a read of Err checks.
+RESUME_NEXT_OPERATIONS = [
+    "Matches = Text Like Pattern", "Flag = A = B", "Flag = Not Flag", "Flag = A And B",
+    "Number = Text", "Set Item = Other", "Number = 1", "If A > B Then Number = 1",
+    "Number = A Mod B", "Flag = Item Is Nothing", "Flag = False",
+]
+
+
+def resume_next_operation(statement: str) -> str:
+    """``statement`` after On Error Resume Next, then a read of Err.Number."""
+    return ("Private Sub First()\n"
+            "        Dim Matches As Boolean, Text As String, Pattern As String, Flag As Boolean\n"
+            "        Dim A As Long, B As Long, Number As Long, Item As Object, Other As Object\n"
+            "        On Error Resume Next\n"
+            f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
+
+
 def sweep_statements() -> list[str]:
     """Each statement of the sweep, and each library statement written
     plain, with Call, and qualified by VBA. and by its module."""
@@ -2024,6 +2048,19 @@ class ErrorTest(unittest.TestCase):
                                 findings)
                 self.assertIn(text, findings[0])
                 self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
+
+    def test_every_statement_can_fail_after_resume_next(self) -> None:
+        for statement in RESUME_NEXT_OPERATIONS:
+            with self.subTest(statement=statement):
+                files = standalone(module(resume_next_operation(statement)))
+                self.assertEqual(run_check(check_vba_errors.check, files), [])
+        # Nothing but On Error itself comes before this read.
+        findings = run_check(check_vba_errors.check,
+                             standalone(module(resume_next_operation("").replace(
+                                 "        \n", ""))))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("Err.Number read in First after line 7, which cleared Err with an On "
+                      "Error statement", findings[0])
 
     def test_vba_statements_and_functions_change_nothing(self) -> None:
         # A table of every VBA statement and function the check knows to run

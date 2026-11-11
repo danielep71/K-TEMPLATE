@@ -5,11 +5,11 @@ A read of ``Err.Number``, ``Err.Source`` or ``Err.Description`` is reported
 when, on the straight-line path that leads to it, a statement has already
 cleared or may have replaced the error it means to read:
 
-- an ``On Error`` statement, which clears ``Err``;
+- an ``On Error`` statement or ``Err.Clear``, which clears ``Err``;
 - in an error handler, a call or a member access (``Helper``, ``x = Helper(1)``,
   ``x = Helper`` without parentheses, ``obj.Method``, ``Debug.Print``,
-  ``Application.StatusBar = ...``, ``Err.Clear``, ``New``), which can run code
-  that clears or replaces it. A name without parentheses is a call unless it
+  ``Application.StatusBar = ...``, ``New``), which can run code that clears
+  or replaces it. A name without parentheses is a call unless it
   is a variable, a constant, an Enum member or a component: a function,
   property or Declare of the project, or a host global such as ActiveCell.
   Names that start with ``vb`` or ``xl`` are the constants of VBA and Excel.
@@ -25,24 +25,30 @@ cleared or may have replaced the error it means to read:
   (``.Value = x`` in a ``With`` block) or a property of the host.
 
 After ``On Error Resume Next``, and outside a handler, ``Err`` belongs to the
-most recent statement that can fail, so a read after such a statement checks
-that statement and is not reported. A plain copy into a variable
-(``n = Err.Number``) and a literal change nothing. The VBA functions of
-PURE_FUNCTIONS (``CLng``, ``CStr``, ``Len``, ..., also written ``VBA.CLng``),
-arithmetic, concatenation and an array element can fail but run no code that
-clears ``Err``: in a handler they change nothing, and after ``On Error Resume
-Next`` they are a statement that can fail. So are the VBA statements of
-BUILTIN_STATEMENT (``ReDim``, ``Erase``, ``Open``, ``Print #``, ...), also
-written with ``Call``, as in ``Call SaveSetting(...)``: their operands alone
-are read as expressions, without the type that ``ReDim`` declares
-(``As Long``), and the type in ``TypeOf x Is Thing`` is not a value. A
-statement that starts with any other name is a call, ``Load`` and
-``Unload`` included, since they run the form's event procedures.
+most recent statement that runs anything, since any of them can fail, even
+``Number = 1`` (a type mismatch) or ``Matches = Text Like Pattern``: a read
+after one checks it and is not reported. Only these leave ``Err`` as the
+``On Error`` statement or ``Err.Clear`` cleared it: a declaration (``Dim``,
+``Static``, ``Const``), a label, a blank line or a comment, ``With Err`` and
+``End With``, and a write of a property of ``Err`` whose value runs nothing,
+as in ``Err.Number = 0``.
+
+In a handler, the VBA functions of PURE_FUNCTIONS (``CLng``, ``CStr``,
+``Len``, ..., also written ``VBA.CLng``), operators, an array element and
+the VBA statements of BUILTIN_STATEMENT (``ReDim``, ``Erase``, ``Open``,
+``Print #``, ...) change nothing: they can fail but run no code that clears
+``Err``. A VBA statement may be written with ``Call``, as in
+``Call SaveSetting(...)``. Its operands alone are read as expressions,
+without the type that ``ReDim`` declares (``As Long``), and the type in
+``TypeOf x Is Thing`` is not a value. A statement that starts with any other
+name is a call, ``Load`` and ``Unload`` included, since they run the form's
+event procedures.
 
 Within a statement, the check follows VBA's evaluation order: a read inside
 the arguments of a call, as in ``CLng(Err.Number)``, runs before that call.
 Only what runs before a read counts for it, under the same rules as the
-statements before: after ``On Error Resume Next`` it can refresh ``Err``, and
+statements before: after ``On Error Resume Next`` any name, call or operator
+other than a literal, a constant or a property of ``Err`` refreshes ``Err``, and
 in a handler a call or member access makes the read stale, as in
 ``Report Helper(), Err.Number``. An operator written before a read may run
 after it, as ``&`` in ``a & b / Err.Number``; it counts as running before.
@@ -55,7 +61,7 @@ Reading or writing any property of ``Err`` (``Number``, ``Source``,
 ``Description``, ``HelpFile``, ``HelpContext``, ``LastDllError``) is data:
 it changes nothing, and only a read of the first three is checked. Assigning
 one (``Err.Description = x``) reads nothing of it, and ``.Number`` inside
-``With Err`` reads ``Err.Number``. ``Err.Clear`` and ``Err.Raise`` are calls.
+``With Err`` reads ``Err.Number``. ``Err.Raise`` is a call.
 ``Err`` read through its default member (``n = Err``), ``Err`` passed to a
 procedure and ``Erl`` are not followed.
 
@@ -71,8 +77,10 @@ read that is stale on every path to it.
 Inside a Function or Property Get, its own name is the result variable,
 and with an argument list, as in ``Fetch(True)``, a call of itself, unless
 the declared result is an array or a Variant, which an index may read: then
-it counts as an element of the result. Each compilation environment of check_vba_conditionals.py
-is analyzed separately, and a finding names the environments it occurs in.
+it counts as an element of the result.
+
+Each compilation environment of check_vba_conditionals.py is analyzed
+separately, and a finding names the environments it occurs in.
 """
 
 from __future__ import annotations
@@ -116,6 +124,7 @@ IF_OR_ELSE = re.compile(r"\b(?:If|Else)\b", re.IGNORECASE)
 RESULT_TYPE = re.compile(r"^\s*As\s+(?P<type>[A-Za-z_][\w.]*)\s*(?P<array>\(\s*\))?",
                          re.IGNORECASE)
 # Any property of Err as an assignment target, as in Err.Description = x.
+ERR_CLEAR = re.compile(r"^(?:VBA\s*\.\s*)?Err\s*\.\s*Clear\b", re.IGNORECASE)
 ERR_TARGET = re.compile(r"(?:VBA\s*\.\s*)?Err\s*\.\s*[A-Za-z_]\w*", re.IGNORECASE)
 WITH_ERR = re.compile(r"^With\s+(?:VBA\s*\.\s*)?Err\s*$", re.IGNORECASE)
 # A member of the object of a With block, as in .Number; not x.y, f(1).y or 1.5.
@@ -136,6 +145,10 @@ ENCLOSING_CALL = re.compile(rf"(?:(?<![\w.!]){VBA_QUALIFIER}|\.\s*)?[A-Za-z_]\w*
                             re.IGNORECASE)
 TRAILING_OPERATOR = re.compile(r"(?:[-&+*/\\^<>=]|\b(?:Mod|Not|And|Or|Xor|Eqv|Imp|Like|Is)\b)\s*$",
                                re.IGNORECASE)
+# The loop variable of a For, assigned once its bounds are read.
+FOR_HEAD = re.compile(r"^For\s+(?:Each\s+[A-Za-z_]\w*\s+In\b|[A-Za-z_]\w*[%&!#@$]?\s*=)",
+                      re.IGNORECASE)
+NAMED_ARGUMENT = re.compile(r"\b[A-Za-z_]\w*\s*:=?\s*$")
 LABEL_PREFIX = re.compile(r"^\s*(?:[A-Za-z_]\w*:(?!=)|\d+:?)")
 # Statements that end the tracked segment once their own expression is read:
 # that expression runs straight after the statement before.
@@ -176,7 +189,9 @@ NAME = re.compile(r"(?<![\w.!#])([A-Za-z_]\w*)\b(?![%&!#@$]?\s*\()(?!\s*:=)")
 MEMBER = re.compile(r"\.\s*[A-Za-z_]|![A-Za-z_]")
 NEW = re.compile(r"\bNew\s+[A-Za-z_]", re.IGNORECASE)
 NUMBER_LITERAL = re.compile(r"&[HO][0-9A-F]+&?", re.IGNORECASE)
-OPERATOR = re.compile(r"[*/\\^]|(?<![\w&])&|\bMod\b", re.IGNORECASE)
+# Any operator: it computes, and so it can fail, as Like does with error 93.
+OPERATOR = re.compile(r"[-+*/\\^&=<>]|\b(?:And|Eqv|Imp|Is|Like|Mod|Not|Or|Xor)\b",
+                      re.IGNORECASE)
 # VBA functions that run no project code, so they leave Err as it is unless
 # they fail; extend the set when a copy of Err goes through another one.
 PURE_FUNCTIONS = frozenset("""
@@ -275,26 +290,15 @@ class Names:
 
 @dataclass(frozen=True)
 class Effect:
-    """Whether code can fail, and whether it can run code that changes Err."""
+    """Whether code runs anything, so that it can fail and leave its own
+    error in Err after On Error Resume Next, and whether it can run code that
+    changes Err in a handler: a call or a member access."""
 
     fails: bool = False
     changes: bool = False
 
     def __or__(self, other: Effect) -> Effect:
         return Effect(self.fails or other.fails, self.changes or other.changes)
-
-
-def arithmetic(text: str) -> bool:
-    """Whether ``text`` computes: an operator other than a sign before a number."""
-    if OPERATOR.search(text):
-        return True
-    for match in re.finditer(r"[-+]", text):
-        before = text[:match.start()].rstrip()
-        after = text[match.end():].lstrip()
-        if (before and (before[-1].isalnum() or before[-1] in "_)]")) or \
-                not after[:1].isdigit():
-            return True
-    return False
 
 
 def library_qualifier(match: re.Match[str] | None, names: Names) -> bool:
@@ -326,7 +330,9 @@ def effect(text: str, names: Names) -> Effect:
     qualified = any(library_qualifier(match, names) for match in VBA_PURE.finditer(text))
     text = VBA_CONSTANT.sub(library, VBA_PURE.sub(library, text))
     text = NUMBER_LITERAL.sub(lambda match: "0" * len(match.group()), dates_as_values(text))
-    result = Effect(fails=arithmetic(text) or qualified)
+    # A literal, a constant and a property of Err run nothing; any other
+    # name, call or operator runs code that can fail.
+    result = Effect(fails=qualified or OPERATOR.search(text) is not None)
     if MEMBER.search(text) or NEW.search(text):
         result = Effect(True, True)
     for match in CALL.finditer(text):
@@ -343,8 +349,8 @@ def effect(text: str, names: Names) -> Effect:
         name = match.group(1).casefold()
         if name in names.callables and name not in names.values:
             result = Effect(True, True)
-        elif not (name in names.values or name in WORDS or name.startswith(CONSTANT_PREFIXES)):
-            result = result | Effect(True, name not in PURE_FUNCTIONS)
+        elif not (name in WORDS or name.startswith(CONSTANT_PREFIXES)):
+            result = result | Effect(True, name not in names.values | PURE_FUNCTIONS)
     return result
 
 
@@ -370,12 +376,14 @@ def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
     """The expressions a statement evaluates before its own operation, in
     evaluation order, and what the whole statement can do to Err. A procedure
     runs after its arguments are read, and a property is set after its value
-    is read. Assigning a property of Err, as in Err.Description = x, reads
-    and clears nothing of it."""
-    if DECLARATION.match(statement) or END_WITH.match(statement):
+    is read. Every statement runs code that can fail, even Number = 1 with a
+    type mismatch, except a declaration, With Err and End With, and a write
+    of a property of Err, as in Err.Description = x, which reads and clears
+    nothing of it and fails only when its value runs code."""
+    if DECLARATION.match(statement) or END_WITH.match(statement) or WITH_ERR.match(statement):
         return "", Effect()
     if WITH.match(statement):
-        return statement[4:], effect(statement[4:], names)
+        return statement[4:], effect(statement[4:], names) | Effect(fails=True)
     pair = assignment(statement)
     if pair is not None:
         target, value = pair
@@ -383,7 +391,7 @@ def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
             return value, effect(value, names)
         index = target.find("(")
         reads = value + (" , " + target[index:] if index > 0 else "")
-        return reads, effect(value, names) | target_effect(target, names)
+        return reads, effect(value, names) | target_effect(target, names) | Effect(fails=True)
     # A procedure of the project named like a VBA statement, such as Beep,
     # shadows it, unless the statement is qualified, as in VBA.Beep. Call
     # SaveSetting(...) is SaveSetting ... written as a call.
@@ -423,7 +431,8 @@ def evaluated_before(text: str, position: int) -> str:
         start = call.start() if call else index
         before[start:index + 1] = " " * (index + 1 - start)
     result = "".join(before).rstrip()
-    while (operator := TRAILING_OPERATOR.search(result)) is not None:
+    # An operator, or the name of a named argument (Number:=), runs after it.
+    while (operator := TRAILING_OPERATOR.search(result) or NAMED_ARGUMENT.search(result)):
         result = result[:operator.start()].rstrip()
     return result
 
@@ -515,10 +524,14 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
         segment.stale = (line, "which cleared Err with an On Error statement")
         segment.resume_next = bool(RESUME_NEXT.match(statement))
         return []
+    if ERR_CLEAR.match(statement):
+        segment.stale = (line, "which cleared Err with Err.Clear")
+        return []
     if BRANCH.match(statement):
         # Its expression runs first; what follows is reached from elsewhere too.
-        condition = SINGLE_LINE_IF.match(statement)
-        reads = condition.group("condition") if condition else statement
+        single, loop = SINGLE_LINE_IF.match(statement), FOR_HEAD.match(statement)
+        reads = (single.group("condition") if single else
+                 statement[loop.end():] if loop else statement)
         findings = judge(path, procedure, line, reads, Effect(), segment, names)
         segment.restart()
         return findings

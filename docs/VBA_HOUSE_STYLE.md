@@ -189,7 +189,7 @@ integrity** reports its findings as a warning, not a failure.
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
 | `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
-| `tools/check_vba_errors.py` | In each environment, on the straight-line code of each procedure: no read of `Err.Number`, `Err.Source` or `Err.Description` after an `On Error` statement, which clears `Err`, or, in an error handler, after a call or member access (`Helper`, `x = Helper(1)`, `x = Helper` without parentheses, `Debug.Print`, `Application.StatusBar = False`, `Err.Clear`, `New`) or an assignment to a property (`Status = x` with a `Property Let Status`), which may change it. A copy into a variable, a literal, a VBA function such as `CLng`, `CStr` or `Len`, also written `VBA.CLng`, and a VBA statement such as `ReDim`, `Erase`, `Open` or `Print #` change nothing. After `On Error Resume Next`, `Err` belongs to the last statement that can fail, so a read checks that statement. A read inside the arguments of a call, as in `CLng(Err.Number)`, comes before the call, and a call or member access that the same statement evaluates before a read counts as one before it; assigning a property of `Err` is not a read, and `.Number` inside `With Err` reads `Err.Number` |
+| `tools/check_vba_errors.py` | In each environment, on the straight-line code of each procedure: no read of `Err.Number`, `Err.Source` or `Err.Description` after an `On Error` statement or `Err.Clear`, which clears `Err`, or, in an error handler, after a call or member access (`Helper`, `x = Helper(1)`, `x = Helper` without parentheses, `Debug.Print`, `Application.StatusBar = False`, `Err.Clear`, `New`) or an assignment to a property (`Status = x` with a `Property Let Status`), which may change it. A copy into a variable, a literal, a VBA function such as `CLng`, `CStr` or `Len`, also written `VBA.CLng`, and a VBA statement such as `ReDim`, `Erase`, `Open` or `Print #` change nothing. After `On Error Resume Next`, `Err` belongs to the last statement that runs anything, since any can fail, even `Number = 1`: a read checks that statement, and only a declaration, a comment or a write of a property of `Err` comes between `On Error` and a read reported as stale. A read inside the arguments of a call, as in `CLng(Err.Number)`, comes before the call, and a call or member access that the same statement evaluates before a read counts as one before it; assigning a property of `Err` is not a read, and `.Number` inside `With Err` reads `Err.Number` |
 | `tools/check_vba_calls.py` (advisory) | In each environment, for every call that resolves to a procedure of the project, a statement call (`Name args`, `Call Name(args)`, `Module.Name args`) or a call with parentheses in an expression (`x = Helper(1)`): no more arguments than the procedure accepts and every required one passed, counting `Optional` parameters, a `ParamArray` and named arguments (`Name:=Value`); no named argument the procedure does not declare; no qualified call to a `Private` procedure of another module |
 
 What they cannot prove:
@@ -248,8 +248,9 @@ What they cannot prove:
     that starts with a name the check does not list as a VBA statement
     counts as a call, `Load` and `Unload` included, since they run the
     form's event procedures. A listed VBA statement written with `Call`, as
-    in `Call SaveSetting(...)`, is still that statement. Arithmetic, concatenation, an array element and the
-    listed VBA statements can fail but run no code, so they do not;
+    in `Call SaveSetting(...)`, is still that statement. Operators, an array
+    element and the listed VBA statements can fail but run no code, so in a
+    handler they do not;
   - as in VBA, a procedure, property or `Declare` of the project shadows a
     VBA function, statement or constant of its name, such as a project
     `Format`, while `VBA.Format` or `VBA.Strings.Format` still names the VBA
@@ -272,8 +273,9 @@ What they cannot prove:
     as does a form control assigned without a qualifier, and
     `Set x = Nothing`, although it may run the released object's
     `Class_Terminate`;
-  - after `On Error Resume Next`, it does not check which of several failing
-    statements a read was meant for;
+  - after `On Error Resume Next`, it counts every statement that runs
+    anything, even `Number = 1`, as one that can fail, and does not check
+    which of several such statements a read was meant for;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 
