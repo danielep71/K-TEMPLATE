@@ -19,13 +19,16 @@ cleared or may have replaced the error it means to read:
   while ``VBA.Format`` still names the VBA function. ``Err`` and ``Erl``
   always mean VBA's. Within the project, a name, bare or first in a dotted
   name, means what the nearest scope level declares (Scope.resolve): the
-  procedure's parameters, variables and own name; then any declaration of
+  procedure's parameters, variables and own name (the result of a
+  Function or Property Get, of its declared type); then any declaration of
   its module; then a public one of another component; then a component. A
   procedure there wins over a variable of a farther level, and the reverse.
-  When that is not certain, a dotted name is a member access: when two
-  components declare its first name publicly, or a Type or Enum it goes
-  through, or when its type is qualified by anything but the component
-  that declares it (``As VBA.Collection``).
+  When that is not certain, a dotted name is a member access: when it
+  starts, unqualified, with a variable that two components declare
+  publicly, when it goes through a Type or Enum that two components
+  declare, or when its type is qualified by anything but the component
+  that declares it (``As VBA.Collection``). A name qualified by its
+  component, as ``Module.Kept``, is resolved in that component.
   A dotted name is a member access unless it reads a value (Scope.value): a
   field of a variable declared ``As`` a user-defined Type of the project
   (``Saved.Number``, ``Saved(i).Inner.Field``, ``.Number`` inside
@@ -33,10 +36,13 @@ cleared or may have replaced the error it means to read:
   ``Module.RunStatus.rsFailed``), or a constant, Enum member or variable of
   a standard module that its name qualifies (``Module.LIMIT``). A variable
   of a class or object type, a class or document module and ``Me`` stay
-  member accesses. An index is an element only on a name declared as an
-  array (``Name() As T``, ``Name(1 To 3) As T``, a ``ReDim``): on an object,
-  a Variant or an undeclared type it may call a default property, as
-  ``Owner(1)`` does on a Collection, and it stays a member access. The part
+  member accesses. In a dotted name, an index is an element only on a name
+  declared as an array (``Name() As T``, ``Name(1 To 3) As T``, a
+  ``ReDim``): on an object, a Variant or an undeclared type it may call a
+  default property, as ``Owner(1)`` does on a Collection, and it stays a
+  member access; an index before a dot that holds a parenthesis, as in
+  ``Saved(Count(1)).Number``, is one too. A bare ``C(1)`` is read as an
+  element, even on a Collection, whose Item it calls. The part
   a dotted name reaches must hold data: a value type (Long, String, Date,
   ...), an Enum or a user-defined Type. Reading or assigning an object, a
   class or a Variant calls its default property, so ``Number = rec.Owner``
@@ -146,6 +152,9 @@ HANDLER = re.compile(r"\bOn\s+Error\s+GoTo\s+([A-Za-z_]\w*|\d+)", re.IGNORECASE)
 # may hold an Else and the statements after it.
 SINGLE_LINE_IF = re.compile(r"^If\b(?P<condition>.*?)\bThen\b(?P<tail>.*)$", re.IGNORECASE)
 IF_OR_ELSE = re.compile(r"\b(?:If|Else)\b", re.IGNORECASE)
+# The types that a suffix gives a name, as Fetch$ is a String.
+SUFFIX_TYPES = {"%": "integer", "&": "long", "!": "single", "#": "double", "@": "currency",
+                "$": "string"}
 # The declared result of a function or Property Get, after its parameters.
 RESULT_TYPE = re.compile(r"^\s*As\s+(?P<type>[A-Za-z_][\w.]*)\s*(?P<array>\(\s*\))?",
                          re.IGNORECASE)
@@ -313,9 +322,12 @@ class Procedure:
     units: list[tuple[int, str | None, list[str]]] = field(default_factory=list)
 
     def variables(self) -> dict[str, Declared]:
-        """Its parameters and the variables it declares, with their types;
-        ReDim declares an array, keeping the type a Dim gave it."""
+        """Its parameters, its own name when it holds its result (result) and
+        the variables it declares, with their types; ReDim declares an array,
+        keeping the type a Dim gave it."""
         found: dict[str, Declared] = {}
+        if (own := self.result()) is not None:
+            found[self.name.casefold()] = own
         opener = is_procedure(self.header)
         rest = self.header[opener.end():].lstrip("%&!#@$") if opener else ""
         end = closing_parenthesis(rest, 0) if rest.startswith("(") else None
@@ -331,6 +343,25 @@ class Procedure:
                     found.update(declared(local.group("list")))
         return found
 
+    def result(self) -> Declared | None:
+        """What the own name of a Function or Property Get, the variable that
+        holds its result, is declared as: its result type, or the type of its
+        suffix (Fetch$), else a Variant (""); None for a Sub or a Property
+        Let or Set, whose name holds nothing."""
+        opener = is_procedure(self.header)
+        kind = opener.group(1).casefold().split() if opener else []
+        if kind not in (["function"], ["property", "get"]) or opener is None:
+            return None
+        rest = self.header[opener.end():]
+        suffix = SUFFIX_TYPES.get(rest[:1], "")
+        rest = rest[1:] if suffix else rest
+        start = rest.find("(")
+        end = closing_parenthesis(rest, start) if start >= 0 and not rest[:start].strip() else None
+        result = RESULT_TYPE.match(rest[end + 1:] if end is not None else rest)
+        if result is None:
+            return suffix, False
+        return result.group("type").casefold(), result.group("array") is not None
+
     @property
     def calls_itself_with_arguments(self) -> bool:
         """Whether its own name with an argument list, as in Fetch(True), is a
@@ -338,20 +369,8 @@ class Procedure:
         Property Get whose declared result is neither an array nor a Variant,
         which may hold one. Without a declared type, the result is a Variant,
         unless a type suffix, as in Fetch$, gives one."""
-        opener = is_procedure(self.header)
-        if opener is None or opener.group(1).split()[0].casefold() not in {"function", "property"}:
-            return False
-        if opener.group(1).casefold().replace(" ", "") in {"propertylet", "propertyset"}:
-            return False
-        rest = self.header[opener.end():]
-        suffix = rest[:1] in tuple("%&!#@$")
-        rest = rest[1:] if suffix else rest
-        start = rest.find("(")
-        end = closing_parenthesis(rest, start) if start >= 0 and not rest[:start].strip() else None
-        result = RESULT_TYPE.match(rest[end + 1:] if end is not None else rest)
-        if result is None:
-            return suffix
-        return result.group("array") is None and result.group("type").casefold() != "variant"
+        result = self.result()
+        return result is not None and not result[1] and result[0] not in {"", "variant"}
 
 
 @dataclass

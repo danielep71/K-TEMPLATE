@@ -249,13 +249,17 @@ What they cannot prove:
     Enum member (`RunStatus.rsFailed`, `Module.RunStatus.rsFailed`), or a
     constant, Enum member or variable of a standard module that its name
     qualifies (`Module.LIMIT`): a variable of a class or object type, a
-    class or document module and `Me` stay member accesses, and a field
-    whose index holds a parenthesis, as in `Saved(Count(1)).Number`, counts
-    as one too. An index is an element only on a name declared as an array
-    (`Name() As T`, `Name(1 To 3) As T`, a `ReDim`): on an object, a
-    `Variant` or an undeclared type it may call a default property, as
-    `Owner(1)` does on a `Collection`, so it counts as a member access, even
-    on a `Variant` that holds an array. The part a dotted name reaches must
+    class or document module and `Me` stay member accesses, and so does an
+    index before a dot that holds a parenthesis, as in
+    `Saved(Count(1)).Number`. In a dotted name, an index is an element only
+    on a name declared as an array (`Name() As T`, `Name(1 To 3) As T`, a
+    `ReDim`): on an object, a `Variant` or an undeclared type it may call a
+    default property, as `Owner(1)` does on a `Collection`, so it counts as
+    a member access, even on a `Variant` that holds an array. A bare `C(1)`,
+    with no dot, is read as an element, even on a `Collection`, whose `Item`
+    it calls. A function's own name holds its result: in a `Function` or
+    `Property Get` of a user-defined `Type`, `TryRun.Number = Err.Number`
+    copies into that result. The part a dotted name reaches must
     hold data, a value type such as `Long` or `String`, an Enum or a
     user-defined `Type`: reading or assigning an object, a class or a
     `Variant` calls its default property, so `Number = rec.Owner` counts as
@@ -277,11 +281,12 @@ What they cannot prove:
     means what the nearest scope level declares: the procedure's parameters
     and variables, then its module's declarations, then the public ones of
     the other components, then a component, so a module's property `Saved`
-    hides another module's public variable `Saved`. A name declared more
-    than once in the project counts as a member access in a dotted name: a
-    public variable of two components, or a `Type` or an `Enum` that two
-    components declare, as does a type qualified by anything but the
-    component that declares it, such as `As VBA.Collection`;
+    hides another module's public variable `Saved`. A dotted name counts as
+    a member access when it starts, unqualified, with a public variable of
+    two components, when it goes through a `Type` or an `Enum` that two
+    components declare, or when its type is qualified by anything but the
+    component that declares it, such as `As VBA.Collection`; a name
+    qualified by its component, as `Module.Kept`, is resolved there;
   - within a statement, it follows VBA's evaluation order: a read inside the
     arguments of a call runs before the call, and only what runs before a
     read counts for it, as between statements. In a handler,
