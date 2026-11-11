@@ -28,7 +28,12 @@ cleared or may have replaced the error it means to read:
   member accesses. An index is an element only on a name declared as an
   array (``Name() As T``, ``Name(1 To 3) As T``, a ``ReDim``): on an object,
   a Variant or an undeclared type it may call a default property, as
-  ``Owner(1)`` does on a Collection, and it stays a member access.
+  ``Owner(1)`` does on a Collection, and it stays a member access. The part
+  a dotted name reaches must hold data: a value type (Long, String, Date,
+  ...), an Enum or a user-defined Type. Reading or assigning an object, a
+  class or a Variant calls its default property, so ``Number = rec.Owner``
+  stays a member access, even when the Variant holds a plain value; only
+  ``Set`` copies the reference, as in ``Set Book = rec.Owner``.
   In the same way, an assignment (``=``, ``Let``, ``Set``, ``LSet``,
   ``RSet``) to anything but a variable, such a field or value, an array
   element or a statement target (``Date``, ``Mid(Text, 1, 1)``) sets a
@@ -239,6 +244,11 @@ CHAIN_PART = re.compile(r"([A-Za-z_]\w*)[%&!#@$]?|\(([^()]*)\)")
 Declared = tuple[str, bool]
 # A part of a dotted name, and whether an index follows it, as in Many(i).
 Link = tuple[str, bool]
+# The types whose value is data: reading or assigning one calls nothing, as an
+# object or a Variant may through its default property.
+VALUE_TYPES = frozenset("""
+    boolean byte currency date decimal double integer long longlong longptr single string
+""".split())
 # A declared name and its type, in a variable or parameter list or a Type:
 # Name, Name(1 To 3) As Long, ByRef Name As Record, WithEvents Name As Thing.
 DECLARED = re.compile(r"^\s*(?:(?:Optional|ByVal|ByRef|ParamArray|WithEvents)\s+)*"
@@ -465,23 +475,36 @@ class Scope:
         reached = self.walk(declaration, links) if declaration else None
         return reached is not None and not reached[1] and self.fields(reached[0]) is not None
 
-    def value(self, links: list[Link], names: Names) -> bool:
+    def data(self, reached: Declared | None, reference: bool) -> bool:
+        """Whether a part declared as ``reached`` is read or assigned without
+        a call: a value type, an Enum or a user-defined Type, whose copy runs
+        no code. An object, a class or a Variant, whose value is its default
+        property, is data only as a reference, in Set x = rec.Owner."""
+        if reached is None:
+            return False
+        kind = reached[0]
+        return reference or kind in VALUE_TYPES or self.members(kind) is not None \
+            or self.fields(kind) is not None
+
+    def value(self, links: list[Link], names: Names, reference: bool = False) -> bool:
         """Whether the dotted name ``links`` reads a value without a call: a
         field of a variable of a user-defined Type (Saved.Number,
         Saved(i).Inner.Field), an Enum member (Kind.kOne), or a value of a
         standard module named by it (Module.LIMIT, Module.Kind.kOne,
-        Module.Saved.Number). Anything else is a member access."""
+        Module.Saved.Number). The part it reaches must hold data (data), or,
+        with ``reference``, as in Set x = rec.Owner, any reference. Anything
+        else is a member access."""
         (root, indexed), rest = links[0], links[1:]
         declaration = self.variable(root)
         if declaration is not None:
-            return self.walk(declaration, links) is not None
+            return self.data(self.walk(declaration, links), reference)
         if root in names.callables or indexed:
             return False
         home = self.project.get(root)
         if home is not None and home.standard and rest:
             declaration = self.variable(rest[0][0], root)
             if declaration is not None:
-                return self.walk(declaration, rest) is not None
+                return self.data(self.walk(declaration, rest), reference)
             if len(rest) == 1:
                 own = root == self.home
                 return not rest[0][1] and rest[0][0] in (home.values if own else home.public_values)
@@ -514,11 +537,12 @@ class Names:
     # The declarations that dotted names resolve against, if known.
     scope: Scope | None = None
 
-    def value_chain(self, text: str) -> list[str] | None:
+    def value_chain(self, text: str, reference: bool = False) -> list[str] | None:
         """The indices of the dotted name ``text`` when it reads a value
         without a call (Scope.value), or None."""
         chain = links(text)
-        if self.scope is None or len(chain) < 2 or not self.scope.value(chain, self):
+        if self.scope is None or len(chain) < 2 or \
+                not self.scope.value(chain, self, reference):
             return None
         return [index for _, index in CHAIN_PART.findall(text) if index]
 
@@ -643,7 +667,13 @@ def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
             return value, effect(value, names)
         index = target.find("(")
         reads = value + (" , " + target[index:] if index > 0 else "")
-        return reads, effect(value, names) | target_effect(target, names) | Effect(fails=True)
+        # Set copies a reference: an object-valued field runs no default
+        # property there, as in Set Book = rec.Owner or Set rec.Owner = Book.
+        reference = statement.lstrip()[:4].casefold() == "set "
+        chain = CHAIN.fullmatch(value.strip()) if reference else None
+        indices = names.value_chain(chain.group(), True) if chain else None
+        found = effect(value if indices is None else " , ".join(indices), names)
+        return reads, found | target_effect(target, names, reference) | Effect(fails=True)
     # A procedure of the project named like a VBA statement, such as Beep,
     # shadows it, unless the statement is qualified, as in VBA.Beep. Call
     # SaveSetting(...) is SaveSetting ... written as a call.
@@ -689,7 +719,7 @@ def evaluated_before(text: str, position: int) -> str:
     return result
 
 
-def target_effect(target: str, names: Names) -> Effect:
+def target_effect(target: str, names: Names, reference: bool = False) -> Effect:
     """What assigning to ``target`` can do to Err, once the value is read.
 
     A variable of the procedure or the module (and the procedure's own name)
@@ -701,7 +731,7 @@ def target_effect(target: str, names: Names) -> Effect:
     and a field of a variable of a user-defined Type, as in Saved.Number or
     Saved(i).Number, or a value of a standard module, is a variable."""
     if (chain := CHAIN.fullmatch(target.strip())) is not None:
-        chain_indices = names.value_chain(chain.group())
+        chain_indices = names.value_chain(chain.group(), reference)
         if chain_indices is not None:
             found = Effect()
             for chain_index in chain_indices:

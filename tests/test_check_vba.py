@@ -2131,6 +2131,9 @@ QUALIFIED_VALUES = [
     "TEST_Codes.LastError.Number = Err.Number",
     "With Saved: .Number = Err.Number: .Source = Err.Source: End With",
     "Number = mRecord.Items(2)", "ReDim Grown(1 To 2): Grown(1).Number = Err.Number",
+    # Set copies a reference, which calls no default property.
+    "Set Book = mRecord.Owner", "Set mRecord.Owner = Nothing",
+    "Text = Saved.Source: Saved.Source = Err.Source",
 ]
 # Each is a member access or a call before the read: one finding.
 QUALIFIED_MEMBERS = [
@@ -2141,6 +2144,8 @@ QUALIFIED_MEMBERS = [
     # Owner(1) does on a Collection; a Variant that holds an array too.
     "Number = mRecord.Owner(1)", "mRecord.Owner(1) = 3", "Number = mRecord.Data(1)",
     "Number = Loose(1).Number", "Number = Saved(1).Number",
+    # Reading or assigning an object or a Variant calls its default property.
+    "Number = mRecord.Owner", "mRecord.Owner = 3", "Number = mRecord.Data",
 ]
 
 

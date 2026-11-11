@@ -255,11 +255,15 @@ What they cannot prove:
     (`Name() As T`, `Name(1 To 3) As T`, a `ReDim`): on an object, a
     `Variant` or an undeclared type it may call a default property, as
     `Owner(1)` does on a `Collection`, so it counts as a member access, even
-    on a `Variant` that holds an array. An assignment to anything but a variable, such a field or
-    value, an array element, `Date`, `Time` or `Mid` counts as setting a
-    property, and a statement
-    that starts with a name the check does not list as a VBA statement
-    counts as a call, `Load` and `Unload` included, since they run the
+    on a `Variant` that holds an array. The part a dotted name reaches must
+    hold data, a value type such as `Long` or `String`, an Enum or a
+    user-defined `Type`: reading or assigning an object, a class or a
+    `Variant` calls its default property, so `Number = rec.Owner` counts as
+    a member access, even when the `Variant` holds a plain value, while
+    `Set Book = rec.Owner` copies a reference. An assignment to anything but
+    a variable, such a field or value, an array element, `Date`, `Time` or
+    `Mid` counts as setting a property, and a statement that starts with a
+    name the check does not list as a VBA statement counts as a call, `Load` and `Unload` included, since they run the
     form's event procedures. A listed VBA statement written with `Call`, as
     in `Call SaveSetting(...)`, is still that statement. Operators, an array
     element and the listed VBA statements can fail but run no code, so in a
