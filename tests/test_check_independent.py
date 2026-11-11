@@ -150,6 +150,11 @@ class IndependentTest(unittest.TestCase):
         self.assertEqual(run(adapters(ENTRY), [output(), other]).compared, 1)
         self.assertFinding(run(adapters(ENTRY), [output(quantity="other_amount")]),
                            "IMPL-01 gives no other_amount, which cites it")
+        # Every value citing the source must be printed, whatever its class.
+        cited = output(quantity="other_amount")
+        cited["reference"]["class"] = "illustrative"
+        self.assertFinding(run(adapters(ENTRY), [output(), cited]),
+                           "IMPL-01 gives no other_amount, which cites it")
         # A value citing another source is not this adapter's to recompute.
         self.assertEqual(run(adapters(ENTRY), [output(quantity="other_amount",
                                                       source="IMPL-02")]).findings, [])
@@ -195,6 +200,8 @@ class IndependentTest(unittest.TestCase):
              "envelope is not"),
             (adapters({"source": "IMPL-01"}), "adapters[0]: keys are not command, source"),
             (adapters({**ENTRY, "source": "SRC-01"}), "source is not an IMPL- ID"),
+            (adapters({**ENTRY, "source": "IMPL-01\n"}), "source is not an IMPL- ID"),
+            (adapters({**ENTRY, "source": "IMPL-0\u0661"}), "source is not an IMPL- ID"),
             (adapters({**ENTRY, "source": "IMPL-09"}), "IMPL-09 is not in the register"),
             (adapters(ENTRY, ENTRY), "adapters[1]: source IMPL-01 has a second adapter"),
             (adapters({**ENTRY, "command": []}), "command is not a non-empty list of words"),

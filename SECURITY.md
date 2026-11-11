@@ -3,12 +3,11 @@
 ## 📌 Supported versions
 
 The latest release, the active release branch and the default branch are
-supported on a best-effort basis. The latest release is the newest version in
-[CHANGELOG.md](CHANGELOG.md), published as described in
-[RELEASING.md](RELEASING.md); until one exists, only the two branches are
-supported. Reports must identify a full commit SHA.
-Modified copies are unsupported unless the problem reproduces in this
-repository.
+supported on a best-effort basis. The latest release is the newest version
+published as a GitHub Release, as [RELEASING.md](RELEASING.md) describes;
+until one exists, only the two branches are supported. Reports must identify
+a full commit SHA. Modified copies are unsupported unless the problem
+reproduces in this repository.
 
 ## 📨 Reporting a vulnerability
 

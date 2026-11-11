@@ -10,7 +10,8 @@ Subcommands, all read-only apart from the files that bundle writes:
     VERSION at the tag;
   - the tag's commit is on origin/BRANCH;
   - the tag message names that commit on a "Candidate <sha>." line and has
-    a "Deviations:" line, as RELEASING.md requires.
+    a "Deviations:" line followed by text on the same line, such as "none",
+    or by a list on the next lines, as RELEASING.md requires.
 - integrity --repository OWNER/NAME --sha SHA
   Fails unless the check run Repository integrity succeeded on SHA. It reads
   the check runs through the GitHub CLI.
@@ -65,7 +66,9 @@ from check_changelog import CHANGELOG, VERSION, released_versions  # noqa: E402
 ROOT = Path(__file__).resolve().parents[1]
 TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
 CANDIDATE = re.compile(r"^Candidate ([0-9a-f]{40})\.\s*$", re.M)
-DEVIATIONS = re.compile(r"^Deviations: \S", re.M)
+# "Deviations:" followed by text on the same line, or by a "- " or "* " list
+# that starts on the next line.
+DEVIATIONS = re.compile(r"^Deviations:(?:[ \t]+\S|[ \t]*\n[ \t]*[-*][ \t]+\S)", re.M)
 SECTION = re.compile(r"^## \[(?P<label>[^\]]+)\][^\n]*\n(?P<body>.*?)(?=^## \[|^\[[^\]]+\]: |\Z)",
                      re.M | re.S)
 REQUIRED_CHECK = "Repository integrity"
@@ -145,7 +148,8 @@ def verify(root: Path, tag: str, default_branch: str) -> list[str]:
             problems.append(f"the message of {tag} must name its commit on one line "
                             f"'Candidate {commit}.'")
         if not DEVIATIONS.search(message):
-            problems.append(f"the message of {tag} has no 'Deviations:' line")
+            problems.append(f"the message of {tag} has no 'Deviations:' line followed by "
+                            "text, such as 'none', or by a list")
     return problems
 
 

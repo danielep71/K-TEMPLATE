@@ -13,8 +13,8 @@ Each NAME has a renderer here that computes the block from the repository:
   end with, read from the suite that .github/excel-evidence-policy.json names
   by the same code that checks Excel-run evidence (tools/check_excel_run.py);
 - integrity-checks, in CONTRIBUTING.md: the checks that
-  tools/check_repository.py runs, in order, with what each runs and whether
-  it is advisory;
+  tools/check_repository.py runs, in order, with what each runs, as CI runs
+  it for the repository OWNER/REPOSITORY, and whether it is advisory;
 - data-contract-datasets and data-contract-fields, in
   docs/methodology/DATA_CONTRACT.md: the Datasets table and one field table
   per dataset, read from docs/methodology/data-contract.json by the code that
@@ -110,8 +110,9 @@ def shown_command(command: Sequence[str]) -> str:
 
 def integrity_checks(root: Path) -> str:
     """The checks of tools/check_repository.py, in the order they run."""
-    context = check_repository.Context(root, repository=None, default_branch=None,
-                                       is_template=None)
+    # With a repository, as CI runs them: changelog then shows --repository.
+    context = check_repository.Context(root, repository="OWNER/REPOSITORY",
+                                       default_branch=None, is_template=None)
     rows = []
     for check in check_repository.checks(context):
         if check.command is not None:

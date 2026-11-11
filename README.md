@@ -103,8 +103,8 @@ GitHub copies files from a template, not its settings. In order:
    entries and the link references of `CHANGELOG.md` with an empty
    `[Unreleased]` section of the new repository and restores the
    introduction's "No version has been released" sentence if it is missing,
-   deletes `VERSION` if the template has one (it exists only after a
-   template release) and sets the release rows of *Current status* in
+   deletes `VERSION` if the template has one (it exists once a template
+   release is prepared) and sets the release rows of *Current status* in
    `RELEASING.md` to say that nothing is released yet, since both describe
    the template's releases, and replaces `<REGIME>` in the naming table of
    `docs/VBA_HOUSE_STYLE.md`. You can then delete

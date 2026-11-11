@@ -125,6 +125,20 @@ class ReleaseTest(unittest.TestCase):
         self.assertTrue(any(f"'Candidate {self.sha}.'" in p for p in found), found)
         self.assertTrue(any("no 'Deviations:' line" in p for p in found), found)
 
+    def test_deviations_may_be_a_list_on_the_next_lines(self) -> None:
+        head = self.git("rev-parse", "HEAD").strip()
+        self.tag(message=f"v1.2.0 - Release\n\nCandidate {head}.\nDeviations:\n"
+                         "- Invariant 7: the published workbook was not checked.\n"
+                         "* Invariant 4: the run names another build.\n")
+        self.assertEqual(self.problems(), [])
+
+    def test_deviations_without_text_or_a_list_fail(self) -> None:
+        head = self.git("rev-parse", "HEAD").strip()
+        self.tag(message=f"v1.2.0 - Release\n\nCandidate {head}.\nDeviations:\n\nSigned.\n")
+        self.assertEqual(self.problems(),
+                         ["the message of v1.2.0 has no 'Deviations:' line followed by text, "
+                          "such as 'none', or by a list"])
+
     def test_notes_hold_the_message_and_the_changelog_section(self) -> None:
         self.tag()
         text = release.notes(self.root, "v1.2.0")
