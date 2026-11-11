@@ -43,8 +43,10 @@ it is `<REGIME>_`, they accept any project prefix that is not a reserved one
 Every component starts with `Option Explicit`. Core and test standard modules
 also use `Option Private Module`. Procedures are `Private` unless another
 component calls them. `Public` does not mean supported: only the declarations
-listed in [PUBLIC_API.txt](PUBLIC_API.txt) are the supported API, and a change
-to one updates the inventory, its contract and its tests together.
+listed under `[supported]` in [PUBLIC_API.txt](PUBLIC_API.txt) are the
+supported API, and a change to one updates the inventory, its contract and its
+tests together. Every other `Public` declaration under `src/` is listed under
+`[project-public]`, so making a member `Public` is a reviewed change.
 
 - Declare array bounds explicitly; never use `Option Base`.
 - Prefer specific types to `Variant`. Use `Variant` only at a boundary that
@@ -184,7 +186,7 @@ integrity** reports its findings as a warning, not a failure.
 | `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`; no tab or trailing white space, except in a form's VBE header; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
 | `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe` |
 | `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target is a label of the same procedure, in each environment; no label is defined twice in a procedure |
-| `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
+| `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match the `[supported]` tier of [PUBLIC_API.txt](PUBLIC_API.txt), and every other public declaration under `src/` its `[project-public]` tier, one to one, with normalized signatures; no declaration listed in the wrong tier; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
 | `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
 | `tools/check_vba_calls.py` (advisory) | In each environment, for every call that resolves to a procedure of the project, a statement call (`Name args`, `Call Name(args)`, `Module.Name args`) or a call with parentheses in an expression (`x = Helper(1)`): no more arguments than the procedure accepts and every required one passed, counting `Optional` parameters, a `ParamArray` and named arguments (`Name:=Value`); no named argument the procedure does not declare; no qualified call to a `Private` procedure of another module |
