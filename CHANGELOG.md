@@ -15,9 +15,11 @@ neither a commit log nor release evidence.
 - Link the issue or pull request that holds the detail.
 - Record only evidence that was produced. A static check is not an Excel run:
   say what was and was not run in Excel.
-- Until a version is released, edit an existing entry rather than adding one
-  that describes a change to unreleased work: an entry describes what the
-  release contains.
+- Once a version has been released, edit an existing entry of the next
+  version rather than adding one that describes a change to its unreleased
+  work: an entry describes what the release contains. The first release's
+  section also records, as **Changed** and **Fixed**, how its additions
+  changed while it was prepared.
 - Entries move into a dated section only when a release is prepared, as
   [RELEASING.md](RELEASING.md) describes. After that, until the tag exists,
   a fix for a release gate that failed on the candidate records its change in
@@ -83,6 +85,15 @@ Use only the categories an entry needs.
   print, not only an `independent` one. The setup guide's `DS-01` row now
   says to remove both illustrative cases and their *Traceability* row, and
   to replace `ACC-01`, in the same change (#384).
+- `tools/release.py verify` and the **Release** workflow accept a tag
+  message whose `Deviations:` line is followed by a `- ` or `* ` list on the
+  next lines, as well as by text such as `none` on the same line, and reject
+  `Deviations:` with nothing after it, with an error that names both forms.
+  `RELEASING.md` shows both forms, defines a released version as one whose
+  section is dated and a published one as one with a tag and a GitHub
+  Release, and says that `RELEASE_ATTESTATIONS` without GitHub Enterprise
+  Cloud fails the attestation and creates no draft. The changelog policy,
+  `SECURITY.md` and the setup and structure guides match (#385).
 
 ## [1.0.0] - 2026-11-10
 
