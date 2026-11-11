@@ -253,8 +253,13 @@ class GeneratedRepositoryTest(unittest.TestCase):
                         ["config", "commit.gpgsign", "false"]):
             self.git(*command)
         self.commit("Created from the template")
-        # The release branch that Dependabot targets, as a fetched remote branch.
-        self.git("update-ref", "refs/remotes/origin/release/0.1.0", "HEAD")
+        # An origin with the release branch that Dependabot targets; the push
+        # also makes it a fetched remote branch.
+        origin = tempfile.TemporaryDirectory(prefix="initialize-repository-origin-")
+        self.addCleanup(origin.cleanup)
+        self.git("init", "-q", "--bare", origin.name)
+        self.git("remote", "add", "origin", origin.name)
+        self.git("push", "-q", "origin", "HEAD:refs/heads/main", "HEAD:refs/heads/release/0.1.0")
 
     def git(self, *args: str) -> str:
         return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True,

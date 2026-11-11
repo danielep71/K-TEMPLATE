@@ -94,6 +94,12 @@ Use only the categories an entry needs.
   Release, and says that `RELEASE_ATTESTATIONS` without GitHub Enterprise
   Cloud fails the attestation and creates no draft. The changelog policy,
   `SECURITY.md` and the setup and structure guides match (#385).
+- **Repository integrity** no longer reports a Dependabot `target-branch` as
+  missing in a single-branch or shallow clone: `dependabot-target-branches`
+  asks the `origin` remote for a branch that has no remote-tracking branch,
+  and is skipped, or fails under `--strict`, when `origin` cannot answer. The
+  check table in `CONTRIBUTING.md` shows the `changelog` check with
+  `--repository OWNER/REPOSITORY`, as CI runs it (#381).
 
 ## [1.0.0] - 2026-11-10
 
