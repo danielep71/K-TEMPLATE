@@ -16,10 +16,12 @@ cannot drift while another stays correct:
   already copied into ``Err.LastDllError``;
 - ``Err.LastDllError`` is read only as ``<local> = Err.LastDllError``, into a
   ``Dim`` or ``Static`` variable of the procedure, in the statement directly
-  after a call to a ``Declare``;
+  after a call to a ``Declare``; a ``.LastDllError`` read inside a
+  ``With Err`` block, or through another qualifier, is rejected, since the
+  ``With`` statement already stands between the call and the read;
 - a call to an export the register marks ``zero_is_ambiguous``, whose zero
-  result may mean success or failure, assigns its result to a local variable
-  in the call statement, is directly preceded by ``SetLastError 0`` (or
+  result may mean success or failure, assigns its result, and nothing else,
+  to a local variable in the call statement, is directly preceded by ``SetLastError 0`` (or
   ``Call SetLastError(0)``) through a ``Declare`` of the ``SetLastError``
   export, and is directly followed by that capture.
 
@@ -43,7 +45,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from check_vba_conditionals import reachable_sources
-from check_vba_identifiers import END_PROC, NAME, PROC, STATEMENT_WORDS, SUFFIX, declared_names
+from check_vba_identifiers import (
+    END_PROC,
+    NAME,
+    PROC,
+    STATEMENT_WORDS,
+    SUFFIX,
+    closing_parenthesis,
+    declared_names,
+)
 from vba_lexer import (
     Finding,
     logical_units,
@@ -69,7 +79,10 @@ LOCAL = re.compile(r"^\s*(?:Dim|Static)\s+(?P<list>.*)$", re.I)
 CONST = re.compile(r"^\s*Const\s", re.I)
 LABEL = re.compile(rf"^\s*(?:(?P<name>{NAME})|\d+):(?!=)")
 LINE_NUMBER = re.compile(r"^\s*\d+(?=\s)")
-LAST_DLL_ERROR = re.compile(r"\bErr\s*\.\s*LastDllError\b", re.I)
+# Any read of a LastDllError member: Err.LastDllError, .LastDllError in a
+# With Err block, or one through another qualifier such as VBA.Err.
+LAST_DLL_ERROR = re.compile(r"\.\s*LastDllError\b", re.I)
+PLAIN_LAST_DLL_ERROR = re.compile(r"(?<![\w.!])Err\s*\.\s*LastDllError\b", re.I)
 CAPTURE = re.compile(rf"^\s*(?:Let\s+)?(?P<local>{NAME})\s*=\s*Err\s*\.\s*LastDllError\s*$",
                      re.I)
 CLEAR = re.compile(rf"^\s*(?:Call\s+)?(?P<name>{NAME})\s*(?:\(\s*0&?\s*\)|\s0&?)\s*$", re.I)
@@ -259,6 +272,9 @@ def capture_problem(procedure: Procedure, index: int, declared: dict[str, Declar
                     ) -> str | None:
     """What is wrong with the Err.LastDllError read of ``procedure.body[index]``."""
     statement = procedure.body[index][1]
+    if len(LAST_DLL_ERROR.findall(statement)) != len(PLAIN_LAST_DLL_ERROR.findall(statement)):
+        return (f"{procedure.name} reads LastDllError through a With block or a qualifier "
+                "other than Err; write it as <local> = Err.LastDllError")
     capture = CAPTURE.match(statement)
     if capture is None:
         return (f"{procedure.name} reads Err.LastDllError inside a larger statement; copy "
@@ -281,6 +297,22 @@ def capture_problem(procedure: Procedure, index: int, declared: dict[str, Declar
     return None
 
 
+def assigned_call(statement: str, name: str) -> str | None:
+    """The variable of ``<variable> = Name`` or ``<variable> = Name(<arguments>)``,
+    with balanced parentheses and nothing after them; None for any other statement."""
+    head = re.match(rf"^\s*(?:Let\s+)?(?P<local>{NAME})\s*=\s*{re.escape(name)}{SUFFIX}(?!\w)\s*",
+                    statement, re.I)
+    if head is None:
+        return None
+    rest = statement[head.end():]
+    if rest.startswith("("):
+        end = closing_parenthesis(rest, 0)
+        if end is None:
+            return None
+        rest = rest[end + 1:]
+    return head.group("local") if not rest.strip() else None
+
+
 def ambiguous_problems(procedure: Procedure, index: int, item: Declared,
                        declared: dict[str, Declared]) -> list[str]:
     """What is wrong around a call to an export whose zero result is ambiguous."""
@@ -289,10 +321,9 @@ def ambiguous_problems(procedure: Procedure, index: int, item: Declared,
     before = body[index - 1][1] if index else None
     after = body[index + 1][1] if index + 1 < len(body) else None
     call = f"{procedure.name} calls {item.name} ({item.export}), whose zero result is ambiguous,"
-    result = re.match(rf"^\s*(?:Let\s+)?(?P<local>{NAME})\s*=\s*{re.escape(item.name)}"
-                      rf"{SUFFIX}\s*(?:\(.*\))?\s*$", statement, re.I)
+    result = assigned_call(statement, item.name)
     problems = []
-    if result is None or result.group("local").casefold() not in procedure.locals:
+    if result is None or result.casefold() not in procedure.locals:
         problems.append(f"{call} without assigning its result to a local variable in the "
                         "call statement")
     if not is_clear(before, declared):

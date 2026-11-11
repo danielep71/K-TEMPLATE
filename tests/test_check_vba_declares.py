@@ -186,6 +186,23 @@ CAPTURE_INVALID: dict[str, tuple[str, str | None, str, tuple[str, ...]]] = {
     "non-zero-clear-in-the-legacy-branch": (
         changed(LEGACY_CALL, LEGACY_CALL.replace("(0)", "(5)")),
         None, "without SetLastError 0 directly before it", LEGACY),
+    "expression-after-the-ambiguous-call-in-the-vba7-branch": (
+        changed(VBA7_CALL, VBA7_CALL.replace("(SlotIndex)\n", "(SlotIndex) + (1)\n")),
+        None, "without assigning its result to a local variable", VBA7),
+    "second-call-after-the-ambiguous-call-in-the-legacy-branch": (
+        changed(LEGACY_CALL, LEGACY_CALL.replace("(SlotIndex)\n", "(SlotIndex) Or CLng(0)\n")),
+        None, "without assigning its result to a local variable", LEGACY),
+    "with-err-clears-before-the-capture": (
+        changed(CLEAR_CAPTURE, "    With Err\n        .Clear\n        DllError = .LastDllError\n"
+                               "    End With\n    If ApiOK = 0 Then\n"),
+        None, "reads LastDllError through a With block", ALL),
+    "with-err-capture": (
+        changed(CLEAR_CAPTURE, "    With Err\n        DllError = .LastDllError\n"
+                               "    End With\n    If ApiOK = 0 Then\n"),
+        None, "reads LastDllError through a With block", ALL),
+    "capture-through-the-vba-qualifier": (
+        changed(CLEAR_CAPTURE, CLEAR_CAPTURE.replace("= Err.", "= VBA.Err.")),
+        None, "a qualifier other than Err", ALL),
     "result-into-a-parameter-in-the-vba7-branch": (
         changed(VBA7_CALL, VBA7_CALL.replace("SlotValue =", "SlotOut =")),
         None, "without assigning its result to a local variable", VBA7),
@@ -274,6 +291,11 @@ class DeclareTest(unittest.TestCase):
                  *ENTRIES[1:]]
         self.assertEqual(findings(register_text=register(upper)), [])
         self.assertEqual(findings(BASE.replace('Lib "kernel32"', 'Lib "kernel32.dll"')), [])
+
+    def test_whole_call_with_nested_parentheses_passes(self) -> None:
+        nested = changed(VBA7_CALL, VBA7_CALL.replace("(SlotIndex)\n",
+                                                      "((SlotIndex) + CLng(0)) ' (x)\n"))
+        self.assertEqual(findings(nested), [])
 
     def test_strings_and_comments_are_not_reads(self) -> None:
         # BASE quotes Err.LastDllError in a string and in a comment of ReadSlot.
