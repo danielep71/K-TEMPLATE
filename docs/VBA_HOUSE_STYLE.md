@@ -231,7 +231,8 @@ What they cannot prove:
   along the text of the procedure, merging the branches of `If`,
   `Select Case` and loop blocks. It follows no jump, and `Resume` and
   `Resume Next` start no path, because the statement they continue at is
-  known only at run time;
+  known only at run time. A `Resume <label>` that runs only under a
+  condition, as in a retry, starts no path either;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 

@@ -854,6 +854,37 @@ Cleanup:
         self.assertEqual(findings,
                          [f"tests/modules/TEST_Fixture.bas:13: {TRAPPED} [vba6-win32]"])
 
+    def test_conditional_resume_starts_no_path(self) -> None:
+        retry = '''Private Sub First()
+        Dim Attempts As Long
+Retry:
+        On Error GoTo Handler
+        If Attempts < 1 Then Err.Raise 5, "TEST_Fixture.First"
+        Exit Sub
+Handler:
+        Attempts = Attempts + 1
+        If Attempts < 3 Then Resume Retry
+        Err.Raise Err.Number, "TEST_Fixture.First"
+End Sub
+'''
+        block_retry = retry.replace("        If Attempts < 3 Then Resume Retry\n",
+                                    "        If Attempts < 3 Then\n            Resume Retry\n"
+                                    "        End If\n")
+        # Documented false negative: a cleanup reached only under a condition.
+        conditional_cleanup = RERAISE.replace(
+            "        Resume Cleanup\n",
+            "        If SavedNumber <> 0 Then\n            Resume Cleanup\n        End If\n")
+        for name, body in {"bounded-retry": retry, "bounded-retry-in-a-block-if": block_retry,
+                           "conditional-cleanup": conditional_cleanup}.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, standalone(module(body))), [])
+        with self.subTest(name="unconditional-retry"):
+            findings = run_check(check_vba_jumps.check, standalone(module(
+                retry.replace("If Attempts < 3 Then Resume Retry", "Resume Retry"))))
+            self.assertEqual([item.split(": ", 1)[1] for item in findings],
+                             [TRAPPED.replace("Cleanup", "Retry")
+                              + " [vba6-win32, vba7-win32, vba7-win64]"])
+
     def test_resume_without_a_label_starts_no_path(self) -> None:
         # Resume and Resume Next continue at the statement that failed, or
         # after it, which the check cannot locate; only Resume <label> starts a path.

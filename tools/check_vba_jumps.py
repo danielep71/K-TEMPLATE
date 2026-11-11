@@ -19,6 +19,10 @@ after ``On Error GoTo 0``. The model of the handler state:
 - A ``Resume <label>`` belongs to the handler whose label precedes it most
   closely, and re-enables that handler, which trapped the error. A
   ``Resume`` before any handler label is not followed.
+- Only a ``Resume <label>`` that the handler runs unconditionally starts a
+  path. One inside an ``If``, ``Select Case`` or loop of the handler, or in
+  a one-line ``If``, runs only under a condition, as in a bounded retry, so
+  it starts no path, and a raise it would loop through is not reported.
 - From the ``Resume`` target, the check follows the text of the procedure.
   ``If``, ``Select Case`` and loop blocks merge the states of their
   branches. A one-line ``If ... Then a: b Else c: d`` is read as a block
@@ -429,11 +433,17 @@ def reraise_findings(path: str, procedure: Procedure) -> list[Finding]:
                if step.label is not None}
     messages: dict[tuple[int, str], str] = {}
     trapping: str | None = None
+    # The blocks open in the handler; a Resume inside one is conditional.
+    depth = 0
     for step in procedure.steps:
         if step.label is not None and step.label.casefold() in handlers:
-            trapping = step.label
+            trapping, depth = step.label, 0
+        if BLOCK_IF.match(step.code) or SELECT.match(step.code) or LOOP_OPEN.match(step.code):
+            depth += 1
+        elif BLOCK_END.match(step.code) or LOOP_CLOSE.match(step.code):
+            depth = max(depth - 1, 0)
         for operation, target in statement_jumps(step.code):
-            if trapping is None or operation.casefold() != "resume" \
+            if trapping is None or depth or operation.casefold() != "resume" \
                     or target.casefold() not in targets:
                 continue
             for line, handler in trapped_raises(procedure.steps, targets[target.casefold()],
