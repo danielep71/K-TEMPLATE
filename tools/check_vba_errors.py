@@ -32,9 +32,12 @@ PURE_FUNCTIONS (``CLng``, ``CStr``, ``Len``, ..., also written ``VBA.CLng``),
 arithmetic, concatenation and an array element can fail but run no code that
 clears ``Err``: in a handler they change nothing, and after ``On Error Resume
 Next`` they are a statement that can fail. So are the VBA statements of
-BUILTIN_STATEMENT (``ReDim``, ``Erase``, ``Open``, ``Print #``, ...), whose
-operands alone are read as expressions; a statement that starts with any
-other name is a call.
+BUILTIN_STATEMENT (``ReDim``, ``Erase``, ``Open``, ``Print #``, ...), also
+written with ``Call``, as in ``Call SaveSetting(...)``: their operands alone
+are read as expressions, without the type that ``ReDim`` declares
+(``As Long``), and the type in ``TypeOf x Is Thing`` is not a value. A
+statement that starts with any other name is a call, ``Load`` and
+``Unload`` included, since they run the form's event procedures.
 
 Within a statement, the check follows VBA's evaluation order: a read inside
 the arguments of a call, as in ``CLng(Err.Number)``, runs before that call.
@@ -83,7 +86,7 @@ from pathlib import Path
 
 from check_vba_calls import dates_as_values
 from check_vba_conditionals import reachable_sources
-from check_vba_identifiers import Module, closing_parenthesis, scan
+from check_vba_identifiers import Module, closing_parenthesis, scan, top_level_split
 from check_vba_jumps import PROC_CLOSE, is_procedure, label_at_start
 from vba_lexer import (
     Finding,
@@ -149,6 +152,13 @@ BUILTIN_STATEMENT = re.compile(
     r"^(?:ReDim(?:\s+Preserve)?|Erase|Open|Close|Print|Write|Input|Line\s+Input|Get|Put|Seek"
     r"|Lock|Unlock|Kill|MkDir|RmDir|ChDir|ChDrive|FileCopy|Name|SetAttr|Randomize|Beep|Reset"
     r"|Width|Error|AppActivate|SaveSetting|DeleteSetting|SendKeys)\b", re.IGNORECASE)
+CALL_KEYWORD = re.compile(r"^Call\s+", re.IGNORECASE)
+# The type of a variable that ReDim declares, as in ReDim a(1 To n) As Long,
+# As New Thing or As String * 10: a name of a type, not a value or a call.
+TYPE_CLAUSE = re.compile(r"\s+As\s+(?:New\s+)?[A-Za-z_][\w.]*(?:\s*\*\s*\w+)?\s*$",
+                         re.IGNORECASE)
+# The type that TypeOf x Is Thing compares with.
+TYPEOF_TYPE = re.compile(r"(\bTypeOf\b[^,()]*?\bIs\s+)[A-Za-z_][\w.]*", re.IGNORECASE)
 STATEMENT_SYNTAX = re.compile(r"\b(?:Access|Append|Binary|Input|Lock|Output|Random|Read|Shared"
                               r"|Write)\b", re.IGNORECASE)
 # Assignment targets that are VBA statements: Date = x sets the system date,
@@ -170,11 +180,16 @@ OPERATOR = re.compile(r"[*/\\^]|(?<![\w&])&|\bMod\b", re.IGNORECASE)
 # VBA functions that run no project code, so they leave Err as it is unless
 # they fail; extend the set when a copy of Err goes through another one.
 PURE_FUNCTIONS = frozenset("""
-    abs array asc ascw cbool cbyte ccur cdate cdbl cdec chr chrw cint clng clnglng clngptr csng
-    cstr cvar cverr dateserial day fix format hex iif instr instrrev int isarray isdate isempty
-    iserror ismissing isnull isnumeric isobject join lbound lcase left len lenb ltrim mid midb
-    month now oct replace right round rtrim sgn space spc split str strcomp string tab time timer
-    trim typename ubound ucase val vartype year
+    abs array asc ascb ascw atn cbool cbyte ccur cdate cdbl cdec choose chr chrb chrw cint clng
+    clnglng clngptr cos csng cstr curdir cvar cvdate cverr date dateadd datediff datepart
+    dateserial datevalue day ddb dir environ eof exp filedatetime filelen filter fix format
+    formatcurrency formatdatetime formatnumber formatpercent freefile fv getattr getsetting hex
+    hour iif input inputb instr instrb instrrev int ipmt irr isarray isdate isempty iserror
+    ismissing isnull isnumeric isobject join lbound lcase left leftb len lenb loc lof log ltrim
+    mid midb minute mirr month monthname now nper npv oct pmt ppmt pv qbcolor rate replace rgb
+    right rightb rnd round rtrim second sgn sin sln space spc split sqr str strcomp strconv
+    string strreverse switch syd tab tan time timer timeserial timevalue trim typename ubound
+    ucase val vartype weekday weekdayname year
 """.split())
 # The same functions qualified by their library, as in VBA.CLng(x), and the
 # constants of VBA so qualified, as in VBA.vbCrLf: neither a member access of
@@ -302,6 +317,7 @@ def effect(text: str, names: Names) -> Effect:
     global object, such as ActiveSheet, called without parentheses. Only a
     name the project does not declare can be a VBA function or constant."""
     text = ERR_PROPERTY.sub(lambda match: "0" * len(match.group()), text)
+    text = TYPEOF_TYPE.sub(r"\g<1>", text)
 
     def library(match: re.Match[str]) -> str:
         return "0" * len(match.group()) if library_qualifier(match, names) else match.group()
@@ -369,14 +385,19 @@ def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
         reads = value + (" , " + target[index:] if index > 0 else "")
         return reads, effect(value, names) | target_effect(target, names)
     # A procedure of the project named like a VBA statement, such as Beep,
-    # shadows it, unless the statement is qualified, as in VBA.Beep.
-    qualifier = VBA_HEAD.match(statement)
+    # shadows it, unless the statement is qualified, as in VBA.Beep. Call
+    # SaveSetting(...) is SaveSetting ... written as a call.
+    called = CALL_KEYWORD.match(statement)
+    body = statement[called.end():] if called else statement
+    qualifier = VBA_HEAD.match(body)
     if not library_qualifier(qualifier, names):
         qualifier = None
-    unqualified = statement[qualifier.end():] if qualifier else statement
+    unqualified = body[qualifier.end():] if qualifier else body
     builtin = BUILTIN_STATEMENT.match(unqualified)
     if builtin and (qualifier or unqualified.split(None, 1)[0].casefold() not in names.callables):
         operands = STATEMENT_SYNTAX.sub(" ", unqualified[builtin.end():])
+        if builtin.group().casefold().startswith("redim"):
+            operands = ",".join(TYPE_CLAUSE.sub("", item) for item in top_level_split(operands))
         return operands, effect(operands, names) | Effect(fails=True)
     head_match = HEAD.match(statement)
     arguments = statement[head_match.end():] if head_match else statement

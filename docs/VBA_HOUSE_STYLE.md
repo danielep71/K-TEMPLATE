@@ -246,7 +246,9 @@ What they cannot prove:
     constant. An assignment to anything but a variable, an array element,
     `Date`, `Time` or `Mid` counts as setting a property, and a statement
     that starts with a name the check does not list as a VBA statement
-    counts as a call. Arithmetic, concatenation, an array element and the
+    counts as a call, `Load` and `Unload` included, since they run the
+    form's event procedures. A listed VBA statement written with `Call`, as
+    in `Call SaveSetting(...)`, is still that statement. Arithmetic, concatenation, an array element and the
     listed VBA statements can fail but run no code, so they do not;
   - as in VBA, a procedure, property or `Declare` of the project shadows a
     VBA function, statement or constant of its name, such as a project

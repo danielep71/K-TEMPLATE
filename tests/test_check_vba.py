@@ -1951,6 +1951,61 @@ ERRORS_INVALID = {
         "Err.Description read in First after line 9"),
 }
 ALL_ENVIRONMENTS = "[vba6-win32, vba7-win32, vba7-win64]"
+# VBA statements and functions that run no project code, with literals and
+# declared variables as operands: none may make the next read of Err stale.
+STATEMENT_SWEEP = [
+    "Open Text For Input As #1", "Open Text For Append Shared As FileNumber",
+    "Open Text For Random Access Read Write Lock Read Write As #FileNumber Len = 128",
+    "Close #1", "Close", "Reset", "Get #1, , Number", "Put #1, 1, Text", "Seek #1, 1",
+    "Lock #1", "Unlock #1, 1 To 2", "Width #1, 80", "Write #1, Text, Number",
+    "Input #1, Text, Number", "Line Input #1, Text", "Print #1, Text; Number",
+    "Print #1, Spc(2); Tab(4); Text", "Name Text As Text", "Erase Values",
+    "Erase Values, Other", "ReDim Values(1 To 2)", "ReDim Values(1 To 2) As Long",
+    "ReDim Preserve Values(1 To Number), Other(2) As String",
+    "ReDim Values(0 To 1, 1 To 3) As Long", "Date = Now", "Time = #12:00:00 PM#",
+    'Mid(Text, 1, 1) = "x"', "Mid$(Text, 2) = Text", 'MidB(Text, 1, 2) = "ab"',
+    'LSet Text = "x"', "RSet Text = Text", "Let Number = 1", "Set Item = Nothing",
+    "Static Count As Long", "Dim Local As Long", "Dim Fixed As String * 10",
+    "Dim Things As New Collection", "Const LIMIT As Long = 3", "Stop",
+    "Number = Sqr(4) + Abs(-1) + Rnd", "FileNumber = FreeFile", "Number = LOF(1) + Loc(1)",
+    "Flag = EOF(1)", 'Text = Format(Date, "yyyy") & Dir(Text) & Environ("TEMP")',
+    'Number = DateDiff("d", Date, Now)', "If TypeOf Item Is Collection Then Number = 1",
+    "If TypeOf Item Is VBA.Collection Then Number = 1",
+]
+# Procedures of the VBA library that are written as statements, with the
+# module of the library that holds them, as in VBA.Interaction.Beep.
+LIBRARY_STATEMENTS = [
+    ("Beep", "", "Interaction"),
+    ("SaveSetting", '"App", "Section", "Key", Text', "Interaction"),
+    ("DeleteSetting", '"App", "Section", "Key"', "Interaction"),
+    ("AppActivate", "Text", "Interaction"), ("SendKeys", '"{ENTER}", True', "Interaction"),
+    ("Kill", "Text", "FileSystem"), ("MkDir", "Text", "FileSystem"),
+    ("RmDir", "Text", "FileSystem"), ("ChDir", "Text", "FileSystem"),
+    ("ChDrive", "Text", "FileSystem"), ("FileCopy", "Text, Text", "FileSystem"),
+    ("SetAttr", "Text, vbNormal", "FileSystem"), ("Randomize", "", "Math"),
+    ("Randomize", "42", "Math"),
+]
+
+
+def sweep_statements() -> list[str]:
+    """Each statement of the sweep, and each library statement written
+    plain, with Call, and qualified by VBA. and by its module."""
+    statements = list(STATEMENT_SWEEP)
+    for name, arguments, library in LIBRARY_STATEMENTS:
+        for qualifier in ("", "VBA.", f"VBA.{library}."):
+            statements.append(f"{qualifier}{name} {arguments}".rstrip())
+            statements.append(f"Call {qualifier}{name}({arguments})" if arguments
+                              else f"Call {qualifier}{name}")
+    return statements
+
+
+def sweep_handler(statement: str) -> str:
+    """A handler that runs ``statement`` at line 11, then reads Err.Number."""
+    return ("Private Sub First()\n"
+            "        Dim Number As Long, Text As String, Flag As Boolean, Item As Object\n"
+            "        Dim Values() As Long, Other() As String, FileNumber As Integer\n"
+            "        On Error GoTo Handler\n        Exit Sub\nHandler:\n"
+            f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
 
 
 class ErrorTest(unittest.TestCase):
@@ -1969,6 +2024,20 @@ class ErrorTest(unittest.TestCase):
                                 findings)
                 self.assertIn(text, findings[0])
                 self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
+
+    def test_vba_statements_and_functions_change_nothing(self) -> None:
+        # A table of every VBA statement and function the check knows to run
+        # no project code: in a handler, none makes the read after it stale.
+        files = {f"tests/modules/TEST_Sweep{index}.bas":
+                 module(sweep_handler(statement)).replace("TEST_Fixture", f"TEST_Sweep{index}")
+                 for index, statement in enumerate(sweep_statements())}
+        findings = run_check(check_vba_errors.check, {**files, "docs/PUBLIC_API.txt": "# None\n"})
+        statements = sweep_statements()
+        for finding in findings:
+            index = int(finding.split(".bas")[0].removeprefix("tests/modules/TEST_Sweep"))
+            with self.subTest(statement=statements[index]):
+                self.fail(finding)
+        self.assertGreater(len(statements), 100)
 
     def test_project_declarations_shadow_vba_built_ins(self) -> None:
         # A procedure of the project named like a VBA function, statement,
@@ -1993,6 +2062,8 @@ class ErrorTest(unittest.TestCase):
             "        Text = VBA.Trim$(Text)\n        Number = Err.Number\n": None,
             "        Number = Math.Abs(1)\n        Number = Err.Number\n": 10,
             "        Number = VBA.Math.Abs(1)\n        Number = Err.Number\n": None,
+            "        Call Beep\n        Number = Err.Number\n": 10,
+            "        Call VBA.Beep\n        Number = Err.Number\n": None,
         }
         for statements, line in cases.items():
             with self.subTest(statements=statements):
