@@ -13,6 +13,11 @@ cleared or may have replaced the error it means to read:
   is a variable, a constant, an Enum member or a component: a function,
   property or Declare of the project, or a host global such as ActiveCell.
   Names that start with ``vb`` or ``xl`` are the constants of VBA and Excel.
+  A name is resolved against the project first: a procedure, property or
+  Declare of the module, or a public one of a standard module, shadows a VBA
+  function, statement, statement target or constant of its name, as in VBA,
+  while ``VBA.Format`` still names the VBA function. ``Err`` and ``Erl``
+  always mean VBA's.
   In the same way, an assignment (``=``, ``Let``, ``Set``, ``LSet``,
   ``RSet``) to anything but a variable, an array element or a statement
   target (``Date``, ``Mid(Text, 1, 1)``) sets a property, a call made once
@@ -109,14 +114,14 @@ OPERATOR = re.compile(r"[*/\\^]|(?<![\w&])&|\bMod\b", re.IGNORECASE)
 PURE_FUNCTIONS = frozenset("""
     abs array asc ascw cbool cbyte ccur cdate cdbl cdec chr chrw cint clng clnglng clngptr csng
     cstr cvar cverr dateserial day fix format hex iif instr instrrev int isarray isdate isempty
-    iserror ismissing isnull isnumeric isobject join lbound lcase left len lenb ltrim mid month
-    midb now oct replace right round rtrim sgn space spc split str strcomp string tab time timer trim typename
-    ubound ucase val vartype year
+    iserror ismissing isnull isnumeric isobject join lbound lcase left len lenb ltrim mid midb
+    month now oct replace right round rtrim sgn space spc split str strcomp string tab time timer
+    trim typename ubound ucase val vartype year
 """.split())
-# The same functions qualified by their library, as in VBA.CLng(x): not a
-# member access of an object.
-VBA_PURE = re.compile(rf"(?<![\w.!])VBA\s*\.\s*(?=(?:{'|'.join(sorted(PURE_FUNCTIONS))})\b)",
-                      re.IGNORECASE)
+# The same functions qualified by their library, as in VBA.CLng(x): neither a
+# member access of an object nor a procedure of the project of that name.
+VBA_PURE = re.compile(rf"(?<![\w.!])VBA\s*\.\s*(?:{'|'.join(sorted(PURE_FUNCTIONS))})\b"
+                      r"[%&!#@$]?", re.IGNORECASE)
 # Prefixes of the constants of VBA (vbCrLf) and Excel (xlUp), which are values.
 CONSTANT_PREFIXES = ("vb", "xl")
 # Words that may stand in an expression without being a value that can fail.
@@ -157,6 +162,17 @@ class Procedure:
 
 
 @dataclass(frozen=True)
+class Names:
+    """The names a procedure resolves before VBA's own: ``values``, read
+    without a call, and ``callables``, the procedures, properties and Declares
+    of the project it can call unqualified. A project declaration shadows a
+    VBA function, statement or constant of the same name, as in VBA."""
+
+    values: frozenset[str] = frozenset()
+    callables: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True)
 class Effect:
     """Whether code can fail, and whether it can run code that changes Err."""
 
@@ -180,31 +196,34 @@ def arithmetic(text: str) -> bool:
     return False
 
 
-def effect(text: str, variables: frozenset[str]) -> Effect:
+def effect(text: str, names: Names) -> Effect:
     """What evaluating the expression ``text`` can do to Err; strings are blanked.
 
-    ``variables`` are the names that hold a value: a name followed by
-    parentheses is an array element when it is one of them, and a call
-    otherwise. A bare name that is none of them is a call too: a function or
-    property of the project, a Declare, or a member of the host's global
-    object, such as ActiveSheet, called without parentheses."""
+    A name followed by parentheses is an array element when it is a value,
+    and a call otherwise; a bare name that is not a value is a call too: a
+    function or property of the project, a Declare, or a member of the host's
+    global object, such as ActiveSheet, called without parentheses. Only a
+    name the project does not declare can be a VBA function or constant."""
     text = ERR_READ.sub(lambda match: "0" * len(match.group()), text)
-    text = VBA_PURE.sub("", text)
+    text = VBA_PURE.sub(lambda match: "0" * len(match.group()), text)
     text = NUMBER_LITERAL.sub(lambda match: "0" * len(match.group()), dates_as_values(text))
     result = Effect(fails=arithmetic(text))
     if MEMBER.search(text) or NEW.search(text):
         result = Effect(True, True)
     for match in CALL.finditer(text):
         name = match.group(1).casefold()
-        if name in WORDS:
-            continue
-        pure = name in PURE_FUNCTIONS or name in variables
-        result = result | Effect(True, not pure)
+        if name in names.values:
+            result = result | Effect(fails=True)
+        elif name in names.callables:
+            result = Effect(True, True)
+        elif name not in WORDS:
+            result = result | Effect(True, name not in PURE_FUNCTIONS)
     for match in NAME.finditer(text):
         name = match.group(1).casefold()
-        if name in WORDS or name in variables or name.startswith(CONSTANT_PREFIXES):
-            continue
-        result = result | Effect(True, name not in PURE_FUNCTIONS)
+        if name in names.callables and name not in names.values:
+            result = Effect(True, True)
+        elif not (name in names.values or name in WORDS or name.startswith(CONSTANT_PREFIXES)):
+            result = result | Effect(True, name not in PURE_FUNCTIONS)
     return result
 
 
@@ -226,43 +245,45 @@ def assignment(statement: str) -> tuple[str, str] | None:
     return None
 
 
-def statement_effect(statement: str, variables: frozenset[str]) -> tuple[Effect, Effect]:
+def statement_effect(statement: str, names: Names) -> tuple[Effect, Effect]:
     """What the expressions a statement evaluates first, and the statement
     itself, can do to Err. A procedure runs after its arguments are read, and
     a property is set after its value is."""
     if DECLARATION.match(statement) or END_WITH.match(statement):
         return Effect(), Effect()
     if WITH.match(statement):
-        found = effect(statement[4:], variables)
+        found = effect(statement[4:], names)
         return found, found
     pair = assignment(statement)
     if pair is not None:
-        found = effect(pair[1], variables)
-        return found, found | target_effect(pair[0], variables)
+        found = effect(pair[1], names)
+        return found, found | target_effect(pair[0], names)
     builtin = BUILTIN_STATEMENT.match(statement)
-    if builtin:
-        found = effect(STATEMENT_SYNTAX.sub(" ", statement[builtin.end():]), variables)
+    # A procedure of the project named like a VBA statement, such as Beep, shadows it.
+    if builtin and statement.split(None, 1)[0].casefold() not in names.callables:
+        found = effect(STATEMENT_SYNTAX.sub(" ", statement[builtin.end():]), names)
         return found, found | Effect(fails=True)
     head_match = HEAD.match(statement)
-    found = effect(statement[head_match.end():] if head_match else statement, variables)
+    found = effect(statement[head_match.end():] if head_match else statement, names)
     return found, found | Effect(True, True)
 
 
-def target_effect(target: str, variables: frozenset[str]) -> Effect:
+def target_effect(target: str, names: Names) -> Effect:
     """What assigning to ``target`` can do to Err, once the value is read.
 
     A variable of the procedure or the module (and the procedure's own name)
     is a plain copy, an array element can fail, and a statement target such
     as Date or Mid(Text, 1, 1) can fail. Any other target is a property: a
-    Property Let or Set of the project, a member (x.y = 1, .y = 1 in a With
-    block), or a property of the host, such as Caption, which runs code."""
+    Property Let or Set of the project, which shadows a statement target of
+    its name, a member (x.y = 1, .y = 1 in a With block), or a property of
+    the host, such as Caption, which runs code."""
     index = target.find("(")
     name = (target[:index] if index > 0 else target).rstrip("%&!#@$ ").casefold()
-    indices = effect(target[index:], variables) if index > 0 else Effect()
+    indices = effect(target[index:], names) if index > 0 else Effect()
     if PLAIN_TARGET.fullmatch(target) or (index > 0 and PLAIN_TARGET.fullmatch(name)):
-        if name in variables:
+        if name in names.values:
             return indices | Effect(fails=index > 0)
-        if name in BUILTIN_TARGETS:
+        if name in BUILTIN_TARGETS and name not in names.callables:
             return indices | Effect(fails=True)
     return indices | Effect(True, True)
 
@@ -282,7 +303,7 @@ def stale_message(procedure: str, statement: str, stale: tuple[int, str]) -> str
 
 
 def check_statement(path: str, procedure: Procedure, line: int, statement: str,
-                    segment: Segment, variables: frozenset[str]) -> list[Finding]:
+                    segment: Segment, names: Names) -> list[Finding]:
     """Read one statement against ``segment``, then apply its effect on Err."""
     findings: list[Finding] = []
     if JOIN.match(statement):
@@ -295,10 +316,10 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
     branch = BRANCH.match(statement)
     if branch:
         condition = IF_CONDITION.match(statement)
-        before = effect(condition.group("condition") if condition else statement, variables)
+        before = effect(condition.group("condition") if condition else statement, names)
         total = before
     else:
-        before, total = statement_effect(statement, variables)
+        before, total = statement_effect(statement, names)
     # Err read after code that can fail, in the same statement, may be that
     # code's error: no claim then, unless no failure can refresh Err.
     refreshed = before.fails and segment.follows_last_failure
@@ -315,8 +336,7 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
     return findings
 
 
-def check_procedure(path: str, procedure: Procedure, variables: frozenset[str]
-                    ) -> list[Finding]:
+def check_procedure(path: str, procedure: Procedure, names: Names) -> list[Finding]:
     handlers = handler_labels(procedure)
     segment = Segment()
     findings: list[Finding] = []
@@ -324,7 +344,7 @@ def check_procedure(path: str, procedure: Procedure, variables: frozenset[str]
         if label is not None:
             segment.restart(in_handler=label.casefold() in handlers)
         for statement in statements:
-            findings += check_statement(path, procedure, line, statement, segment, variables)
+            findings += check_statement(path, procedure, line, statement, segment, names)
             if IF_START.match(statement):
                 # The rest of the line belongs to a single-line If's branches.
                 segment.restart()
@@ -358,30 +378,34 @@ def procedures(source: str) -> list[Procedure]:
     return found
 
 
-def variable_names(module: Module, values: frozenset[str], line: int) -> frozenset[str]:
-    """The names the procedure at ``line`` reads without calling anything: its
+def procedure_names(module: Module, project: Names, line: int) -> Names:
+    """The names the procedure at ``line`` resolves. Its values are its
     parameters and variables, its own name (its result), the module's
-    variables, constants and Enum members, and ``values``, the names of the
-    components and the public values of the standard modules. A procedure,
-    property or Declare of the module is not one of them."""
+    variables, constants and Enum members, and those of ``project``: the
+    names of the components and the public values of the standard modules.
+    It can call the procedures, properties and Declares of its module and
+    the public ones of the standard modules, in ``project``."""
     procedure = next((item for item in module.procedures if item.line == line), None)
     local = procedure.names | {procedure.name.casefold()} if procedure else set()
-    return frozenset(local | (module.names - module.callables) | values)
+    return Names(frozenset(local | (module.names - module.callables) | project.values),
+                 frozenset(module.callables | project.callables))
 
 
 def analyze(modules: dict[str, str]) -> tuple[list[Finding], int]:
     """The findings of one environment's sources, and how many procedures it has."""
     scanned = {path: scan(path, source) for path, source in modules.items()}
-    values = frozenset({Path(path).stem.casefold() for path in modules} | {
-        name for module in scanned.values() if module.standard
-        for name in module.public - module.public_callables})
+    standard = [module for module in scanned.values() if module.standard]
+    project = Names(
+        frozenset({Path(path).stem.casefold() for path in modules} | {
+            name for module in standard for name in module.public - module.public_callables}),
+        frozenset(name for module in standard for name in module.public_callables))
     findings: list[Finding] = []
     count = 0
     for path, source in modules.items():
         for procedure in procedures(source):
             count += 1
-            variables = variable_names(scanned[path], values, procedure.line)
-            findings += check_procedure(path, procedure, variables)
+            names = procedure_names(scanned[path], project, procedure.line)
+            findings += check_procedure(path, procedure, names)
     return findings, count
 
 

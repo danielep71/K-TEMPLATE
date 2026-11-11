@@ -1862,6 +1862,38 @@ class ErrorTest(unittest.TestCase):
                 self.assertIn(text, findings[0])
                 self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
 
+    def test_project_declarations_shadow_vba_built_ins(self) -> None:
+        # A procedure of the project named like a VBA function, statement,
+        # constant or statement target is called instead; VBA.Format still
+        # names the VBA function.
+        shadows = ("\n\nPrivate Function Format(ByVal Value As Variant) As String\nEnd Function\n"
+                   "\n\nPrivate Sub Beep()\nEnd Sub\n"
+                   "\n\nPrivate Function vbLimit() As Long\nEnd Function\n"
+                   "\n\nPrivate Property Let Mid(ByVal Value As String)\nEnd Property\n")
+        other = ('Attribute VB_Name = "TEST_Shadow"\nOption Explicit\nOption Private Module\n'
+                 "Public Function Trim(ByVal Value As String) As String\nEnd Function\n")
+        cases = {
+            "        Text = Format(1)\n        Number = Err.Number\n": 10,
+            "        Beep\n        Number = Err.Number\n": 10,
+            "        Number = vbLimit\n        Number = Err.Number\n": 10,
+            '        Mid = "x"\n        Number = Err.Number\n': 10,
+            "        Text = Trim(Text)\n        Number = Err.Number\n": 10,
+            "        Text = VBA.Format(1)\n        Number = Err.Number\n": None,
+            "        Text = VBA.Trim$(Text)\n        Number = Err.Number\n": None,
+        }
+        for statements, line in cases.items():
+            with self.subTest(statements=statements):
+                files = {**standalone(module(handler(statements) + shadows)),
+                         "tests/modules/TEST_Shadow.bas": other}
+                findings = run_check(check_vba_errors.check, files)
+                if line is None:
+                    self.assertEqual(findings, [])
+                else:
+                    self.assertEqual(len(findings), 1, findings)
+                    self.assertTrue(findings[0].startswith(
+                        f"tests/modules/TEST_Fixture.bas:{line}: Err.Number read in First after "
+                        f"line {line - 1}, which may have changed Err"), findings)
+
     def test_each_environment_is_analyzed_separately(self) -> None:
         # The call that makes the read stale exists in one #If branch only;
         # the finding names the environments of that branch, once.

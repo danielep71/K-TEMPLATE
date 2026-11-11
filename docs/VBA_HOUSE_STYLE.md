@@ -238,7 +238,11 @@ What they cannot prove:
   `Date`, `Time` or `Mid` counts as setting a property. A statement that
   starts with a name the check does not list as a VBA statement counts as a
   call. Arithmetic, concatenation, an array element and the listed VBA
-  statements can fail but run no code, so they do not. A form control
+  statements can fail but run no code, so they do not. As in VBA, a
+  procedure, property or `Declare` of the project shadows a VBA function,
+  statement or constant of its name, such as a project `Format`, while
+  `VBA.Format` still names the VBA function; `Err` and `Erl` always mean
+  VBA's. A form control
   assigned without a qualifier counts as a variable, and `Set x = Nothing`
   as a copy, although it may run the released object's `Class_Terminate`.
   After `On Error Resume Next`, it does not check which of several failing
