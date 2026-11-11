@@ -97,9 +97,11 @@ Use only the categories an entry needs.
 - **Repository integrity** no longer reports a Dependabot `target-branch` as
   missing in a single-branch or shallow clone: `dependabot-target-branches`
   asks the `origin` remote for a branch that has no remote-tracking branch,
-  and is skipped, or fails under `--strict`, when `origin` cannot answer. The
+  and is skipped, or fails under `--strict`, when `origin` cannot answer.
+  `tools/initialize_repository.py` asks the same way before it warns that
+  `--release-branch` is missing, and says so when `origin` cannot answer. The
   check table in `CONTRIBUTING.md` shows the `changelog` check with
-  `--repository OWNER/REPOSITORY`, as CI runs it (#381).
+  `--repository OWNER/REPOSITORY`, as CI runs it (#381, #394).
 - **Repository integrity** accepts the bytes that `.gitattributes`,
   `.editorconfig` and the formatter keep. `git diff --check` reports no
   white-space error in the regulatory source copies under
