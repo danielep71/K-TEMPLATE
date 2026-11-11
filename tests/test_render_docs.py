@@ -285,6 +285,12 @@ class RepositoryTest(unittest.TestCase):
         self.assertIn("| `changelog` | `python tools/check_changelog.py --repository "
                       "OWNER/REPOSITORY` |", text)
 
+    def test_the_probe_a_check_must_fail_first_is_shown(self) -> None:
+        text = render_docs.integrity_checks(ROOT)
+        self.assertIn("| `actionlint` | `actionlint -no-color`, once the probe "
+                      "`actionlint -no-color .github/actionlint/invalid-workflow.yml` has "
+                      "failed with `unexpected key \"bogus-key\"` |", text)
+
     def test_a_check_without_a_description_is_refused(self) -> None:
         def undocumented(context: check_repository.Context) -> list[tuple[str, str]]:
             return []

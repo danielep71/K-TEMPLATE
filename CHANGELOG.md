@@ -63,6 +63,14 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- The `actionlint` check of **Repository integrity** first lints
+  `.github/actionlint/invalid-workflow.yml`, a workflow with a known error
+  that never runs, and fails unless actionlint rejects it with that finding.
+  Only then does it lint the workflows, so a broken or stubbed actionlint that
+  accepts everything can no longer pass the check (#404).
+
 ### Fixed
 
 - The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims

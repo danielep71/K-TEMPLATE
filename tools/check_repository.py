@@ -4,12 +4,17 @@
 Each check is a command or a small function. The run writes, under
 test-results/integrity/:
 
-- one <check>.log per check, with its command and output;
+- one <check>.log per check, with its command and output, and those of its
+  probe if it has one;
 - report.json: the commit, whether the tree is dirty, the pull request head,
   the Python version and platform, the SHA-256 of every tracked file, and each
   check's command, status and exit code;
 - summary.md, which --summary also appends to a file such as
   $GITHUB_STEP_SUMMARY.
+
+A check with a probe first runs its tool on an input the tool must reject,
+and fails without running its command unless the tool exits non-zero and
+reports the expected finding: a tool that accepts everything cannot pass.
 
 A check whose tool or GitHub context is missing is skipped and reported as
 such, as is a check that cannot reach the origin remote; --strict, which CI
@@ -46,6 +51,10 @@ SCOPE = "Repository checks only: no VBA compilation, no Excel run, no numerical 
 TIMEOUT_SECONDS = 600
 # How long to wait for the origin remote to list a branch.
 REMOTE_TIMEOUT_SECONDS = 60
+# A workflow that actionlint must reject; it lives outside .github/workflows/,
+# so GitHub never runs it and the normal lint never reads it.
+ACTIONLINT_PROBE = ".github/actionlint/invalid-workflow.yml"
+ACTIONLINT_PROBE_FINDING = 'unexpected key "bogus-key"'
 REQUIRED_DOCUMENTS = ("README.md", "LICENSE", "docs/repo_governance/SETTINGS.md")
 BADGE = re.compile(r"raw\.githubusercontent\.com/([^/\s]+/[^/\s]+)/traffic-history/")
 CONTACT_URL = re.compile(r'^\s*url:\s*"?([^"\s]+)"?\s*$', re.M)
@@ -84,6 +93,15 @@ class Context:
 
 
 @dataclass
+class Probe:
+    """A command that must fail and report a finding, proving the check can fail."""
+
+    command: list[str]
+    # Text the probe's output must contain.
+    finding: str
+
+
+@dataclass
 class Check:
     """A command to run, or a function returning findings as (file, message)."""
 
@@ -94,6 +112,8 @@ class Check:
     missing: str | None = None
     # Findings are reported as a warning and do not fail the run.
     advisory: bool = False
+    # Run first; the check fails without running its command unless the probe fails.
+    probe: Probe | None = None
 
 
 @dataclass
@@ -279,6 +299,7 @@ def checks(context: Context) -> list[Check]:
                                       module=True)
     mypy, mypy_missing = tool_command("mypy", "--no-incremental", module=True)
     actionlint, actionlint_missing = tool_command("actionlint", "-no-color")
+    actionlint_probe = Probe([*actionlint, ACTIONLINT_PROBE], ACTIONLINT_PROBE_FINDING)
     node = shutil.which("node")
     node_missing = None if node else "node is not on PATH"
     no_repository = None if context.repository else "the repository is unknown (--repository)"
@@ -291,7 +312,7 @@ def checks(context: Context) -> list[Check]:
         Check("tests", [python, "-m", "unittest", "discover", "-s", "tests", "-v"]),
         Check("ruff", ruff, missing=ruff_missing),
         Check("mypy", mypy, missing=mypy_missing),
-        Check("actionlint", actionlint, missing=actionlint_missing),
+        Check("actionlint", actionlint, missing=actionlint_missing, probe=actionlint_probe),
         Check("labels-sync-self-test", [node or "node", ".github/scripts/labels-sync.mjs",
                                         "--self-test"], missing=node_missing),
         Check("labels-catalogue", [node or "node", ".github/scripts/labels-sync.mjs", "--mode",
@@ -369,14 +390,36 @@ def run_one(check: Check, context: Context, strict: bool) -> Result:
         return Result(check.name, "fail" if findings else "pass", None, 1 if findings else 0,
                       f"{len(findings)} finding(s)" if findings else "", log)
     assert check.command is not None
-    try:
-        completed = subprocess.run(check.command, cwd=context.root, capture_output=True,
-                                   text=True, timeout=TIMEOUT_SECONDS, check=False)
-        output, code = completed.stdout + completed.stderr, completed.returncode
-    except (OSError, subprocess.TimeoutExpired) as error:
-        output, code = str(error), 1
+    prefix = ""
+    if check.probe is not None:
+        prefix, failure = run_probe(check.probe, context.root)
+        if failure:
+            return Result(check.name, "fail", check.command, None, failure, prefix)
+    output, code = run_command(check.command, context.root)
     return Result(check.name, "pass" if code == 0 else "fail", check.command, code,
-                  "" if code == 0 else f"exit code {code}", output)
+                  "" if code == 0 else f"exit code {code}", prefix + output)
+
+
+def run_probe(probe: Probe, root: Path) -> tuple[str, str | None]:
+    """The probe's log, and why it does not prove the check can fail, or None if it does."""
+    output, code = run_command(probe.command, root)
+    log = f"probe: $ {' '.join(probe.command)}\n{output.rstrip()}\n"
+    if code != 0 and probe.finding in output:
+        return log + f"probe: rejected as expected (exit code {code})\n\n", None
+    found = "exited 0" if code == 0 else f"exited {code} without reporting {probe.finding!r}"
+    log += (f"FAIL: the probe {found}; the tool must exit non-zero and report "
+            f"{probe.finding!r} before the check can pass\n")
+    return log, f"probe not rejected: {found}"
+
+
+def run_command(command: list[str], root: Path) -> tuple[str, int]:
+    """A command's combined output and exit code; 1 when it cannot run or times out."""
+    try:
+        completed = subprocess.run(command, cwd=root, capture_output=True, text=True,
+                                   timeout=TIMEOUT_SECONDS, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return str(error), 1
+    return completed.stdout + completed.stderr, completed.returncode
 
 
 def missing_result(check: Check, reason: str, strict: bool) -> Result:

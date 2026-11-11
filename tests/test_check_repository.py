@@ -390,6 +390,77 @@ class RunTest(RepositoryTest):
         summary = (self.root / "test-results/integrity/summary.md").read_text(encoding="utf-8")
         self.assertIn("| `advice` | ⚠️ warn | advisory, not a failure: exit code 1 |", summary)
 
+    def fake_actionlint(self, probe: tuple[int, str], workflows: int) -> list[Check]:
+        """The real actionlint check, run by a fake actionlint on PATH.
+
+        The fake answers the probe with an exit code and an output, and the
+        lint of the workflows, which it runs without a file argument, with an
+        exit code.
+        """
+        folder = self.root.parent / f"{self.root.name}-bin"
+        folder.mkdir()
+        self.addCleanup(shutil.rmtree, folder, ignore_errors=True)
+        fake = folder / "actionlint"
+        fake.write_text(f"#!{sys.executable}\nimport sys\n"
+                        f"if {check_repository.ACTIONLINT_PROBE!r} in sys.argv:\n"
+                        f"    print({probe[1]!r})\n    sys.exit({probe[0]})\n"
+                        f"print('linted the workflows')\nsys.exit({workflows})\n",
+                        encoding="utf-8")
+        fake.chmod(0o755)
+        with mock.patch.dict(os.environ, {"PATH": f"{folder}{os.pathsep}{os.environ['PATH']}"}):
+            listed = [check for check in check_repository.checks(self.context())
+                      if check.name == "actionlint"]
+        self.assertEqual(listed[0].command, [str(fake), "-no-color"])
+        self.commit()
+        return listed
+
+    REJECTED = (1, f"{check_repository.ACTIONLINT_PROBE}:19:9: "
+                   f"{check_repository.ACTIONLINT_PROBE_FINDING} for step [syntax-check]")
+
+    @unittest.skipIf(os.name == "nt", "the fake actionlint is a script with a shebang line")
+    def test_actionlint_that_accepts_the_probe_fails_without_linting(self) -> None:
+        listed = self.fake_actionlint((0, "no problems"), workflows=0)
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 1, printed)
+        self.assertIn("actionlint: FAIL (probe not rejected: exited 0)", printed)
+        self.assertIn("the tool must exit non-zero and report 'unexpected key \"bogus-key\"'",
+                      printed)
+        self.assertNotIn("linted the workflows", printed)
+        self.assertEqual((report["checks"][0]["status"], report["checks"][0]["exit_code"]),
+                         ("fail", None))
+
+    @unittest.skipIf(os.name == "nt", "the fake actionlint is a script with a shebang line")
+    def test_actionlint_that_fails_the_probe_without_the_finding_fails(self) -> None:
+        listed = self.fake_actionlint((1, "cannot read the file"), workflows=0)
+        code, printed, _ = self.run_checks(listed)
+        self.assertEqual(code, 1, printed)
+        self.assertIn("actionlint: FAIL (probe not rejected: exited 1 without reporting "
+                      "'unexpected key \"bogus-key\"')", printed)
+        self.assertNotIn("linted the workflows", printed)
+
+    @unittest.skipIf(os.name == "nt", "the fake actionlint is a script with a shebang line")
+    def test_actionlint_that_rejects_the_probe_lints_the_workflows(self) -> None:
+        listed = self.fake_actionlint(self.REJECTED, workflows=0)
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 0, printed)
+        self.assertIn("actionlint: PASS", printed)
+        self.assertEqual(report["checks"][0]["exit_code"], 0)
+        log = (self.root / "test-results/integrity/actionlint.log").read_text("utf-8")
+        fake = self.root.parent / f"{self.root.name}-bin/actionlint"
+        self.assertIn(f"probe: $ {fake} -no-color "
+                      f"{check_repository.ACTIONLINT_PROBE}\n{self.REJECTED[1]}\n"
+                      "probe: rejected as expected (exit code 1)\n", log)
+        self.assertTrue(log.endswith("linted the workflows\n"), log)
+
+    @unittest.skipIf(os.name == "nt", "the fake actionlint is a script with a shebang line")
+    def test_actionlint_that_rejects_the_workflows_fails(self) -> None:
+        listed = self.fake_actionlint(self.REJECTED, workflows=1)
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 1, printed)
+        self.assertIn("actionlint: FAIL (exit code 1)", printed)
+        self.assertIn("linted the workflows", printed)
+        self.assertEqual(report["checks"][0]["exit_code"], 1)
+
     def test_github_annotations(self) -> None:
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
             self.assertEqual(check_repository.annotate(("a.md", "bad")), "::error file=a.md::bad")

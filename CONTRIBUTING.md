@@ -113,7 +113,7 @@ either, `changelog` runs without `--repository`.
 | `tests` | `python -m unittest discover -s tests -v` |
 | `ruff` | `python -m ruff check --no-cache tools tests` |
 | `mypy` | `python -m mypy --no-incremental` |
-| `actionlint` | `actionlint -no-color` |
+| `actionlint` | `actionlint -no-color`, once the probe `actionlint -no-color .github/actionlint/invalid-workflow.yml` has failed with `unexpected key "bogus-key"` |
 | `labels-sync-self-test` | `node .github/scripts/labels-sync.mjs --self-test` |
 | `labels-catalogue` | `node .github/scripts/labels-sync.mjs --mode validate` |
 | `labels-drift-self-test` | `node .github/scripts/labels-drift.mjs --self-test` |
