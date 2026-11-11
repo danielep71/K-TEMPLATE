@@ -153,8 +153,36 @@ def environments(finding: str) -> set[str]:
     return set(match.group(1).split(", ")) if match else set()
 
 
-# (source, register, text every finding contains, environments that report it).
-CAPTURE_INVALID: dict[str, tuple[str, str | None, str, tuple[str, ...]]] = {
+QUALIFIED = BASE.replace("NativeSetLastError 0", "TEST_Native.NativeSetLastError 0") \
+    .replace("Call NativeSetLastError(0)", "Call test_native.NativeSetLastError(0)") \
+    .replace("= NativeTlsGetValue(", "= TEST_Native.NativeTlsGetValue(") \
+    .replace("= SetEnvironmentVariableW(", "= TEST_Native . SetEnvironmentVariableW(")
+CLEAR_CALL = "    ApiOK = SetEnvironmentVariableW(StrPtr(VariableName), 0)\n"
+CONDITION = "inside a condition, a single-line If or a larger expression"
+
+# A correct capture, written another way: each must pass in every environment.
+CAPTURE_VALID: dict[str, str] = {
+    "calls-qualified-by-the-module-name": QUALIFIED,
+    "statement-call-with-call": changed(
+        CLEAR_CALL, "    Call SetEnvironmentVariableW(StrPtr(VariableName), 0)\n"),
+    "statement-call-without-call": changed(
+        CLEAR_CALL, "    SetEnvironmentVariableW StrPtr(VariableName), 0\n"),
+    "statement-call-with-a-parenthesized-argument": changed(
+        CLEAR_CALL, "    TEST_Native.SetEnvironmentVariableW (StrPtr(VariableName)), 0\n"),
+    "line-continuations": changed(
+        CLEAR_CAPTURE, CLEAR_CAPTURE.replace("= Err", "= _\n        Err"), changed(
+            CLEAR_CALL, "    ApiOK = SetEnvironmentVariableW( _\n        StrPtr(VariableName), 0)\n")),
+    "call-and-capture-inside-a-with-block": changed(
+        CLEAR_CALL + CLEAR_CAPTURE,
+        "    With ThisWorkbook\n        ApiOK = SetEnvironmentVariableW(StrPtr(.Name), 0)\n"
+        "        DllError = Err.LastDllError\n    End With\n    If ApiOK = 0 Then\n"),
+    "nested-parentheses-and-a-comment": changed(
+        VBA7_CALL, VBA7_CALL.replace("(SlotIndex)\n", "((SlotIndex) + CLng(0)) ' (x)\n")),
+}
+
+# (source, register, the texts the findings contain, each finding at least
+# one of them, and the environments that report them).
+CAPTURE_INVALID: dict[str, tuple[str, str | None, str | tuple[str, ...], tuple[str, ...]]] = {
     "statement-between-call-and-capture": (
         changed(CLEAR_CAPTURE, "    FailMsg = vbNullString\n" + CLEAR_CAPTURE),
         None, "not directly after a native call", ALL),
@@ -188,10 +216,46 @@ CAPTURE_INVALID: dict[str, tuple[str, str | None, str, tuple[str, ...]]] = {
         None, "without SetLastError 0 directly before it", LEGACY),
     "expression-after-the-ambiguous-call-in-the-vba7-branch": (
         changed(VBA7_CALL, VBA7_CALL.replace("(SlotIndex)\n", "(SlotIndex) + (1)\n")),
-        None, "without assigning its result to a local variable", VBA7),
+        None, ("without assigning its result to a local variable", CONDITION), VBA7),
     "second-call-after-the-ambiguous-call-in-the-legacy-branch": (
         changed(LEGACY_CALL, LEGACY_CALL.replace("(SlotIndex)\n", "(SlotIndex) Or CLng(0)\n")),
-        None, "without assigning its result to a local variable", LEGACY),
+        None, ("without assigning its result to a local variable", CONDITION), LEGACY),
+    "qualified-ambiguous-call-without-clear-or-capture": (
+        QUALIFIED.replace("    TEST_Native.NativeSetLastError 0\n", "")
+        .replace("    Call test_native.NativeSetLastError(0)\n", "")
+        .replace(SLOT_CAPTURE, "    If SlotValue"),
+        None, ("without SetLastError 0 directly before it",
+               "without <local> = Err.LastDllError directly after it"), ALL),
+    "ambiguous-call-qualified-by-another-module": (
+        changed(VBA7_CALL, VBA7_CALL.replace("= Native", "= TEST_Other.Native")),
+        None, "after the statement of line 33, not directly after a native call", VBA7),
+    "ambiguous-call-in-a-single-line-if": (
+        changed(VBA7_CALL, VBA7_CALL.replace("    SlotValue =",
+                                             "    If SlotIndex > 0 Then SlotValue =")),
+        None, ("without assigning its result to a local variable", CONDITION), VBA7),
+    "call-in-a-single-line-if-that-clears-the-error": (
+        changed(CLEAR_CALL, "    If SetEnvironmentVariableW(StrPtr(VariableName), 0) = 0 "
+                            "Then Err.Clear\n"),
+        None, CONDITION, ALL),
+    "call-and-capture-in-a-single-line-if": (
+        changed(CLEAR_CALL + CLEAR_CAPTURE,
+                "    If VariableName <> vbNullString Then ApiOK = SetEnvironmentVariableW("
+                "StrPtr(VariableName), 0): DllError = Err.LastDllError\n    If ApiOK = 0 Then\n"),
+        None, CONDITION, ALL),
+    "call-in-an-if-condition-before-the-capture": (
+        changed(CLEAR_CALL + CLEAR_CAPTURE,
+                "    If SetEnvironmentVariableW(StrPtr(VariableName), 0) = 0 Then\n"
+                "        DllError = Err.LastDllError\n"),
+        None, CONDITION, ALL),
+    "call-in-a-select-case-before-the-capture": (
+        changed(CLEAR_CALL + CLEAR_CAPTURE,
+                "    Select Case SetEnvironmentVariableW(StrPtr(VariableName), 0)\n"
+                "    Case 0\n        DllError = Err.LastDllError\n    End Select\n"
+                "    If ApiOK = 0 Then\n"),
+        None, "not directly after a native call", ALL),
+    "call-compared-in-an-assignment": (
+        changed(CLEAR_CALL, "    ApiOK = SetEnvironmentVariableW(StrPtr(VariableName), 0) = 0\n"),
+        None, CONDITION, ALL),
     "with-err-clears-before-the-capture": (
         changed(CLEAR_CAPTURE, "    With Err\n        .Clear\n        DllError = .LastDllError\n"
                                "    End With\n    If ApiOK = 0 Then\n"),
@@ -259,11 +323,15 @@ REGISTER_INVALID: dict[str, tuple[str, str]] = {
 
 
 class DeclareTest(unittest.TestCase):
-    def assertReported(self, found: list[str], text: str, expected: tuple[str, ...]) -> None:
+    def assertReported(self, found: list[str], text: str | tuple[str, ...],
+                       expected: tuple[str, ...]) -> None:
+        texts = (text,) if isinstance(text, str) else text
         self.assertTrue(found, "no finding")
         for finding in found:
             self.assertTrue(finding.startswith(f"{MODULE}:"), finding)
-            self.assertIn(text, finding)
+            self.assertTrue(any(item in finding for item in texts), finding)
+        for item in texts:
+            self.assertTrue(any(item in finding for finding in found), (item, found))
         self.assertEqual(set().union(*map(environments, found)), set(expected), found)
 
     def test_repository_register_is_valid_and_empty(self) -> None:
@@ -292,10 +360,10 @@ class DeclareTest(unittest.TestCase):
         self.assertEqual(findings(register_text=register(upper)), [])
         self.assertEqual(findings(BASE.replace('Lib "kernel32"', 'Lib "kernel32.dll"')), [])
 
-    def test_whole_call_with_nested_parentheses_passes(self) -> None:
-        nested = changed(VBA7_CALL, VBA7_CALL.replace("(SlotIndex)\n",
-                                                      "((SlotIndex) + CLng(0)) ' (x)\n"))
-        self.assertEqual(findings(nested), [])
+    def test_other_forms_of_a_correct_capture_pass(self) -> None:
+        for name, source in CAPTURE_VALID.items():
+            with self.subTest(name=name):
+                self.assertEqual(findings(source), [])
 
     def test_strings_and_comments_are_not_reads(self) -> None:
         # BASE quotes Err.LastDllError in a string and in a comment of ReadSlot.

@@ -16,22 +16,26 @@ cannot drift while another stays correct:
   already copied into ``Err.LastDllError``;
 - ``Err.LastDllError`` is read only as ``<local> = Err.LastDllError``, into a
   ``Dim`` or ``Static`` variable of the procedure, in the statement directly
-  after a call to a ``Declare``; a ``.LastDllError`` read inside a
+  after one that is exactly a call to a ``Declare`` (``Name args``,
+  ``Call Name(args)`` or ``<variable> = Name(args)``, the name alone or
+  qualified by the module's name), not a call inside a condition, a
+  single-line If or an expression; a ``.LastDllError`` read inside a
   ``With Err`` block, or through another qualifier, is rejected, since the
   ``With`` statement already stands between the call and the read;
 - a call to an export the register marks ``zero_is_ambiguous``, whose zero
   result may mean success or failure, assigns its result, and nothing else,
-  to a local variable in the call statement, is directly preceded by ``SetLastError 0`` (or
-  ``Call SetLastError(0)``) through a ``Declare`` of the ``SetLastError``
-  export, and is directly followed by that capture.
+  to a local variable in the call statement, is directly preceded by
+  ``SetLastError 0`` (or ``Call SetLastError(0)``) through a ``Declare`` of
+  the ``SetLastError`` export, and is directly followed by that capture.
 
 A ``Declare`` is private to its module (check_vba_public_api.py rejects a
-public one in a standard module), so a call resolves to a ``Declare`` of the
-calling module. The check reads statements in order, not control flow: a jump
-into the middle of a sequence, and an error replaced inside the call itself,
-are not seen. It does not compare a ``Declare``'s parameters or return type
-with the export's signature. docs/VBA_HOUSE_STYLE.md, Static checks, lists
-its limits.
+public one in a standard module, and VBA one in a class), so a call resolves
+to a ``Declare`` of the calling module, by its name alone or qualified by the
+module's name, the component's file name. The check reads statements in
+order, not control flow: a jump into the middle of a sequence, and an error
+replaced inside the call itself, are not seen. It does not compare a
+``Declare``'s parameters or return type with the export's signature.
+docs/VBA_HOUSE_STYLE.md, Static checks, lists its limits.
 """
 
 from __future__ import annotations
@@ -83,12 +87,14 @@ LINE_NUMBER = re.compile(r"^\s*\d+(?=\s)")
 # With Err block, or one through another qualifier such as VBA.Err.
 LAST_DLL_ERROR = re.compile(r"\.\s*LastDllError\b", re.I)
 PLAIN_LAST_DLL_ERROR = re.compile(r"(?<![\w.!])Err\s*\.\s*LastDllError\b", re.I)
-CAPTURE = re.compile(rf"^\s*(?:Let\s+)?(?P<local>{NAME})\s*=\s*Err\s*\.\s*LastDllError\s*$",
-                     re.I)
-CLEAR = re.compile(rf"^\s*(?:Call\s+)?(?P<name>{NAME})\s*(?:\(\s*0&?\s*\)|\s0&?)\s*$", re.I)
+CAPTURE = re.compile(rf"^\s*(?:Let\s+)?(?P<local>{NAME}){SUFFIX}\s*=\s*Err\s*\.\s*LastDllError"
+                     r"\s*$", re.I)
 ON_ERROR = re.compile(r"^\s*On\s+Error\b", re.I)
-# A name that is not the member of an object or of a With block.
-WORD = re.compile(rf"(?<![\w.!])(?P<name>{NAME})")
+# A name, alone or after one qualifier, that is not itself the member of an
+# object or of a With block: Name, or Module.Name.
+WORD = re.compile(rf"(?<![\w.!])(?:(?P<qualifier>{NAME})\s*\.\s*)?(?P<name>{NAME})")
+ASSIGNMENT = re.compile(rf"^\s*(?:Let\s+)?(?P<variable>{NAME}){SUFFIX}\s*=\s*", re.I)
+EXPLICIT_CALL = re.compile(r"^\s*Call\s+", re.I)
 
 
 @dataclass(frozen=True)
@@ -180,6 +186,8 @@ class Procedure:
 
 @dataclass
 class Module:
+    # The component's name, which may qualify a call to its own Declare.
+    name: str
     declared: dict[str, Declared] = field(default_factory=dict)
     procedures: list[Procedure] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
@@ -209,7 +217,7 @@ def declaration(path: str, lines: list[str], start: int, end: int,
 def scan(path: str, source: str) -> Module:
     """The Declare statements and the procedure bodies of one environment's source."""
     lines = source.split("\n")
-    module = Module()
+    module = Module(Path(path).stem)
     current: Procedure | None = None
     for start, end, kind, code in logical_units(lines, blank_strings=True):
         if kind == "directive":
@@ -245,31 +253,93 @@ def local_or_statement(procedure: Procedure, line: int, statement: str) -> None:
         procedure.body.append((line, statement))
 
 
-def called(statement: str, declared: dict[str, Declared]) -> list[Declared]:
-    """The Declares a statement names, each once, in order."""
+@dataclass(frozen=True)
+class NativeCall:
+    """A statement that is exactly one call to a Declare."""
+
+    item: Declared
+    # The variable the result is assigned to, or None for a statement call.
+    variable: str | None
+    arguments: str
+
+
+def declare_at(text: str, module: Module) -> tuple[Declared, str] | None:
+    """The Declare that ``text`` starts with, as ``Name`` or ``<module>.Name``,
+    and the text after it."""
+    match = WORD.match(text)
+    if match is None or (match.group("qualifier") and
+                         match.group("qualifier").casefold() != module.name.casefold()):
+        return None
+    item = module.declared.get(match.group("name").casefold())
+    rest = text[match.end():]
+    suffix = re.match(SUFFIX, rest)
+    rest = rest[suffix.end():] if suffix else rest
+    if item is None or rest[:1].isalnum() or rest[:1] in "_.!":
+        return None
+    return item, rest
+
+
+def native_call(statement: str | None, module: Module) -> NativeCall | None:
+    """The call, when ``statement`` is exactly one call to a Declare of the module:
+    ``Name args``, ``Call Name(args)`` or ``<variable> = Name(args)``, the name
+    alone or qualified by the module's name. A call inside a condition, a
+    single-line If or a larger expression is not one."""
+    if statement is None:
+        return None
+    assignment = ASSIGNMENT.match(statement)
+    explicit = EXPLICIT_CALL.match(statement)
+    head = assignment or explicit
+    found = declare_at(statement[head.end():] if head else statement.lstrip(), module)
+    if found is None:
+        return None
+    item, rest = found
+    if head is None:
+        # A statement call: its arguments, if any, follow a space or a parenthesis.
+        if rest.strip() and (not rest[:1].isspace() and rest[:1] != "("
+                             or rest.lstrip().startswith("=")):
+            return None
+        return NativeCall(item, None, rest.strip())
+    rest = rest.strip()
+    arguments = ""
+    if rest.startswith("("):
+        end = closing_parenthesis(rest, 0)
+        if end is None:
+            return None
+        arguments, rest = rest[1:end], rest[end + 1:]
+    if rest.strip():
+        return None
+    return NativeCall(item, assignment.group("variable") if assignment else None,
+                      arguments.strip())
+
+
+def called(statement: str, module: Module) -> list[Declared]:
+    """The Declares a statement names, alone or qualified by the module's name,
+    each once, in order."""
     found: dict[str, Declared] = {}
     for match in WORD.finditer(statement):
-        item = declared.get(match.group("name").casefold())
+        if match.group("qualifier") and \
+                match.group("qualifier").casefold() != module.name.casefold():
+            continue
+        item = module.declared.get(match.group("name").casefold())
         if item is not None:
             found.setdefault(item.name.casefold(), item)
     return list(found.values())
 
 
-def is_clear(statement: str | None, declared: dict[str, Declared]) -> bool:
+def is_clear(statement: str | None, module: Module) -> bool:
     """Whether a statement is SetLastError 0, through any Declare of that export."""
-    match = CLEAR.match(statement or "")
-    item = declared.get(match.group("name").casefold()) if match else None
-    return item is not None and item.export.casefold() == "setlasterror"
+    call = native_call(statement, module)
+    return call is not None and call.variable is None and \
+        call.item.export.casefold() == "setlasterror" and \
+        re.fullmatch(r"\(?\s*0&?\s*\)?", call.arguments) is not None
 
 
-def native_call(statement: str | None, declared: dict[str, Declared]) -> bool:
-    """Whether a statement calls a Declare other than SetLastError."""
-    return statement is not None and any(item.export.casefold() != "setlasterror"
-                                         for item in called(statement, declared))
+def reads_error(call: NativeCall | None) -> bool:
+    """Whether a capture may follow this call: one to a Declare other than SetLastError."""
+    return call is not None and call.item.export.casefold() != "setlasterror"
 
 
-def capture_problem(procedure: Procedure, index: int, declared: dict[str, Declared]
-                    ) -> str | None:
+def capture_problem(procedure: Procedure, index: int, module: Module) -> str | None:
     """What is wrong with the Err.LastDllError read of ``procedure.body[index]``."""
     statement = procedure.body[index][1]
     if len(LAST_DLL_ERROR.findall(statement)) != len(PLAIN_LAST_DLL_ERROR.findall(statement)):
@@ -291,42 +361,33 @@ def capture_problem(procedure: Procedure, index: int, declared: dict[str, Declar
     if ON_ERROR.match(before):
         return (f"{procedure.name} reads Err.LastDllError after the On Error statement of "
                 f"line {line}, which clears it; read it directly after the native call")
-    if not native_call(before, declared):
-        return (f"{procedure.name} reads Err.LastDllError after the statement of line "
-                f"{line}, not directly after a native call")
-    return None
-
-
-def assigned_call(statement: str, name: str) -> str | None:
-    """The variable of ``<variable> = Name`` or ``<variable> = Name(<arguments>)``,
-    with balanced parentheses and nothing after them; None for any other statement."""
-    head = re.match(rf"^\s*(?:Let\s+)?(?P<local>{NAME})\s*=\s*{re.escape(name)}{SUFFIX}(?!\w)\s*",
-                    statement, re.I)
-    if head is None:
+    if reads_error(native_call(before, module)):
         return None
-    rest = statement[head.end():]
-    if rest.startswith("("):
-        end = closing_parenthesis(rest, 0)
-        if end is None:
-            return None
-        rest = rest[end + 1:]
-    return head.group("local") if not rest.strip() else None
+    inner = [item.name for item in called(before, module)
+             if item.export.casefold() != "setlasterror"]
+    if inner:
+        return (f"{procedure.name} reads Err.LastDllError after the statement of line "
+                f"{line}, which calls {inner[0]} inside a condition, a single-line If or a "
+                "larger expression; call it in a statement of its own, then capture")
+    return (f"{procedure.name} reads Err.LastDllError after the statement of line "
+            f"{line}, not directly after a native call")
 
 
 def ambiguous_problems(procedure: Procedure, index: int, item: Declared,
-                       declared: dict[str, Declared]) -> list[str]:
+                       module: Module) -> list[str]:
     """What is wrong around a call to an export whose zero result is ambiguous."""
     body = procedure.body
     statement = body[index][1]
     before = body[index - 1][1] if index else None
     after = body[index + 1][1] if index + 1 < len(body) else None
     call = f"{procedure.name} calls {item.name} ({item.export}), whose zero result is ambiguous,"
-    result = assigned_call(statement, item.name)
+    result = native_call(statement, module)
     problems = []
-    if result is None or result.casefold() not in procedure.locals:
+    if result is None or result.item != item or result.variable is None or \
+            result.variable.casefold() not in procedure.locals:
         problems.append(f"{call} without assigning its result to a local variable in the "
                         "call statement")
-    if not is_clear(before, declared):
+    if not is_clear(before, module):
         problems.append(f"{call} without SetLastError 0 directly before it")
     capture = CAPTURE.match(after or "")
     if capture is None or capture.group("local").casefold() not in procedure.locals:
@@ -334,19 +395,19 @@ def ambiguous_problems(procedure: Procedure, index: int, item: Declared,
     return problems
 
 
-def procedure_findings(path: str, procedure: Procedure, declared: dict[str, Declared],
+def procedure_findings(path: str, procedure: Procedure, module: Module,
                        register: dict[tuple[str, str], Entry]) -> Iterator[Finding]:
     """The capture findings of one procedure in one environment."""
     for index, (line, statement) in enumerate(procedure.body):
         if LAST_DLL_ERROR.search(statement):
-            problem = capture_problem(procedure, index, declared)
+            problem = capture_problem(procedure, index, module)
             if problem:
                 yield Finding(path, line, problem)
-        for item in called(statement, declared):
+        for item in called(statement, module):
             entry = register.get(export_key(item.export, item.library))
             if entry is not None and entry.zero_is_ambiguous:
                 yield from (Finding(path, line, problem)
-                            for problem in ambiguous_problems(procedure, index, item, declared))
+                            for problem in ambiguous_problems(procedure, index, item, module))
 
 
 def analyze_source(path: str, source: str, register: dict[tuple[str, str], Entry]
@@ -364,7 +425,7 @@ def analyze_source(path: str, source: str, register: dict[tuple[str, str], Entry
                                                      f"{item.export} from {item.library}, "
                                                      f"which {REGISTER} does not list"))
     for procedure in module.procedures:
-        findings.extend(procedure_findings(path, procedure, module.declared, register))
+        findings.extend(procedure_findings(path, procedure, module, register))
     return findings
 
 

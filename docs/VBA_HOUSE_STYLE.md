@@ -63,7 +63,11 @@ Every `Declare` imports an export listed in the
 `docs/native-declarations.json`. Read a native error from `Err.LastDllError`,
 never from a declared `GetLastError`, and copy it to a local variable in the
 statement directly after the call: `Err.Clear`, any `On Error` statement and
-the next native call replace it. Write the read as `Err.LastDllError`, never
+the next native call replace it. Make the call a statement of its own:
+`Name args`, `Call Name(args)` or `<variable> = Name(args)`, with the name
+alone or qualified by its own module's name. A call inside a condition, a
+single-line `If` or a larger expression is not followed by a capture, since
+the code that runs after it can replace the error first. Write the read as `Err.LastDllError`, never
 as `.LastDllError` in a `With Err` block, whose `With` statement already
 stands between the call and the read. When the register marks an export's
 zero result as ambiguous, clear the error with `SetLastError 0` directly
@@ -208,7 +212,7 @@ integrity** reports its findings as a warning, not a failure.
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
 | `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
-| `tools/check_vba_declares.py` | In each environment: every `Declare` imports an export that `docs/native-declarations.json` lists with its library, matched by its `Alias`, or else its name, ignoring case; no `Declare` of `GetLastError`; `Err.LastDllError` is read only as `<local> = Err.LastDllError`, into a `Dim` or `Static` variable, in the statement directly after a `Declare` call, and never as `.LastDllError` in a `With Err` block or through another qualifier; a call to an export registered as ambiguous on zero assigns its result, and nothing else, to a local variable, directly after `SetLastError 0` and directly before that capture; the register has the documented shape |
+| `tools/check_vba_declares.py` | In each environment: every `Declare` imports an export that `docs/native-declarations.json` lists with its library, matched by its `Alias`, or else its name, ignoring case; no `Declare` of `GetLastError`; `Err.LastDllError` is read only as `<local> = Err.LastDllError`, into a `Dim` or `Static` variable, in the statement directly after a statement that is one `Declare` call (`Name args`, `Call Name(args)` or `<variable> = Name(args)`, the name alone or qualified by its module's name), never after a call inside a condition, a single-line `If` or an expression, and never as `.LastDllError` in a `With Err` block or through another qualifier; a call to an export registered as ambiguous on zero assigns its result, and nothing else, to a local variable, directly after `SetLastError 0` and directly before that capture; the register has the documented shape |
 | `tools/check_vba_calls.py` (advisory) | In each environment, for every call that resolves to a procedure of the project, a statement call (`Name args`, `Call Name(args)`, `Module.Name args`) or a call with parentheses in an expression (`x = Helper(1)`): no more arguments than the procedure accepts and every required one passed, counting `Optional` parameters, a `ParamArray` and named arguments (`Name:=Value`); no named argument the procedure does not declare; no qualified call to a `Private` procedure of another module |
 
 What they cannot prove:
@@ -247,7 +251,10 @@ What they cannot prove:
 - the native declaration check reads the statements of a procedure in
   order: it follows no jump, so a `GoTo` past the call is not seen, nor an
   error replaced inside the call itself. It compares a `Declare` with the
-  register by export and library only, not by parameters or return type;
+  register by export and library only, not by parameters or return type. A
+  `Declare` is private to its module, so it resolves a call to a `Declare`
+  of the calling module only, by its name alone or qualified by the
+  module's name;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 

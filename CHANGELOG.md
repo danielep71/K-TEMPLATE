@@ -71,8 +71,9 @@ Use only the categories an entry needs.
   template. In each compilation environment it reports, with file, line and
   environment, a `Declare` whose export and library the register does not
   list, a `Declare` of `GetLastError`, a read of `Err.LastDllError` other than
-  `<local> = Err.LastDllError` directly after a native call, such as
-  `.LastDllError` in a `With Err` block, and a call to an export registered
+  `<local> = Err.LastDllError` directly after a statement that is one native
+  call, such as a read after a call inside a single-line `If` or a condition,
+  or `.LastDllError` in a `With Err` block, and a call to an export registered
   as ambiguous on zero that is not directly preceded by `SetLastError 0`,
   whose whole result is not assigned to a local variable, or that is not
   directly followed by that capture. A repository with a `Declare` must register its export. The
