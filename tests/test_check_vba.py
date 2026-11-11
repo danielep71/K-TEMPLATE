@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import check_vba_calls  # noqa: E402
 import check_vba_conditionals  # noqa: E402
 import check_vba_dependencies  # noqa: E402
+import check_vba_errors  # noqa: E402
 import check_vba_identifiers  # noqa: E402
 import check_vba_jumps  # noqa: E402
 import check_vba_public_api  # noqa: E402
@@ -1684,6 +1685,160 @@ class CallTest(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(check_vba_calls.main(["--root", str(root)]), expected)
                 self.assertIn("resolved call(s); static check", output.getvalue())
+
+
+def handler(statements: str) -> str:
+    """A procedure whose handler, from line 9, runs ``statements``; the
+    module header takes lines 1 to 3."""
+    return ("Private Sub First(ByVal Retry As Boolean)\n"
+            "        Dim Number As Long, Source As String, Text As String\n"
+            "        On Error GoTo Handler\n"
+            "        Exit Sub\n"
+            "Handler:\n" + statements + "End Sub\n\n\n"
+            "Private Sub Helper()\nEnd Sub\n\n\n"
+            "Private Sub Report(ByVal Value As Variant)\nEnd Sub\n")
+
+
+def guarded(statements: str) -> str:
+    """A procedure that runs ``statements`` from line 7, after On Error Resume
+    Next at line 6."""
+    return ("Private Sub First(ByVal Retry As Boolean)\n"
+            "        Dim Number As Long, Flag As Boolean, Text As String\n"
+            "        On Error Resume Next\n" + statements + "End Sub\n\n\n"
+            "Private Sub Helper()\nEnd Sub\n\n\n"
+            "Private Sub Report(ByVal Value As Variant)\nEnd Sub\n")
+
+
+ERRORS_VALID = {
+    "copied-before-any-call": handler(
+        "        Number = Err.Number\n        Source = Err.Source\n"
+        "        Text = Err.Description\n        Helper\n        Debug.Print Text\n"
+        "        Err.Raise Number, Source, Text\n"),
+    "arguments-read-before-the-call": handler(
+        '        Report "failed: " & Err.Description\n'),
+    "raise-again-first": handler("        Err.Raise Err.Number, Err.Source, Err.Description\n"),
+    "pure-conversions": handler(
+        "        Number = CLng(Err.Number)\n"
+        '        Source = IIf(Len(Err.Source) > 0, Err.Source, "First")\n'
+        "        Text = CStr(Err.Description)\n        Helper\n"),
+    "plain-copies-and-literals": handler(
+        "        Retry = False\n        Number = -1\n        Text = Source\n"
+        "        Number = Err.Number\n"),
+    "concatenation-in-a-handler": handler(
+        '        Text = "failed: " & Source\n        Number = Err.Number\n'),
+    "resume-next-guard": guarded(
+        "        Helper\n        If Err.Number <> 0 Then Exit Sub\n        On Error GoTo 0\n"),
+    "resume-next-copy-after-the-call": guarded(
+        "        Helper\n        Number = Err.Number\n        Text = Err.Description\n"
+        "        On Error GoTo 0\n"),
+    "resume-next-concatenation-is-the-operation": guarded(
+        '        Text = "failed: " & Text\n        Number = Err.Number\n'),
+    "block-if-ends-the-segment": handler(
+        "        If Retry Then\n            Helper\n        End If\n"
+        "        Report Err.Description\n"),
+    "single-line-if-ends-the-segment": handler(
+        "        If Retry Then Helper\n        Report Err.Source\n"),
+    "loop-ends-the-segment": handler(
+        "        Do While Retry\n            Helper\n        Loop\n        Report Err.Number\n"),
+    "label-starts-a-segment": handler(
+        "        Helper\nAgain:\n        Report Err.Number\n"),
+    "err-in-strings-and-comments": handler(
+        "        Helper\n        Debug.Print \"Err.Number\" ' Err.Description\n"),
+    "array-element-in-a-handler": handler(
+        "        Dim Values(1 To 2) As Long\n        Number = Values(1)\n"
+        "        Text = Err.Description\n"),
+}
+ERRORS_INVALID = {
+    "after-a-call": (handler("        Helper\n        Report Err.Description\n"), 10,
+                     "Err.Description read in First after line 9, which may have changed Err "
+                     "with a call or member access"),
+    "after-debug-print": (handler('        Debug.Print "failed"\n'
+                                  "        Err.Raise Err.Number, Err.Source, Err.Description\n"),
+                          10, "Err.Number, Err.Source, Err.Description read in First after line 9"),
+    "after-a-host-property": (handler("        Application.StatusBar = False\n"
+                                      "        Number = Err.Number\n"), 10,
+                              "Err.Number read in First after line 9, which may have changed"),
+    "after-err-clear": (handler("        Err.Clear\n        Number = Err.Number\n"), 10,
+                        "Err.Number read in First after line 9"),
+    "after-a-function-result": (handler("        Text = Format$(Now, \"yyyy\") & Describe(1)\n"
+                                        "        Source = Err.Source\n"), 10,
+                                "Err.Source read in First after line 9"),
+    "after-on-error-in-a-handler": (handler("        On Error GoTo 0\n"
+                                            "        Report Err.Description\n"), 10,
+                                    "Err.Description read in First after line 9, which cleared "
+                                    "Err with an On Error statement"),
+    "after-a-plain-copy-only": (handler("        Helper\n        Retry = False\n"
+                                        "        Number = Err.Number\n"), 11,
+                                "Err.Number read in First after line 9"),
+    "inside-a-branch": (handler("        If Retry Then\n            Helper\n"
+                                "            Report Err.Number\n        End If\n"), 11,
+                        "Err.Number read in First after line 10"),
+    "on-the-line-of-the-handler-label": (
+        handler("").replace("Handler:\n", "Handler: Helper: Number = Err.Number\n"), 8,
+        "Err.Number read in First after line 8"),
+    "guard-after-on-error-goto-0": (guarded("        Helper\n        On Error GoTo 0\n"
+                                            "        If Err.Number <> 0 Then Exit Sub\n"), 9,
+                                    "Err.Number read in First after line 8, which cleared Err"),
+    "resume-next-before-any-operation": (guarded("        Report Err.Description\n"), 7,
+                                         "Err.Description read in First after line 6"),
+    "resume-next-flag-is-no-operation": (guarded("        Flag = False\n"
+                                                 "        Number = Err.Number\n"), 8,
+                                         "Err.Number read in First after line 6"),
+    "select-case-after-on-error": (guarded("        Helper\n        On Error GoTo 0\n"
+                                           "        Select Case Err.Number\n"
+                                           "        End Select\n"), 9,
+                                   "Err.Number read in First after line 8"),
+}
+ALL_ENVIRONMENTS = "[vba6-win32, vba7-win32, vba7-win64]"
+
+
+class ErrorTest(unittest.TestCase):
+    def test_valid_fixtures_pass(self) -> None:
+        self.assertEqual(run_check(check_vba_errors.check, VALID), [])
+        for name, body in ERRORS_VALID.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_errors.check, standalone(module(body))), [])
+
+    def test_invalid_fixtures_fail(self) -> None:
+        for name, (body, line, text) in ERRORS_INVALID.items():
+            with self.subTest(name=name):
+                findings = run_check(check_vba_errors.check, standalone(module(body)))
+                self.assertEqual(len(findings), 1, findings)
+                self.assertTrue(findings[0].startswith(f"tests/modules/TEST_Fixture.bas:{line}: "),
+                                findings)
+                self.assertIn(text, findings[0])
+                self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
+
+    def test_each_environment_is_analyzed_separately(self) -> None:
+        # The call that makes the read stale exists in one #If branch only;
+        # the finding names the environments of that branch, once.
+        body = handler("#If VBA7 Then\n        Helper\n#Else\n        Number = 0\n#End If\n"
+                       "        Report Err.Description\n")
+        findings = run_check(check_vba_errors.check, standalone(module(body)))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].startswith("tests/modules/TEST_Fixture.bas:14: "), findings)
+        self.assertIn("after line 10, which may have changed Err", findings[0])
+        self.assertTrue(findings[0].endswith("[vba7-win32, vba7-win64]"), findings)
+        legacy = body.replace("#If VBA7 Then", "#If Not VBA7 Then")
+        findings = run_check(check_vba_errors.check, standalone(module(legacy)))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].endswith("[vba6-win32]"), findings)
+
+    def test_counts_and_exit_codes(self) -> None:
+        invalid = standalone(module(ERRORS_INVALID["after-a-call"][0]))
+        for files, expected, counted in (({}, 0, "0 VBA component(s), 0 procedure(s)"),
+                                         (VALID, 0, "7 VBA component(s), 6 procedure(s)"),
+                                         (invalid, 1, "1 VBA component(s), 3 procedure(s)")):
+            with self.subTest(counted=counted), repository(files) as root, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(check_vba_errors.main(["--root", str(root)]), expected)
+                verdict = output.getvalue().splitlines()[-1]
+                self.assertIn("PASS" if expected == 0 else "FAIL", verdict)
+                self.assertIn(f"({counted}; static check, nothing compiled or run)", verdict)
+
+    def test_repository_vba_has_no_findings(self) -> None:
+        findings, _, _ = check_vba_errors.check(ROOT)
+        self.assertEqual(findings, [])
 
 
 class MainTest(unittest.TestCase):

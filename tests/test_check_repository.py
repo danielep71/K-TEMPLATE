@@ -421,11 +421,14 @@ class RunTest(RepositoryTest):
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "secret-files",
-                         "vba-format", "vba-calls", "data-contract", "test-cases", "derivations",
-                         "independent-implementations", "workbook-protection",
+                         "vba-format", "vba-errors", "vba-calls", "data-contract", "test-cases",
+                         "derivations", "independent-implementations", "workbook-protection",
                          "changelog", "generated-docs", "markdown-links", "documented-commands",
                          "codeql-default-branch", "whitespace-committed"):
             self.assertIn(expected, names)
+        advisory = {check.name for check in check_repository.checks(self.context())
+                    if check.advisory}
+        self.assertNotIn("vba-errors", advisory)
         # Only --ci checks the working tree, after every other check.
         self.assertNotIn("clean-working-tree", names)
         in_ci = check_repository.checks(self.context(ci=True))
