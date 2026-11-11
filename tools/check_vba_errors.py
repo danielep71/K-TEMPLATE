@@ -45,9 +45,14 @@ in a handler a call or member access makes the read stale, as in
 after it, as ``&`` in ``a & b / Err.Number``; it counts as running before.
 A name qualified by the VBA library or one of its modules (``VBA.CLng``,
 ``VBA.Strings.Len``, ``VBA.vbCrLf``, ``VBA.Beep``, ``VBA.Mid``) is VBA's, as
-unqualified, whatever the project declares.
-Assigning a property of ``Err`` (``Err.Description = x``) writes it and
-reads nothing, and ``.Number`` inside ``With Err`` reads ``Err.Number``.
+unqualified, whatever the project declares; a module name alone, as in
+``Strings.Len``, only when no value, component or procedure of the project
+has that name.
+Reading or writing any property of ``Err`` (``Number``, ``Source``,
+``Description``, ``HelpFile``, ``HelpContext``, ``LastDllError``) is data:
+it changes nothing, and only a read of the first three is checked. Assigning
+one (``Err.Description = x``) reads nothing of it, and ``.Number`` inside
+``With Err`` reads ``Err.Number``. ``Err.Clear`` and ``Err.Raise`` are calls.
 ``Err`` read through its default member (``n = Err``), ``Err`` passed to a
 procedure and ``Erl`` are not followed.
 
@@ -92,6 +97,11 @@ from vba_lexer import (
 ROOT = Path(__file__).resolve().parents[1]
 ERR_READ = re.compile(r"(?<![\w.!])(?:VBA\s*\.\s*)?Err\s*\.\s*(Number|Source|Description)\b",
                       re.IGNORECASE)
+# Every property of Err: reading or writing one is data, not a call. Only
+# Number, Source and Description are checked for being read stale.
+ERR_PROPERTY = re.compile(r"(?<![\w.!])(?:VBA\s*\.\s*)?Err\s*\.\s*"
+                          r"(?:Number|Source|Description|HelpFile|HelpContext|LastDllError)\b",
+                          re.IGNORECASE)
 ON_ERROR = re.compile(r"^On\s+Error\b", re.IGNORECASE)
 RESUME_NEXT = re.compile(r"^On\s+Error\s+Resume\s+Next\b", re.IGNORECASE)
 HANDLER = re.compile(r"\bOn\s+Error\s+GoTo\s+([A-Za-z_]\w*|\d+)", re.IGNORECASE)
@@ -111,10 +121,13 @@ WITH_MEMBER = re.compile(r"(?<![\w)\].!])\.(?=\s*[A-Za-z_])")
 # enclosing call (the last name only, as in .Method of obj.Method(), since
 # obj is read first) and an operator, which both run after the operand.
 # The VBA library and its modules, as in VBA.CLng, VBA.Strings.Len or
-# Strings.Len: what they qualify is VBA's, whatever the project declares.
-VBA_MODULE = (r"(?:Constants|Conversion|DateTime|FileSystem|Financial|Information|Interaction"
-              r"|Math|Strings)\s*\.\s*")
-VBA_QUALIFIER = rf"(?:VBA\s*\.\s*(?:{VBA_MODULE})?|{VBA_MODULE})"
+# Strings.Len: what VBA. qualifies is VBA's, whatever the project declares; a
+# module name alone is VBA's only when nothing of the project has that name
+# (library_qualifier).
+VBA_MODULES = (r"Constants|Conversion|DateTime|FileSystem|Financial|Information|Interaction"
+               r"|Math|Strings")
+VBA_QUALIFIER = (rf"(?:VBA\s*\.\s*(?:(?:{VBA_MODULES})\s*\.\s*)?"
+                 rf"|(?P<module>{VBA_MODULES})\s*\.\s*)")
 VBA_HEAD = re.compile(rf"^{VBA_QUALIFIER}", re.IGNORECASE)
 ENCLOSING_CALL = re.compile(rf"(?:(?<![\w.!]){VBA_QUALIFIER}|\.\s*)?[A-Za-z_]\w*[%&!#@$]?\s*$",
                             re.IGNORECASE)
@@ -269,6 +282,17 @@ def arithmetic(text: str) -> bool:
     return False
 
 
+def library_qualifier(match: re.Match[str] | None, names: Names) -> bool:
+    """Whether ``match``, of a pattern built on VBA_QUALIFIER, names VBA's
+    library: always after VBA., and for a module name alone, such as
+    Strings, only when no value, component or procedure of the project has
+    that name."""
+    if match is None:
+        return False
+    module = match.group("module")
+    return module is None or module.casefold() not in names.values | names.callables
+
+
 def effect(text: str, names: Names) -> Effect:
     """What evaluating the expression ``text`` can do to Err; strings are blanked.
 
@@ -277,11 +301,14 @@ def effect(text: str, names: Names) -> Effect:
     function or property of the project, a Declare, or a member of the host's
     global object, such as ActiveSheet, called without parentheses. Only a
     name the project does not declare can be a VBA function or constant."""
-    text = ERR_READ.sub(lambda match: "0" * len(match.group()), text)
+    text = ERR_PROPERTY.sub(lambda match: "0" * len(match.group()), text)
+
+    def library(match: re.Match[str]) -> str:
+        return "0" * len(match.group()) if library_qualifier(match, names) else match.group()
+
     # A qualified VBA function can fail, as CLng("x") does, but runs no project code.
-    qualified = VBA_PURE.search(text) is not None
-    text = VBA_PURE.sub(lambda match: "0" * len(match.group()), text)
-    text = VBA_CONSTANT.sub(lambda match: "0" * len(match.group()), text)
+    qualified = any(library_qualifier(match, names) for match in VBA_PURE.finditer(text))
+    text = VBA_CONSTANT.sub(library, VBA_PURE.sub(library, text))
     text = NUMBER_LITERAL.sub(lambda match: "0" * len(match.group()), dates_as_values(text))
     result = Effect(fails=arithmetic(text) or qualified)
     if MEMBER.search(text) or NEW.search(text):
@@ -344,6 +371,8 @@ def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
     # A procedure of the project named like a VBA statement, such as Beep,
     # shadows it, unless the statement is qualified, as in VBA.Beep.
     qualifier = VBA_HEAD.match(statement)
+    if not library_qualifier(qualifier, names):
+        qualifier = None
     unqualified = statement[qualifier.end():] if qualifier else statement
     builtin = BUILTIN_STATEMENT.match(unqualified)
     if builtin and (qualifier or unqualified.split(None, 1)[0].casefold() not in names.callables):
@@ -388,7 +417,7 @@ def target_effect(target: str, names: Names) -> Effect:
     its name, a member (x.y = 1, .y = 1 in a With block), or a property of
     the host, such as Caption, which runs code. VBA.Mid(Text, 1, 1) is Mid."""
     qualifier = VBA_HEAD.match(target)
-    if qualifier:
+    if qualifier and library_qualifier(qualifier, names):
         rest = target[qualifier.end():]
         index = rest.find("(")
         if (rest[:index] if index > 0 else rest).rstrip("%&!#@$ ").casefold() in BUILTIN_TARGETS:

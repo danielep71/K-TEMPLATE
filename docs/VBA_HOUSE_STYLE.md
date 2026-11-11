@@ -259,6 +259,11 @@ What they cannot prove:
     `Report Err.Number, Helper()` is not. An operator written before a read
     may run after it, as `&` in `a & b / Err.Number`; it counts as running
     before;
+  - reading or writing any property of `Err` changes nothing, but only a
+    read of `Number`, `Source` or `Description` is checked: a stale read of
+    `HelpFile`, `HelpContext` or `LastDllError` is not reported. A VBA module
+    name alone, as in `Strings.Len`, counts as VBA's only when no parameter,
+    variable, component or procedure of the project has that name;
   - it does not follow `Err` read through its default member (`n = Err`,
     `If Err Then`), `Err` passed to a procedure, or `Erl`. The default
     member of another object (`x = Target` for a `Range`) counts as a copy,

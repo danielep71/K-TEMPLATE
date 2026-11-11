@@ -1804,6 +1804,19 @@ ERRORS_VALID = {
         " As Long()", "        Number = Fetch(1)\n        Number = Err.Number\n"),
     "own-name-indexes-a-variant-result": fetch(
         "", "        Number = Fetch(1)\n        Number = Err.Number\n"),
+    "other-err-properties-are-data": handler(
+        "        Text = Err.HelpFile\n        Number = Err.HelpContext\n"
+        "        Number = Err.LastDllError\n        Number = VBA.Err.HelpContext\n"
+        "        Number = Err.Number\n"),
+    "context-added-then-raised-again-with-help": handler(
+        '        Err.Description = "context: " & Err.Description\n'
+        "        Err.Raise Err.Number, Err.Source, Err.Description, Err.HelpFile, "
+        "Err.HelpContext\n"),
+    "with-err-other-properties": handler(
+        "        With Err\n            Text = .HelpFile\n            Number = .HelpContext\n"
+        "            Number = .Number\n        End With\n"),
+    "help-properties-are-not-checked-for-staleness": handler(
+        "        Helper\n        Text = Err.HelpFile\n        Number = Err.HelpContext\n"),
     "resume-next-qualified-conversion-can-fail": guarded(
         '        Number = VBA.CLng("bad")\n        Number = Err.Number\n'),
     "resume-next-qualified-len-can-fail": guarded(
@@ -1919,6 +1932,10 @@ ERRORS_INVALID = {
     "recursive-call": (
         fetch(" As Long", "        Number = Fetch(True)\n        Number = Err.Number\n"), 10,
         "Err.Number read in Fetch after line 9, which may have changed Err"),
+    "module-name-that-is-a-parameter": (
+        handler("        Number = Strings.Len(1)\n        Number = Err.Number\n").replace(
+            "ByVal Retry As Boolean", "ByVal Strings As Object"), 10,
+        "Err.Number read in First after line 9"),
     "call-before-a-read-in-the-same-statement": (
         handler("        Number = Describe() + Err.Number\n") + DESCRIBE, 9,
         "Err.Number read in First after a call or member access that the same statement "
@@ -1963,6 +1980,9 @@ class ErrorTest(unittest.TestCase):
                    "\n\nPrivate Property Let Mid(ByVal Value As String)\nEnd Property\n")
         other = ('Attribute VB_Name = "TEST_Shadow"\nOption Explicit\nOption Private Module\n'
                  "Public Function Trim(ByVal Value As String) As String\nEnd Function\n")
+        # A project module named like a module of the VBA library.
+        math = ('Attribute VB_Name = "Math"\nOption Explicit\nOption Private Module\n'
+                "Public Function Abs(ByVal Value As Double) As Double\nEnd Function\n")
         cases = {
             "        Text = Format(1)\n        Number = Err.Number\n": 10,
             "        Beep\n        Number = Err.Number\n": 10,
@@ -1971,11 +1991,13 @@ class ErrorTest(unittest.TestCase):
             "        Text = Trim(Text)\n        Number = Err.Number\n": 10,
             "        Text = VBA.Format(1)\n        Number = Err.Number\n": None,
             "        Text = VBA.Trim$(Text)\n        Number = Err.Number\n": None,
+            "        Number = Math.Abs(1)\n        Number = Err.Number\n": 10,
+            "        Number = VBA.Math.Abs(1)\n        Number = Err.Number\n": None,
         }
         for statements, line in cases.items():
             with self.subTest(statements=statements):
                 files = {**standalone(module(handler(statements) + shadows)),
-                         "tests/modules/TEST_Shadow.bas": other}
+                         "tests/modules/TEST_Shadow.bas": other, "tests/modules/Math.bas": math}
                 findings = run_check(check_vba_errors.check, files)
                 if line is None:
                     self.assertEqual(findings, [])
