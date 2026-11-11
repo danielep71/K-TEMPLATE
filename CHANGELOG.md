@@ -63,6 +63,21 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- **Repository integrity** runs an eighth static check of exported VBA,
+  `vba-declares` (`tools/check_vba_declares.py`), on the new register of
+  native declarations, `docs/native-declarations.json`, which is empty in the
+  template. In each compilation environment it reports, with file, line and
+  environment, a `Declare` whose export and library the register does not
+  list, a `Declare` of `GetLastError`, a read of `Err.LastDllError` other than
+  `<local> = Err.LastDllError` directly after a native call, and a call to an
+  export registered as ambiguous on zero that is not directly preceded by
+  `SetLastError 0`, assigned to a local variable and directly followed by
+  that capture. A repository with a `Declare` must register its export. The
+  house style, the structure guide and the setup guide document the rules
+  and the register; nothing was run in Excel (#398).
+
 ### Fixed
 
 - The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims
