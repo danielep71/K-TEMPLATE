@@ -63,6 +63,24 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- `tools/check_excel_run.py --equivalent-to SHA` lets one Excel run certify a
+  later commit that changes none of the run's inputs, such as a fix to a
+  workflow or a guide. The evidence and the binding are still checked against
+  `--commit`, the commit the workbook was built from. Then every run input
+  must have the same Git blob at both commits: the VBA components and form
+  resources, the files of the build configuration's directories, the
+  methodology guides, fixtures, expected results and accuracy contracts, the
+  build configuration, the layout template, the evidence policy,
+  `.gitattributes` and the build tools. A difference fails and names each
+  path; a match prints
+  `Equivalent: <SHA> (N run inputs identical to <commit>)`, and the report
+  names both commits. `INSTALLATION.md`,
+  `RELEASING.md` step 4, the release certification record and the pull
+  request guide and template say when such a run counts and that its record
+  names both commits (#402).
+
 ### Fixed
 
 - The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims

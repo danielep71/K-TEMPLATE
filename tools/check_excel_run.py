@@ -76,6 +76,30 @@ the modules the run called, each when it was first used. Any other run must
 record compile=PASS from Debug > Compile VBAProject, which a person can run
 without Trust access.
 
+With --equivalent-to, one run certifies another commit too: the evidence is
+checked against --commit, the commit the workbook was built from, exactly as
+above, binding included, and then every run input must have the same Git blob
+at both commits, none added or removed. The run inputs are the files that
+decide what a build writes, what Excel runs and what this check reads:
+
+- every VBA component and form resource of the tree, which source identity
+  compares;
+- every file in a directory of a configuration of tools/devbuild/workbook.json
+  at either commit, and in src/workbook/, the home of the document modules
+  and of the layout template;
+- every file the accuracy check reads (CASE_PATHS): the methodology guides,
+  the fixtures, which the suites also read, the expected results and the
+  accuracy contracts;
+- tools/devbuild/workbook.json itself, the layout template, the evidence
+  policy, .gitattributes, which sets the bytes Git checks these files out
+  with, and the build tools (BUILD_TOOLS). A rebuild uses the build tools of
+  the checkout that runs this check, so they must be those of the build.
+
+A run input that differs, or exists at only one commit, is a finding that
+names it. This check is not a run input: run it from a checkout of the
+commit to certify. The workbook's stamp and the results still name the
+commit it was built from, so the report names both commits.
+
 It proves only that this evidence is consistent with the commit. It does not
 run Excel, and a PASS validates a calculation only as far as the commit's
 accuracy contracts and their reference values do.
@@ -163,6 +187,13 @@ REBUILT_CONFIGURATION = "development"
 # What tools/check_accuracy.py reads of a commit to measure its contracts.
 CASE_PATHS = ("docs/methodology", "tests/fixtures", "tests/expected",
               check_accuracy.REGISTRY.parent.as_posix())
+# The modules of tools/devbuild/ whose code decides the bytes of a build:
+# build_workbook.py and what it loads from its own directory
+# (tests/test_check_excel_run.py keeps the two equal).
+BUILD_TOOLS = ("tools/devbuild/build_workbook.py", "tools/devbuild/vba_project.py")
+# The single files among the run inputs of --equivalent-to; the directories
+# come from CASE_PATHS and the build configuration (run_input_paths).
+RUN_INPUT_FILES = (".gitattributes", BUILD_CONFIG, build_workbook.TEMPLATE, POLICY, *BUILD_TOOLS)
 
 VB_OBJECT_ERROR = -2147221504
 # ERR_TEST_FAILED as vbObjectError + n, or as the literal &H8004xxxx equal to it.
@@ -360,6 +391,7 @@ class Evidence:
     binding_notes: list[str] = field(default_factory=list)
     accuracy: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    equivalence: str = ""
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -1150,9 +1182,73 @@ def suite_findings(policy: Policy | ProjectSuite, suite: Suite, source: bytes,
     return findings
 
 
+def tree_blobs(root: Path, commit: str) -> dict[str, str]:
+    """Every file of the commit, by path, with its Git blob id."""
+    blobs = {}
+    for entry in filter(None, git(root, "ls-tree", "-r", "-z", "--full-tree", commit)
+                        .split(b"\0")):
+        info, _, path = entry.partition(b"\t")
+        _, kind, blob = info.decode("ascii").split()
+        if kind == "blob":
+            blobs[path.decode("utf-8")] = blob
+    return blobs
+
+
+def configured_directories(root: Path, commit: str) -> set[str]:
+    """The source directories of every configuration of the commit's build
+    configuration; none when the commit has no build configuration, whose
+    absence is itself compared. ValueError when it names none."""
+    try:
+        git(root, "cat-file", "-e", f"{commit}:{BUILD_CONFIG}")
+    except RuntimeError:
+        return set()
+    try:
+        data = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
+        directories = {str(item).strip("/") for paths in data["configurations"].values()
+                       for item in paths}
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise ValueError(f"{BUILD_CONFIG} at {commit[:12]} names no configuration "
+                         f"directories: {error!r}") from error
+    return {item for item in directories if item not in ("", ".")}
+
+
+def run_input_paths(directories: set[str], paths: set[str]) -> set[str]:
+    """Those of ``paths`` that are run inputs, given the configuration directories."""
+    homes = {*directories, *CASE_PATHS, build_workbook.DOCUMENT_HOME}
+    return {path for path in paths
+            if path in RUN_INPUT_FILES or path.lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)
+            or any(path.startswith(f"{home}/") for home in homes)}
+
+
+def check_equivalence(root: Path, commit: str, target: str, evidence: Evidence) -> None:
+    """Every run input has the same Git blob at ``commit``, the commit the workbook
+    was built from, and at ``target``, the commit to certify; a finding names each
+    one that differs or exists at only one of them."""
+    try:
+        directories = configured_directories(root, commit) | \
+            configured_directories(root, target)
+        built, other = tree_blobs(root, commit), tree_blobs(root, target)
+    except (ValueError, RuntimeError) as error:
+        evidence.findings.append(f"cannot compare the run inputs of {commit[:12]} and "
+                                 f"{target[:12]}: {error}")
+        return
+    inputs = run_input_paths(directories, set(built) | set(other))
+    changed = sorted(path for path in inputs if built.get(path) != other.get(path))
+    for path in changed:
+        where = (f"only at {commit[:12]}, not at {target[:12]}" if path not in other else
+                 f"only at {target[:12]}, not at {commit[:12]}" if path not in built else
+                 f"differs between {commit[:12]} and {target[:12]}")
+        evidence.findings.append(f"run input {path}: {where}, so the run does not certify "
+                                 f"{target[:12]}")
+    if not changed:
+        evidence.equivalence = f"{target} ({len(inputs)} run inputs identical to {commit})"
+
+
 def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
-          require_binding: bool = False) -> Evidence:
+          require_binding: bool = False, equivalent_to: str | None = None) -> Evidence:
     evidence = Evidence()
+    if equivalent_to is not None:
+        check_equivalence(root, commit, equivalent_to, evidence)
     try:
         policy = policy_at(root, commit)
     except PolicyError as error:
@@ -1196,11 +1292,13 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     return evidence
 
 
-def report(commit: str, evidence: Evidence) -> str:
+def report(commit: str, evidence: Evidence, equivalent_to: str | None = None) -> str:
     environment = "; ".join(f"{key}={evidence.environment.get(key, '')}"
                             for key in ENVIRONMENT_FIELDS)
-    lines = [f"Candidate commit: {commit}",
-             f"Environment: {environment}",
+    lines = [f"Candidate commit: {equivalent_to or commit}"]
+    if equivalent_to:
+        lines.append(f"Run commit: {commit} (the workbook was built from it)")
+    lines += [f"Environment: {environment}",
              f"Operator: {evidence.host.get('operator', '')}",
              f"Run: {evidence.host.get('started', '')} to {evidence.host.get('finished', '')}",
              f"Windows: {evidence.host.get('windows', '')}",
@@ -1217,6 +1315,8 @@ def report(commit: str, evidence: Evidence) -> str:
     lines += [f"Accuracy: {line}" for line in evidence.accuracy]
     notes = f" ({'; '.join(evidence.binding_notes)})" if evidence.binding_notes else ""
     lines.append(f"Binding: {evidence.binding}{notes}")
+    if evidence.equivalence:
+        lines.append(f"Equivalent: {evidence.equivalence}")
     lines += [f"FAIL: {finding}" for finding in evidence.findings]
     status = "FAIL" if evidence.findings else "PASS"
     lines.append(f"excel-run: {status} (evidence checked against the commit; Excel is not run "
@@ -1237,16 +1337,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                              "rebuild of the commit")
     parser.add_argument("--require-binding", action="store_true",
                         help="fail unless the binding is VERIFIED (release evidence)")
+    parser.add_argument("--equivalent-to", metavar="SHA",
+                        help="the full SHA of a commit to certify with this run: every run "
+                             "input must have the same Git blob there as at --commit")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    try:
-        commit = git(root, "rev-parse", "--verify", f"{args.commit}^{{commit}}").decode().strip()
-    except RuntimeError as error:
-        print(f"FAIL: commit {args.commit} not found: {error}")
+    if args.equivalent_to is not None and not check_accuracy.SHA.fullmatch(args.equivalent_to):
+        print(f"FAIL: --equivalent-to {args.equivalent_to}: not a full lower-case commit SHA")
         return 1
-    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding)
-    print(report(commit, evidence))
+    resolved = []
+    for name in (args.commit, args.equivalent_to):
+        if name is None:
+            continue
+        try:
+            resolved.append(git(root, "rev-parse", "--verify",
+                                f"{name}^{{commit}}").decode().strip())
+        except RuntimeError as error:
+            print(f"FAIL: commit {name} not found: {error}")
+            return 1
+    commit, target = resolved[0], (resolved[1] if len(resolved) > 1 else None)
+    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding, target)
+    print(report(commit, evidence, target))
     return 1 if evidence.findings else 0
 
 

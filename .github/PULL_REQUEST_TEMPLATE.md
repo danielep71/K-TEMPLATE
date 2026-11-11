@@ -49,7 +49,7 @@ every case run counts as a pass. Rules: docs/repo_governance/PULL_REQUESTS.md. -
 
 | Item | Result |
 | --- | --- |
-| Exact commit | <!-- Full SHA of the source imported --> |
+| Exact commit | <!-- Full SHA of the source imported; or "run at <SHA>, equivalent" with the Equivalent: line of check_excel_run.py --equivalent-to --> |
 | Excel build and bitness, Windows version | |
 | `Debug → Compile VBAProject` | <!-- PASS / FAIL / ON_DEMAND (the one-command run) / NOT RUN, with a reason --> |
 | Suite and mode | |
