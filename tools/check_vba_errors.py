@@ -17,12 +17,44 @@ cleared or may have replaced the error it means to read:
   Declare of the module, or a public one of a standard module, shadows a VBA
   function, statement, statement target or constant of its name, as in VBA,
   while ``VBA.Format`` still names the VBA function. ``Err`` and ``Erl``
-  always mean VBA's.
+  always mean VBA's. Within the project, a name, bare or first in a dotted
+  name, means what the nearest scope level declares (Scope.resolve): the
+  procedure's parameters, variables and own name (the result of a
+  Function or Property Get, of its declared type); then any declaration of
+  its module; then a public one of another component; then a component. A
+  procedure there wins over a variable of a farther level, and the reverse.
+  When that is not certain, a dotted name is a member access: when it
+  starts, unqualified, with a variable that two components declare
+  publicly, when it goes through a Type or Enum that two components
+  declare, or when its type is qualified by anything but the component
+  that declares it (``As VBA.Collection``). A name qualified by its
+  component, as ``Module.Kept``, is resolved in that component.
+  A dotted name is a member access unless it reads a value (Scope.value): a
+  field of a variable declared ``As`` a user-defined Type of the project
+  (``Saved.Number``, ``Saved(i).Inner.Field``, ``.Number`` inside
+  ``With Saved``), an Enum member (``RunStatus.rsFailed``,
+  ``Module.RunStatus.rsFailed``), or a constant, Enum member or variable of
+  a standard module that its name qualifies (``Module.LIMIT``). A variable
+  of a class or object type, a class or document module and ``Me`` stay
+  member accesses. In a dotted name, an index is an element only on a name
+  declared as an array (``Name() As T``, ``Name(1 To 3) As T``, a
+  ``ReDim``): on an object, a Variant or an undeclared type it may call a
+  default property, as ``Owner(1)`` does on a Collection, and it stays a
+  member access; an index before a dot that holds a parenthesis, as in
+  ``Saved(Count(1)).Number``, is one too. A bare ``C(1)`` is read as an
+  element, even on a Collection, whose Item it calls. The part
+  a dotted name reaches must hold data: a value type (Long, String, Date,
+  ...), an Enum or a user-defined Type. Reading or assigning an object, a
+  class or a Variant calls its default property, so ``Number = rec.Owner``
+  stays a member access, even when the Variant holds a plain value. So does
+  ``Set Book = rec.Owner``: a variable declared ``As New`` runs its class's
+  Class_Initialize when it is first read.
   In the same way, an assignment (``=``, ``Let``, ``Set``, ``LSet``,
-  ``RSet``) to anything but a variable, an array element or a statement
-  target (``Date``, ``Mid(Text, 1, 1)``) sets a property, a call made once
-  the value is read: a Property Let or Set of the project, a member
-  (``.Value = x`` in a ``With`` block) or a property of the host.
+  ``RSet``) to anything but a variable, such a field or value, an array
+  element or a statement target (``Date``, ``Mid(Text, 1, 1)``) sets a
+  property, a call made once the value is read: a Property Let or Set of
+  the project, a member (``.Value = x`` in a ``With`` block) or a property
+  of the host.
 
 After ``On Error Resume Next``, and outside a handler, ``Err`` belongs to the
 most recent statement that runs anything, since any of them can fail, even
@@ -94,7 +126,7 @@ from pathlib import Path
 
 from check_vba_calls import dates_as_values
 from check_vba_conditionals import reachable_sources
-from check_vba_identifiers import Module, closing_parenthesis, scan, top_level_split
+from check_vba_identifiers import Module, closing_parenthesis, scan, statements, top_level_split
 from check_vba_jumps import PROC_CLOSE, is_procedure, label_at_start
 from vba_lexer import (
     Finding,
@@ -120,6 +152,9 @@ HANDLER = re.compile(r"\bOn\s+Error\s+GoTo\s+([A-Za-z_]\w*|\d+)", re.IGNORECASE)
 # may hold an Else and the statements after it.
 SINGLE_LINE_IF = re.compile(r"^If\b(?P<condition>.*?)\bThen\b(?P<tail>.*)$", re.IGNORECASE)
 IF_OR_ELSE = re.compile(r"\b(?:If|Else)\b", re.IGNORECASE)
+# The types that a suffix gives a name, as Fetch$ is a String.
+SUFFIX_TYPES = {"%": "integer", "&": "long", "!": "single", "#": "double", "@": "currency",
+                "$": "string"}
 # The declared result of a function or Property Get, after its parameters.
 RESULT_TYPE = re.compile(r"^\s*As\s+(?P<type>[A-Za-z_][\w.]*)\s*(?P<array>\(\s*\))?",
                          re.IGNORECASE)
@@ -161,10 +196,14 @@ WITH = re.compile(r"^With\b", re.IGNORECASE)
 END_WITH = re.compile(r"^End\s+With\b", re.IGNORECASE)
 # Statements of the VBA language that can fail but run no project code: only
 # their operands are expressions, and the words of their syntax are not names.
+BUILTIN_STATEMENTS = (
+    "ReDim", "Erase", "Open", "Close", "Print", "Write", "Input", "Line Input", "Get", "Put",
+    "Seek", "Lock", "Unlock", "Kill", "MkDir", "RmDir", "ChDir", "ChDrive", "FileCopy", "Name",
+    "SetAttr", "Randomize", "Beep", "Reset", "Width", "Error", "AppActivate", "SaveSetting",
+    "DeleteSetting", "SendKeys")
 BUILTIN_STATEMENT = re.compile(
-    r"^(?:ReDim(?:\s+Preserve)?|Erase|Open|Close|Print|Write|Input|Line\s+Input|Get|Put|Seek"
-    r"|Lock|Unlock|Kill|MkDir|RmDir|ChDir|ChDrive|FileCopy|Name|SetAttr|Randomize|Beep|Reset"
-    r"|Width|Error|AppActivate|SaveSetting|DeleteSetting|SendKeys)\b", re.IGNORECASE)
+    r"^(?:ReDim\s+Preserve|" + "|".join(name.replace(" ", r"\s+") for name in BUILTIN_STATEMENTS)
+    + r")\b", re.IGNORECASE)
 CALL_KEYWORD = re.compile(r"^Call\s+", re.IGNORECASE)
 # The type of a variable that ReDim declares, as in ReDim a(1 To n) As Long,
 # As New Thing or As String * 10: a name of a type, not a value or a call.
@@ -212,6 +251,37 @@ PURE_FUNCTIONS = frozenset("""
 VBA_PURE = re.compile(rf"(?<![\w.!]){VBA_QUALIFIER}(?:{'|'.join(sorted(PURE_FUNCTIONS))})\b"
                       r"[%&!#@$]?", re.IGNORECASE)
 VBA_CONSTANT = re.compile(rf"(?<![\w.!]){VBA_QUALIFIER}vb\w*", re.IGNORECASE)
+# A dotted name, each part with an optional index, as in Saved(i).Inner.Field or
+# Module.Enum.member; an index holds no parentheses of its own.
+CHAIN = re.compile(r"(?<![\w.!#])[A-Za-z_]\w*[%&!#@$]?(?:\s*\([^()]*\))?"
+                   r"(?:\s*\.\s*[A-Za-z_]\w*[%&!#@$]?(?:\s*\([^()]*\))?)+")
+CHAIN_PART = re.compile(r"([A-Za-z_]\w*)[%&!#@$]?|\(([^()]*)\)")
+# What a variable, parameter or field is declared as: its type, in lower
+# case with its qualifier (codes.payload) and "" when undeclared, and whether
+# it is an array, as Name() or Name(1 To 3) declares it.
+Declared = tuple[str, bool]
+# A part of a dotted name, and whether an index follows it, as in Many(i).
+Link = tuple[str, bool]
+# The types whose value is data: reading or assigning one calls nothing, as an
+# object or a Variant may through its default property.
+VALUE_TYPES = frozenset("""
+    boolean byte currency date decimal double integer long longlong longptr single string
+""".split())
+# A declared name and its type, in a variable or parameter list or a Type:
+# Name, Name(1 To 3) As Long, ByRef Name As Record, WithEvents Name As Thing.
+DECLARED = re.compile(r"^\s*(?:(?:Optional|ByVal|ByRef|ParamArray|WithEvents)\s+)*"
+                      r"(?P<name>[A-Za-z]\w*)[%&!#@$]?\s*(?P<array>\(.*\))?\s*"
+                      r"(?:As\s+(?:New\s+)?(?P<type>[A-Za-z_][\w.]*))?", re.IGNORECASE)
+MODULE_VARIABLES = re.compile(r"^\s*(?P<vis>Dim|Public|Private|Global)\s+(?P<list>.*)$",
+                              re.IGNORECASE)
+LOCAL_VARIABLES = re.compile(r"^\s*(?P<keyword>Dim|Static|ReDim(?:\s+Preserve)?)\s+"
+                             r"(?P<list>.*)$", re.IGNORECASE)
+NOT_VARIABLES = re.compile(r"^\s*(?:(?:Public|Private|Global|Friend)\s+)?(?:Static\s+)?"
+                           r"(?:Const|Declare|Enum|Type|Event|Sub|Function|Property|Implements)\b",
+                           re.IGNORECASE)
+BLOCK_START = re.compile(r"^\s*(?:(?P<vis>Public|Private)\s+)?(?P<kind>Enum|Type)\s+"
+                         r"(?P<name>[A-Za-z]\w*)\s*$", re.IGNORECASE)
+BLOCK_END = re.compile(r"^\s*End\s+(?:Enum|Type)\b", re.IGNORECASE)
 # Prefixes of the constants of VBA (vbCrLf) and Excel (xlUp), which are values.
 CONSTANT_PREFIXES = ("vb", "xl")
 # Words that may stand in an expression without being a value that can fail.
@@ -251,6 +321,47 @@ class Procedure:
     header: str = ""
     units: list[tuple[int, str | None, list[str]]] = field(default_factory=list)
 
+    def variables(self) -> dict[str, Declared]:
+        """Its parameters, its own name when it holds its result (result) and
+        the variables it declares, with their types; ReDim declares an array,
+        keeping the type a Dim gave it."""
+        found: dict[str, Declared] = {}
+        if (own := self.result()) is not None:
+            found[self.name.casefold()] = own
+        opener = is_procedure(self.header)
+        rest = self.header[opener.end():].lstrip("%&!#@$") if opener else ""
+        end = closing_parenthesis(rest, 0) if rest.startswith("(") else None
+        if end is not None and rest[1:end].strip():
+            found.update(declared(rest[1:end]))
+        for _, _, unit in self.units:
+            for statement in unit:
+                local = LOCAL_VARIABLES.match(statement)
+                if local and local.group("keyword").casefold().startswith("redim"):
+                    for name, (kind, _) in declared(local.group("list")).items():
+                        found[name] = (kind or found.get(name, ("", True))[0], True)
+                elif local:
+                    found.update(declared(local.group("list")))
+        return found
+
+    def result(self) -> Declared | None:
+        """What the own name of a Function or Property Get, the variable that
+        holds its result, is declared as: its result type, or the type of its
+        suffix (Fetch$), else a Variant (""); None for a Sub or a Property
+        Let or Set, whose name holds nothing."""
+        opener = is_procedure(self.header)
+        kind = opener.group(1).casefold().split() if opener else []
+        if kind not in (["function"], ["property", "get"]) or opener is None:
+            return None
+        rest = self.header[opener.end():]
+        suffix = SUFFIX_TYPES.get(rest[:1], "")
+        rest = rest[1:] if suffix else rest
+        start = rest.find("(")
+        end = closing_parenthesis(rest, start) if start >= 0 and not rest[:start].strip() else None
+        result = RESULT_TYPE.match(rest[end + 1:] if end is not None else rest)
+        if result is None:
+            return suffix, False
+        return result.group("type").casefold(), result.group("array") is not None
+
     @property
     def calls_itself_with_arguments(self) -> bool:
         """Whether its own name with an argument list, as in Fetch(True), is a
@@ -258,20 +369,254 @@ class Procedure:
         Property Get whose declared result is neither an array nor a Variant,
         which may hold one. Without a declared type, the result is a Variant,
         unless a type suffix, as in Fetch$, gives one."""
-        opener = is_procedure(self.header)
-        if opener is None or opener.group(1).split()[0].casefold() not in {"function", "property"}:
+        result = self.result()
+        return result is not None and not result[1] and result[0] not in {"", "variant"}
+
+
+@dataclass
+class Declarations:
+    """What one component declares at module level that a dotted name can
+    reach without a call: its Enums and their members, its user-defined
+    Types and their fields, its variables and their types, and its values
+    (variables, constants, Enum members), each with the subset another
+    component sees. Types are lower-case names, "" when undeclared."""
+
+    standard: bool
+    enums: dict[str, frozenset[str]] = field(default_factory=dict)
+    types: dict[str, dict[str, Declared]] = field(default_factory=dict)
+    variables: dict[str, Declared] = field(default_factory=dict)
+    public: set[str] = field(default_factory=set)
+    values: frozenset[str] = frozenset()
+    public_values: frozenset[str] = frozenset()
+    callables: frozenset[str] = frozenset()
+    public_callables: frozenset[str] = frozenset()
+
+    def declares(self, name: str, public: bool) -> str | None:
+        """What ``name`` is here: "variable", "enum", "callable" or "value"
+        (a constant, an Enum member, a Type, a control); with ``public``, only
+        as another component sees it: a variable, value or procedure of a
+        standard module, or a public Enum of any module."""
+        if public and name not in self.public and name not in self.public_values \
+                and name not in self.public_callables:
+            return None
+        if name in self.enums:
+            return "enum"
+        if public and not self.standard:
+            return None
+        if name in self.variables:
+            return "variable"
+        if name in (self.public_callables if public else self.callables):
+            return "callable"
+        return "value" if name in (self.public_values if public else self.values) else None
+
+
+def declared(items: str) -> dict[str, Declared]:
+    """Each name of a declaration or parameter list, with what it is declared as."""
+    found = {}
+    for item in top_level_split(items):
+        match = DECLARED.match(item)
+        if match:
+            found[match.group("name").casefold()] = \
+                ((match.group("type") or "").casefold(),
+                 match.group("array") is not None)
+    return found
+
+
+def declarations(source: str, module: Module) -> Declarations:
+    """The module-level declarations of one component's source."""
+    result = Declarations(module.standard, values=frozenset(module.names - module.callables),
+                          public_values=frozenset(module.public - module.public_callables),
+                          callables=frozenset(module.callables),
+                          public_callables=frozenset(module.public_callables))
+    block: tuple[str, str] | None = None
+    members: dict[str, Declared] = {}
+    inside = False
+    for _, statement in statements(source):
+        if is_procedure(statement):
+            inside = True
+        elif PROC_CLOSE.match(statement):
+            inside = False
+        elif inside:
+            continue
+        elif block is not None:
+            if BLOCK_END.match(statement):
+                if block[0] == "enum":
+                    result.enums[block[1]] = frozenset(members)
+                else:
+                    result.types[block[1]] = members
+                block, members = None, {}
+            elif block[0] == "enum":
+                members[statement.split("=")[0].strip().strip("[]").casefold()] = ("", False)
+            else:
+                members.update(declared(statement))
+        elif opened := BLOCK_START.match(statement):
+            block = (opened.group("kind").casefold(), opened.group("name").casefold())
+            if (opened.group("vis") or "Public").casefold() == "public":
+                result.public.add(block[1])
+        elif (variables := MODULE_VARIABLES.match(statement)) and \
+                not NOT_VARIABLES.match(statement):
+            found = declared(variables.group("list"))
+            result.variables.update(found)
+            if variables.group("vis").casefold() in {"public", "global"}:
+                result.public.update(found)
+    return result
+
+
+@dataclass(frozen=True)
+class Scope:
+    """The declarations a procedure resolves a dotted name against: its own
+    variables and parameters (``local``), its component (``home``) and the
+    other components of the environment (``project``, by lower-case name)."""
+
+    home: str
+    local: dict[str, Declared]
+    project: dict[str, Declarations]
+
+    def resolve(self, name: str) -> tuple[str, Declarations | None]:
+        """What the unqualified ``name`` means here, as VBA resolves it, by
+        scope level: a parameter, variable or the procedure's own name; then
+        a declaration of the module, whatever its kind; then a public one of
+        another component; then a component. The kind is "local",
+        "variable", "enum", "callable", "value" or "component", with the
+        component that declares it; "" when nothing does."""
+        if name in self.local:
+            return "local", None
+        home = self.project.get(self.home)
+        if home is not None and (kind := home.declares(name, False)):
+            return kind, home
+        public = [(kind, found) for found in self.project.values()
+                  if found is not home and (kind := found.declares(name, True))]
+        if len(public) > 1:
+            return "ambiguous", None  # declared public in two components
+        if public:
+            return public[0]
+        return ("component", self.project[name]) if name in self.project else ("", None)
+
+    def unique(self, table: str, name: str) -> bool:
+        """Whether one component only declares the Type (``table`` "types")
+        or Enum ("enums") ``name``, so that no other one can shadow it."""
+        return sum(name in getattr(found, table) for found in self.project.values()) == 1
+
+    def variable(self, name: str, owner: str | None = None) -> Declared | None:
+        """What variable ``name`` is declared as, or None when it is no
+        variable or another declaration hides it; with ``owner``, only a
+        variable of that component."""
+        if owner is not None:
+            found = self.project.get(owner)
+            visible = found is not None and (owner == self.home or name in found.public)
+            return found.variables.get(name) if found is not None and visible else None
+        kind, found = self.resolve(name)
+        if kind == "local":
+            return self.local[name]
+        return found.variables[name] if kind == "variable" and found is not None else None
+
+    def owners(self, name: str, owner: str | None = None) -> list[Declarations]:
+        """The components whose declaration ``name`` this procedure sees: its
+        own first, then the others that make it public; with ``owner``, only
+        that component."""
+        homes = [owner or self.home] + ([] if owner else list(self.project))
+        return [found for home in homes if (found := self.project.get(home)) is not None
+                and (home == self.home or name in found.public)]
+
+    def members(self, name: str, owner: str | None = None) -> frozenset[str] | None:
+        """The members of the Enum ``name``, if this procedure sees one that
+        nothing else of that name hides and no other component declares; a
+        qualified name, as codes.kind, is looked up in that component only."""
+        qualifier, _, name = name.rpartition(".")
+        if not self.unique("enums", name):
+            return None
+        if qualifier:
+            found = self.project.get(qualifier)
+            return found.enums.get(name) if found is not None else None
+        if owner is None:
+            kind, found = self.resolve(name)
+            return found.enums[name] if kind == "enum" and found is not None else None
+        return next((found.enums[name] for found in self.owners(name, owner)
+                     if name in found.enums), None)
+
+    def fields(self, name: str) -> dict[str, Declared] | None:
+        """The fields of the user-defined Type ``name``, if this procedure sees
+        one and no other component declares one of that name; a qualified
+        name, as codes.payload, is looked up in that component only, and
+        VBA.Collection or Excel.Range, which name no component, are no Type."""
+        qualifier, _, name = name.rpartition(".")
+        if not self.unique("types", name):
+            return None
+        if qualifier:
+            found = self.project.get(qualifier)
+            return found.types.get(name) if found is not None else None
+        return next((found.types[name] for found in self.owners(name) if name in found.types),
+                    None)
+
+    def walk(self, declaration: Declared, links: list[Link]) -> Declared | None:
+        """What the dotted name ``links`` reaches, from its first part,
+        declared as ``declaration``, through the fields of user-defined Types;
+        None when a part is not such a field. An index is an element only on
+        an array: on anything else, an object or a Variant, it may call a
+        default property, as Owner(1) does on a Collection."""
+        for position, (_, indexed) in enumerate(links):
+            kind, array = declaration
+            if indexed != array and (indexed or position < len(links) - 1):
+                return None
+            if position == len(links) - 1:
+                return kind, array and not indexed
+            fields = self.fields(kind)
+            if fields is None or links[position + 1][0] not in fields:
+                return None
+            declaration = fields[links[position + 1][0]]
+        return None
+
+    def record(self, links: list[Link]) -> bool:
+        """Whether ``links`` name a variable of a user-defined Type, or a
+        field of one that is itself one, as With Saved needs."""
+        declaration = self.variable(links[0][0])
+        reached = self.walk(declaration, links) if declaration else None
+        return reached is not None and not reached[1] and self.fields(reached[0]) is not None
+
+    def data(self, reached: Declared | None) -> bool:
+        """Whether a part declared as ``reached`` is read or assigned without
+        a call: a value type, an Enum or a user-defined Type, whose copy runs
+        no code. An object, a class or a Variant is not: its value is its
+        default property, and even Set may create it, if declared As New."""
+        if reached is None:
             return False
-        if opener.group(1).casefold().replace(" ", "") in {"propertylet", "propertyset"}:
+        kind = reached[0]
+        return kind in VALUE_TYPES or self.members(kind) is not None \
+            or self.fields(kind) is not None
+
+    def value(self, links: list[Link], names: Names) -> bool:
+        """Whether the dotted name ``links`` reads a value without a call: a
+        field of a variable of a user-defined Type (Saved.Number,
+        Saved(i).Inner.Field), an Enum member (Kind.kOne), or a value of a
+        standard module named by it (Module.LIMIT, Module.Kind.kOne,
+        Module.Saved.Number). The part it reaches must hold data (data).
+        Anything else is a member access."""
+        (root, indexed), rest = links[0], links[1:]
+        kind, home = self.resolve(root)
+        declaration = self.variable(root)
+        if declaration is not None:
+            return self.data(self.walk(declaration, links))
+        if kind in {"callable", "value", "local", "variable"} or indexed:
             return False
-        rest = self.header[opener.end():]
-        suffix = rest[:1] in tuple("%&!#@$")
-        rest = rest[1:] if suffix else rest
-        start = rest.find("(")
-        end = closing_parenthesis(rest, start) if start >= 0 and not rest[:start].strip() else None
-        result = RESULT_TYPE.match(rest[end + 1:] if end is not None else rest)
-        if result is None:
-            return suffix
-        return result.group("array") is None and result.group("type").casefold() != "variant"
+        if kind == "component" and home is not None and home.standard and rest:
+            declaration = self.variable(rest[0][0], root)
+            if declaration is not None:
+                return self.data(self.walk(declaration, rest))
+            if len(rest) == 1:
+                own = root == self.home
+                return not rest[0][1] and rest[0][0] in (home.values if own else home.public_values)
+            members = self.members(rest[0][0], root)
+            return len(rest) == 2 and members is not None and not any(
+                link[1] for link in rest) and rest[1][0] in members
+        members = self.members(root)
+        return len(rest) == 1 and members is not None and not rest[0][1] and rest[0][0] in members
+
+
+def links(text: str) -> list[Link]:
+    """The parts of the dotted name ``text``, each with whether an index follows it."""
+    parts = CHAIN_PART.findall(text)
+    return [(name.casefold(), position + 1 < len(parts) and bool(parts[position + 1][1]))
+            for position, (name, _) in enumerate(parts) if name]
 
 
 @dataclass(frozen=True)
@@ -286,6 +631,16 @@ class Names:
     # Values whose name with an argument list calls a procedure: the
     # procedure's own name when it calls itself, as in Fetch(True).
     calls: frozenset[str] = frozenset()
+    # The declarations that dotted names resolve against, if known.
+    scope: Scope | None = None
+
+    def value_chain(self, text: str) -> list[str] | None:
+        """The indices of the dotted name ``text`` when it reads a value
+        without a call (Scope.value), or None."""
+        chain = links(text)
+        if self.scope is None or len(chain) < 2 or not self.scope.value(chain, self):
+            return None
+        return [index for _, index in CHAIN_PART.findall(text) if index]
 
 
 @dataclass(frozen=True)
@@ -329,10 +684,27 @@ def effect(text: str, names: Names) -> Effect:
     # A qualified VBA function can fail, as CLng("x") does, but runs no project code.
     qualified = any(library_qualifier(match, names) for match in VBA_PURE.finditer(text))
     text = VBA_CONSTANT.sub(library, VBA_PURE.sub(library, text))
+    # A dotted name that reads a value, as Saved.Number or Kind.kOne, is read
+    # like a variable: only its indices are expressions.
+    indices: list[str] = []
+    chains = 0
+
+    def value(match: re.Match[str]) -> str:
+        nonlocal chains
+        found = names.value_chain(match.group())
+        if found is None:
+            return match.group()
+        indices.extend(found)
+        chains += 1
+        return "0" * len(match.group())
+
+    text = CHAIN.sub(value, text)
     text = NUMBER_LITERAL.sub(lambda match: "0" * len(match.group()), dates_as_values(text))
     # A literal, a constant and a property of Err run nothing; any other
     # name, call or operator runs code that can fail.
-    result = Effect(fails=qualified or OPERATOR.search(text) is not None)
+    result = Effect(fails=qualified or chains > 0 or OPERATOR.search(text) is not None)
+    for index in indices:
+        result = result | effect(index, names)
     if MEMBER.search(text) or NEW.search(text):
         result = Effect(True, True)
     for match in CALL.finditer(text):
@@ -445,7 +817,16 @@ def target_effect(target: str, names: Names) -> Effect:
     as Date or Mid(Text, 1, 1) can fail. Any other target is a property: a
     Property Let or Set of the project, which shadows a statement target of
     its name, a member (x.y = 1, .y = 1 in a With block), or a property of
-    the host, such as Caption, which runs code. VBA.Mid(Text, 1, 1) is Mid."""
+    the host, such as Caption, which runs code. VBA.Mid(Text, 1, 1) is Mid,
+    and a field of a variable of a user-defined Type, as in Saved.Number or
+    Saved(i).Number, or a value of a standard module, is a variable."""
+    if (chain := CHAIN.fullmatch(target.strip())) is not None:
+        chain_indices = names.value_chain(chain.group())
+        if chain_indices is not None:
+            found = Effect()
+            for chain_index in chain_indices:
+                found = found | effect(chain_index, names) | Effect(fails=True)
+            return found
     qualifier = VBA_HEAD.match(target)
     if qualifier and library_qualifier(qualifier, names):
         rest = target[qualifier.end():]
@@ -572,27 +953,45 @@ def check_single_line_if(path: str, procedure: Procedure, line: int, text: str,
     return findings
 
 
+def with_object(statement: str, names: Names) -> str | None:
+    """What .x means inside the With block ``statement`` opens, when it is
+    data rather than a member access: Err, as in With Err, or a variable of
+    a user-defined Type, as in With Saved or With Saved(i).Inner."""
+    if WITH_ERR.match(statement):
+        return "Err."
+    target = statement[4:].strip()
+    chain = CHAIN.fullmatch(target) or re.fullmatch(r"[A-Za-z_]\w*(?:\s*\([^()]*\))?", target)
+    if chain and names.scope is not None and names.scope.record(links(target)):
+        return target + "."
+    return None
+
+
 def check_statements(path: str, procedure: Procedure, line: int, statements: list[str],
-                     segment: Segment, names: Names, with_err: list[bool]) -> list[Finding]:
-    """Read the statements of one line in order; ``with_err`` holds, for each
-    open With block, whether it is on Err, whose .Number reads Err.Number."""
+                     segment: Segment, names: Names, with_objects: list[str | None]
+                     ) -> list[Finding]:
+    """Read the statements of one line in order; ``with_objects`` holds, for
+    each open With block, what its .x reads (with_object), if it is data."""
     findings: list[Finding] = []
+
+    def resolved(statement: str) -> str:
+        if with_objects and with_objects[-1]:
+            return WITH_MEMBER.sub(with_objects[-1], statement)
+        return statement
+
     for index, statement in enumerate(statements):
-        if with_err and with_err[-1]:
-            statement = WITH_MEMBER.sub("Err.", statement)
+        statement = resolved(statement)
         single = SINGLE_LINE_IF.match(statement)
         if single and (single.group("tail").strip() or index < len(statements) - 1):
             # The rest of the line belongs to the If's branches.
-            rest = [WITH_MEMBER.sub("Err.", item) if with_err and with_err[-1] else item
-                    for item in statements[index + 1:]]
+            rest = [resolved(item) for item in statements[index + 1:]]
             return findings + check_single_line_if(path, procedure, line,
                                                    " : ".join([statement, *rest]), segment,
                                                    names)
         findings += check_statement(path, procedure, line, statement, segment, names)
         if WITH.match(statement):
-            with_err.append(bool(WITH_ERR.match(statement)))
-        elif END_WITH.match(statement) and with_err:
-            with_err.pop()
+            with_objects.append(with_object(statement, names))
+        elif END_WITH.match(statement) and with_objects:
+            with_objects.pop()
     return findings
 
 
@@ -600,11 +999,11 @@ def check_procedure(path: str, procedure: Procedure, names: Names) -> list[Findi
     handlers = handler_labels(procedure)
     segment = Segment()
     findings: list[Finding] = []
-    with_err: list[bool] = []
-    for line, label, statements in procedure.units:
+    with_objects: list[str | None] = []
+    for line, label, unit in procedure.units:
         if label is not None:
             segment.restart(in_handler=label.casefold() in handlers)
-        findings += check_statements(path, procedure, line, statements, segment, names, with_err)
+        findings += check_statements(path, procedure, line, unit, segment, names, with_objects)
     return findings
 
 
@@ -634,33 +1033,44 @@ def procedures(source: str) -> list[Procedure]:
     return found
 
 
-def procedure_names(module: Module, project: Names, line: int) -> Names:
-    """The names the procedure at ``line`` resolves. Its values are its
-    parameters and variables, its own name (its result), the module's
-    variables, constants and Enum members, and those of ``project``: the
-    names of the components and the public values of the standard modules.
-    It can call the procedures, properties and Declares of its module and
-    the public ones of the standard modules, in ``project``."""
+def procedure_names(module: Module, project: Names, components: frozenset[str],
+                    line: int) -> Names:
+    """The names the procedure at ``line`` resolves, by scope level as VBA
+    does, each to what the first level that declares it makes it: its
+    parameters, variables and own name (its result) are values; then the
+    module's variables, constants and Enum members are values and its
+    procedures, properties and Declares are callables; then the public ones
+    of the standard modules, in ``project``; then ``components``, values."""
     procedure = next((item for item in module.procedures if item.line == line), None)
-    local = procedure.names | {procedure.name.casefold()} if procedure else set()
-    return Names(frozenset(local | (module.names - module.callables) | project.values),
-                 frozenset(module.callables | project.callables))
+    seen = set(procedure.names | {procedure.name.casefold()} if procedure else set())
+    values: set[str] = set(seen)
+    callables: set[str] = set()
+    for level_values, level_callables in ((module.names - module.callables, module.callables),
+                                          (project.values, project.callables)):
+        values |= level_values - seen
+        callables |= level_callables - seen
+        seen |= level_values | level_callables
+    return Names(frozenset(values | (components - seen)), frozenset(callables))
 
 
 def analyze(modules: dict[str, str]) -> tuple[list[Finding], int]:
     """The findings of one environment's sources, and how many procedures it has."""
     scanned = {path: scan(path, source) for path, source in modules.items()}
     standard = [module for module in scanned.values() if module.standard]
+    components = {Path(path).stem.casefold(): declarations(source, scanned[path])
+                  for path, source in modules.items()}
     project = Names(
-        frozenset({Path(path).stem.casefold() for path in modules} | {
-            name for module in standard for name in module.public - module.public_callables}),
+        frozenset(name for module in standard for name in module.public - module.public_callables),
         frozenset(name for module in standard for name in module.public_callables))
+    stems = frozenset(Path(path).stem.casefold() for path in modules)
     findings: list[Finding] = []
     count = 0
     for path, source in modules.items():
         for procedure in procedures(source):
             count += 1
-            names = procedure_names(scanned[path], project, procedure.line)
+            names = procedure_names(scanned[path], project, stems, procedure.line)
+            names = replace(names, scope=Scope(Path(path).stem.casefold(),
+                                               procedure.variables(), components))
             if procedure.calls_itself_with_arguments:
                 names = replace(names, calls=frozenset({procedure.name.casefold()}))
             findings += check_procedure(path, procedure, names)

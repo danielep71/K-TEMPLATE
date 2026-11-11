@@ -266,9 +266,10 @@ milestones and their pull requests.
   the changelog, `VERSION`, the default branch, the tag message and
   **Repository integrity**. It builds a reproducible source bundle with its
   checksums, attests their build provenance, and drafts the GitHub Release.
-  A private repository attests only when the repository variable
-  `RELEASE_ATTESTATIONS` is `enabled`, with GitHub Enterprise Cloud; otherwise
-  the draft says that the bundle is not attested. A manual run rehearses a
+  A private repository attests only on GitHub Enterprise Cloud with
+  `RELEASE_ATTESTATIONS` set to `enabled`. Without the variable, the draft
+  says that the bundle is not attested; with it but without Enterprise Cloud,
+  the attestation fails and no draft is created. A manual run rehearses a
   ref without attesting or releasing. `tools/release.py` runs the steps
   locally: `verify` reports each failed check, a missing tag included, as a
   finding, and `notes` and `bundle` report a failure on a `FAIL` line
@@ -418,9 +419,12 @@ milestones and their pull requests.
   `Err.Description` that follows, on straight-line code, an `On Error`
   statement or `Err.Clear`, also written `Call Err.Clear`, or, in an error
   handler, a call or member access, so that a handler cannot report or raise
-  again an error that another statement has cleared or replaced. The
+  again an error that another statement has cleared or replaced. An Enum
+  member or constant, also qualified as in `RunStatus.rsFailed` or
+  `Module.LIMIT`, and a field of a variable of a user-defined `Type`, as in
+  `Saved.Number = Err.Number`, are values, not member accesses. The
   [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
-  see (#396, #419).
+  see (#396, #419, #422, #427, #429).
 
 ### Changed
 
@@ -671,6 +675,14 @@ milestones and their pull requests.
   `docs/repo_governance/TRAFFIC.md` lists the milestone among the enabling
   steps. `docs/setup/REPOSITORY_SETUP.md` says that only an existing managed
   ruleset is unknown without write access.
+- The traffic alert tests in `tests/test_workflow_controls.py` skip when
+  `.github/workflows/traffic-history.yml` does not exist, so the traffic
+  removal that `docs/setup/REPOSITORY_SETUP.md` describes leaves them passing,
+  and the guide says so. `SECURITY.md` lists the temporary folder in which
+  `tools/check_excel_run.py` writes the commit's test cases to measure the
+  accuracy contracts. The Dependabot `target-branch` test uses a longer name
+  that `git ls-remote` returns for the branch, so it fails if the check stops
+  comparing exact names (#423).
 
 ### Validation
 
