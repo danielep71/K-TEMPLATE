@@ -65,9 +65,10 @@ Use only the categories an entry needs.
 
 ### Added
 
-- `tools/check_vba_jumps.py` reports an `Err.Raise` reached after a
-  `Resume <label>` while the procedure's own `On Error GoTo <label>` handler
-  is enabled, in each compilation environment: the handler would trap the
+- `tools/check_vba_jumps.py` reports an `Err.Raise` or `Error` statement
+  reached after an unconditional `Resume <label>` while the procedure's own
+  `On Error GoTo <label>` handler is enabled, in each compilation
+  environment: the handler would trap the
   raise again, and a cleanup that raises the saved error can loop and hang
   Excel. The [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the
   handler with `On Error GoTo 0` before raising the saved error again. The

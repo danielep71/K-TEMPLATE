@@ -794,6 +794,17 @@ Cleanup:
         Next Index
         Err.Raise 5
 ''',
+            "raise-after-a-combined-next": '''        If Flag Then
+            For Index = 1 To 2
+                For Inner = 1 To 2
+Cleanup:
+                    Debug.Print Inner
+                Next Inner, Index
+        Else
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
         }
         passing = {
             "raise-in-the-else-branch": '''        If Flag Then
@@ -837,6 +848,17 @@ Cleanup:
         Loop
         Err.Raise 5
 ''',
+            # Next Inner, Index closes both loops, so the Else stays a sibling.
+            "raise-in-the-else-after-a-combined-next": '''        If Flag Then
+            For Index = 1 To 2
+                For Inner = 1 To 2
+Cleanup:
+                    On Error GoTo 0
+                Next Inner, Index
+        Else
+            On Error GoTo Handler: Err.Raise 5
+        End If
+''',
         }
         every = " [vba6-win32, vba7-win32, vba7-win64]"
         for name, blocks in reported.items():
@@ -847,6 +869,81 @@ Cleanup:
         for name, blocks in passing.items():
             with self.subTest(name=name):
                 self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
+
+    def test_reraise_rule_reads_each_construct(self) -> None:
+        reported = {
+            # The raise after "Then:" belongs to the one-line If.
+            "one-line-if-with-a-colon": ("Cleanup:\n        If Flag Then: Err.Raise 5\n",
+                                         "Err.Raise"),
+            "subroutine-without-on-error": ('''Cleanup:
+        GoSub Report
+        Err.Raise 5
+        Exit Sub
+Report:
+        Debug.Print 0
+        Return
+''', "Err.Raise"),
+            "error-statement": ("Cleanup:\n        Error 5\n", "Error"),
+            "qualified-raise": ("Cleanup:\n        VBA.Err.Raise Number:=5\n", "Err.Raise"),
+            "called-raise": ("Cleanup:\n        Call Err.Raise(5, \"TEST_Fixture.First\")\n",
+                             "Err.Raise"),
+        }
+        passing = {
+            "one-line-if-with-a-colon-disabled":
+                "Cleanup:\n        If Flag Then: On Error GoTo 0: Err.Raise 5\n",
+            # "If ... Then:" opens no block, so the Else stays a sibling.
+            "one-line-if-with-a-colon-in-a-branch": '''        If Flag Then
+Cleanup:
+            On Error GoTo 0
+            If Index = 1 Then: Debug.Print 0
+        Else
+            On Error GoTo Handler: Err.Raise 5
+        End If
+''',
+            "subroutine-disables-the-handler": '''Cleanup:
+        GoSub Disarm
+        Err.Raise 5
+        Exit Sub
+Disarm:
+        On Error GoTo 0
+        Return
+''',
+            # Exit Do leaves the Do, not the For it stands in, with the handler off.
+            "exit-do-inside-a-for": '''Cleanup:
+        Do While Flag
+            On Error GoTo 0
+            For Index = 1 To 2
+                If Index = 2 Then Exit Do
+            Next Index
+            On Error GoTo Handler
+            Exit Sub
+        Loop
+        Err.Raise 5
+''',
+            "error-function": "Cleanup:\n        Debug.Print Error$(5), Error(5)\n",
+        }
+        every = " [vba6-win32, vba7-win32, vba7-win64]"
+        for name, (blocks, raised) in reported.items():
+            with self.subTest(name=name):
+                self.assertEqual([item.split(": ", 1)[1] for item in
+                                  run_check(check_vba_jumps.check, enclosed(blocks))],
+                                 [TRAPPED.replace("Err.Raise", raised, 1) + every])
+        for name, blocks in passing.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
+        with self.subTest(name="line-numbers"):
+            numbered = standalone(module('''Private Sub First()
+        On Error GoTo 900
+        Debug.Print 1 / 0
+100     Err.Raise 5
+        Exit Sub
+900     Resume 100
+End Sub
+'''))
+            self.assertEqual(run_check(check_vba_jumps.check, numbered),
+                             ["tests/modules/TEST_Fixture.bas:7: Err.Raise after Resume 100 is "
+                              "trapped again by handler '900' of procedure First; put On Error "
+                              "GoTo 0 before the raise" + every])
 
     def test_reraise_is_checked_in_each_environment(self) -> None:
         findings = run_check(check_vba_jumps.check,

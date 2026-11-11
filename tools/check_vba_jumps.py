@@ -7,11 +7,13 @@ procedure, and every procedure must be closed. Each compilation environment
 of check_vba_conditionals.py is checked separately, so that mutually
 exclusive ``#If`` branches are never combined.
 
-An ``Err.Raise`` reached after a ``Resume <label>`` while one of the
-procedure's own ``On Error GoTo <label>`` handlers is enabled is reported:
-that handler traps the raise again, so a handler that resumes to the same
-code loops, and the error never reaches the caller. Raise a saved error
-after ``On Error GoTo 0``. The model of the handler state:
+A raise reached after a ``Resume <label>`` while one of the procedure's own
+``On Error GoTo <label>`` handlers is enabled is reported: that handler
+traps the raise again, so a handler that resumes to the same code loops,
+and the error never reaches the caller. Raise a saved error after
+``On Error GoTo 0``. A raise is ``Err.Raise`` or ``VBA.Err.Raise``, with or
+without ``Call`` and named arguments, or the ``Error`` statement; a
+``.Raise`` inside ``With Err`` is not seen. The model of the handler state:
 
 - ``On Error GoTo <label>`` enables that local handler, ``On Error GoTo 0``
   disables it and ``On Error Resume Next`` replaces it. ``On Error GoTo -1``
@@ -27,8 +29,13 @@ after ``On Error GoTo 0``. The model of the handler state:
   ``If``, ``Select Case`` and loop blocks merge the states of their
   branches. A one-line ``If ... Then a: b Else c: d`` is read as a block
   ``If`` whose branches hold the statements in order, up to the end of the
-  line. Where the branches disagree, the state is unknown and nothing is
-  reported.
+  line, and so is ``If x Then: a``. A combined ``Next j, i`` closes one
+  loop per name, and ``Exit Do`` or ``Exit For`` leaves the innermost loop
+  of its kind. Where the branches disagree, the state is unknown and
+  nothing is reported.
+- A ``GoSub`` or ``On ... GoSub`` whose subroutine runs an ``On Error``
+  statement before its ``Return`` makes the state unknown; a raise inside
+  the subroutine is not checked.
 - A target inside blocks stays inside them: at the next ``ElseIf``,
   ``Else`` or ``Case`` of an enclosing block, the path skips to that block's
   end. At the end of an enclosing loop, the path continues after the loop;
@@ -36,8 +43,9 @@ after ``On Error GoTo 0``. The model of the handler state:
   raise before the target in a later pass is not checked.
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
   ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
-  end of the procedure. Jumps are not followed, and a label on the path does
-  not merge the states of other jumps to it.
+  end of the procedure. Jumps are not followed: the path goes on after an
+  ``On ... GoTo`` list, which falls through when no target is chosen, and a
+  label on the path does not merge the states of other jumps to it.
 - ``Resume`` and ``Resume Next`` continue at a statement that cannot be known
   statically, so no path starts from them. A raise inside a handler before
   its ``Resume`` is not trapped by that handler, so it is not reported.
@@ -86,8 +94,12 @@ KEYWORDS = frozenset({"beep", "do", "else", "end", "loop", "next", "resume", "re
 # The handler-state model of the re-raise rule; see the module docstring.
 ON_ERROR_SET = re.compile(r"(?<![\w.])On\s+Error\s+(?:GoTo\s+(-1|[A-Za-z_]\w*|\d+)|Resume\s+Next)\b",
                           re.IGNORECASE)
-ERR_RAISE = re.compile(r"(?<![\w.])Err\s*\.\s*Raise\b", re.IGNORECASE)
-RESUME_TO_LABEL = re.compile(r"^Resume\s+([A-Za-z_]\w*|\d+)$", re.IGNORECASE)
+ERR_RAISE = re.compile(r"(?<![\w.])(?:VBA\s*\.\s*)?Err\s*\.\s*Raise\b", re.IGNORECASE)
+# The Error statement, as in "Error 5"; Error$ and Error(...) in an
+# expression are functions, and never start a statement.
+ERROR_STATEMENT = re.compile(r"^Error\b(?!\s*\$)\s*\S", re.IGNORECASE)
+COMBINED_NEXT = re.compile(r"^Next\s+(\w+(?:\s*,\s*\w+)+)$", re.IGNORECASE)
+SUBROUTINE_END = re.compile(r"^(?:Return|Exit\s+(?:Sub|Function|Property)|End)$", re.IGNORECASE)
 ONE_LINE_IF = re.compile(r"^(If\b.*?\bThen)\s+(\S.*)$", re.IGNORECASE)
 ONE_LINE_ELSE = re.compile(r"(?<![\w.])Else\b", re.IGNORECASE)
 CASE_ELSE = re.compile(r"^Case\s+Else$", re.IGNORECASE)
@@ -96,9 +108,9 @@ SELECT = re.compile(r"^Select\s+Case\b", re.IGNORECASE)
 BRANCH = re.compile(r"^(?:ElseIf\b|Else$|Case\b)", re.IGNORECASE)
 BRANCH_ELSE = re.compile(r"^(?:Else|Case\s+Else)$", re.IGNORECASE)
 BLOCK_END = re.compile(r"^End\s+(?:If|Select)$", re.IGNORECASE)
-LOOP_OPEN = re.compile(r"^(?:Do|For|While)\b", re.IGNORECASE)
+LOOP_OPEN = re.compile(r"^(Do|For|While)\b", re.IGNORECASE)
 LOOP_CLOSE = re.compile(r"^(?:Loop|Next|Wend)\b", re.IGNORECASE)
-LOOP_EXIT = re.compile(r"^Exit\s+(?:Do|For)$", re.IGNORECASE)
+LOOP_EXIT = re.compile(r"^Exit\s+(Do|For)$", re.IGNORECASE)
 PATH_END = re.compile(r"^(?:Exit\s+(?:Sub|Function|Property)|End|GoTo\b.*|Resume\b.*|Return)$",
                       re.IGNORECASE)
 # Handler states other than an enabled local handler, which is its label.
@@ -117,9 +129,11 @@ class Step:
 class Block:
     """An If, Select Case or loop block open on a re-raise path. An outer
     block was already open at the ``Resume`` target; ``start`` is the index
-    of its opening step."""
+    of its opening step. ``kind`` is ``"do"``, ``"for"`` or ``"while"``
+    for a loop, which ``Exit Do`` or ``Exit For`` leaves."""
     loop: bool
     entry: str
+    kind: str = ""
     ends: list[str] = field(default_factory=list)
     has_else: bool = False
     started: bool = False
@@ -231,10 +245,16 @@ def scan_statement(path: str, line: int, statement: str, current: Procedure | No
 
 
 def record_steps(procedure: Procedure | None, line: int, statements: list[str]) -> None:
-    """Append the statements of one line to ``procedure``, in block form."""
-    if procedure is not None:
-        procedure.steps.extend(Step(line, code=code) for code in block_form(statements)
-                               if code)
+    """Append the statements of one line to ``procedure``, in block form; a
+    combined ``Next j, i`` closes one loop per name."""
+    if procedure is None:
+        return
+    for code in block_form([statement for statement in statements if statement]):
+        combined = COMBINED_NEXT.match(code)
+        names = combined.group(1).split(",") if combined else []
+        procedure.steps.extend(Step(line, code=f"Next {name.strip()}") for name in names)
+        if not combined:
+            procedure.steps.append(Step(line, code=code))
 
 
 def one_line_parts(statement: str) -> list[tuple[str, str]]:
@@ -258,8 +278,12 @@ def one_line_parts(statement: str) -> list[tuple[str, str]]:
 def block_form(statements: list[str]) -> list[str]:
     """The statements of one line, with each one-line ``If ... Then a: b
     Else c`` written as a block ``If`` that ends with the line. An Else
-    belongs to the nearest open one-line If, as in VBA."""
-    parts = [part for statement in statements for part in one_line_parts(statement)]
+    belongs to the nearest open one-line If, as in VBA. In ``If x Then: y``,
+    the statements after the colon belong to that one-line If."""
+    parts = [part for index, statement in enumerate(statements)
+             for part in ([("if", statement)]
+                          if BLOCK_IF.match(statement) and index < len(statements) - 1
+                          else one_line_parts(statement))]
 
     def branch(index: int, nested: bool) -> tuple[list[str], int]:
         codes: list[str] = []
@@ -315,11 +339,14 @@ def block_statement(code: str, state: str, blocks: list[Block]) -> str | None:
     if BLOCK_IF.match(code) or SELECT.match(code):
         blocks.append(Block(loop=False, entry=state, started=bool(BLOCK_IF.match(code))))
         return state
-    if LOOP_OPEN.match(code):
-        blocks.append(Block(loop=True, entry=state))
+    opener = LOOP_OPEN.match(code)
+    if opener:
+        blocks.append(Block(loop=True, entry=state, kind=opener.group(1).casefold()))
         return state
-    if LOOP_EXIT.match(code) and any(block.loop for block in blocks):
-        next(block for block in reversed(blocks) if block.loop).ends.append(state)
+    leaving = LOOP_EXIT.match(code)
+    left = [block for block in blocks if leaving and block.kind == leaving.group(1).casefold()]
+    if left:
+        left[-1].ends.append(state)
         return DEAD
     if not blocks:
         return None
@@ -343,9 +370,10 @@ def enclosing_blocks(steps: list[Step], target: int) -> list[Block]:
     """The blocks open at ``steps[target]``, outermost first."""
     blocks: list[Block] = []
     for index, step in enumerate(steps[:target]):
-        if BLOCK_IF.match(step.code) or SELECT.match(step.code) or LOOP_OPEN.match(step.code):
-            blocks.append(Block(loop=bool(LOOP_OPEN.match(step.code)), entry=UNKNOWN,
-                                outer=True, start=index))
+        opener = LOOP_OPEN.match(step.code)
+        if BLOCK_IF.match(step.code) or SELECT.match(step.code) or opener:
+            blocks.append(Block(loop=bool(opener), entry=UNKNOWN, outer=True, start=index,
+                                kind=opener.group(1).casefold() if opener else ""))
         elif blocks and (LOOP_CLOSE.match(step.code) if blocks[-1].loop
                          else BLOCK_END.match(step.code)):
             blocks.pop()
@@ -375,10 +403,28 @@ def outer_statement(steps: list[Step], index: int, state: str, blocks: list[Bloc
     return None
 
 
-def trapped_raises(steps: list[Step], start: int, handler: str) -> list[tuple[int, str]]:
-    """``(line, handler)`` for each ``Err.Raise`` that a local handler traps
-    on the path from ``steps[start]``, entered with ``handler`` enabled."""
-    found: list[tuple[int, str]] = []
+def subroutine_changes_handler(steps: list[Step], code: str) -> bool:
+    """Whether a ``GoSub`` in ``code`` runs an ``On Error`` statement between
+    its target label and the subroutine's ``Return`` or exit."""
+    labels = {step.label.casefold(): index for index, step in enumerate(steps)
+              if step.label is not None}
+    for operation, target in statement_jumps(code):
+        if operation.casefold() != "gosub" or target.casefold() not in labels:
+            continue
+        for step in steps[labels[target.casefold()]:]:
+            if SUBROUTINE_END.match(step.code):
+                break
+            if ON_ERROR_SET.search(step.code):
+                return True
+    return False
+
+
+def trapped_raises(steps: list[Step], start: int, handler: str
+                   ) -> list[tuple[int, str, str]]:
+    """``(line, handler, raise)`` for each ``Err.Raise`` or ``Error``
+    statement that a local handler traps on the path from ``steps[start]``,
+    entered with ``handler`` enabled."""
+    found: list[tuple[int, str, str]] = []
     state = handler
     blocks = enclosing_blocks(steps, start)
     # While the path skips the other branches of an enclosing block: the
@@ -412,9 +458,13 @@ def trapped_raises(steps: list[Step], start: int, handler: str) -> list[tuple[in
             continue
         if state == DEAD:
             continue
-        if ERR_RAISE.search(step.code) and enabled(state):
-            found.append((step.line, state))
-        if PATH_END.match(step.code):
+        raised = "Err.Raise" if ERR_RAISE.search(step.code) else \
+            "Error" if ERROR_STATEMENT.match(step.code) else None
+        if raised and enabled(state):
+            found.append((step.line, state, raised))
+        if subroutine_changes_handler(steps, step.code):
+            state = UNKNOWN
+        elif PATH_END.match(step.code):
             if not blocks or blocks[-1].outer:
                 break
             state = DEAD
@@ -424,8 +474,8 @@ def trapped_raises(steps: list[Step], start: int, handler: str) -> list[tuple[in
 
 
 def reraise_findings(path: str, procedure: Procedure) -> list[Finding]:
-    """Each ``Err.Raise`` reached after a ``Resume <label>`` while a local
-    handler of ``procedure`` is enabled."""
+    """Each ``Err.Raise`` or ``Error`` statement reached after a
+    ``Resume <label>`` while a local handler of ``procedure`` is enabled."""
     handlers = {match.group(1).casefold() for step in procedure.steps
                 for match in ON_ERROR_SET.finditer(step.code)
                 if match.group(1) not in {None, "0", "-1"}}
@@ -446,10 +496,10 @@ def reraise_findings(path: str, procedure: Procedure) -> list[Finding]:
             if trapping is None or depth or operation.casefold() != "resume" \
                     or target.casefold() not in targets:
                 continue
-            for line, handler in trapped_raises(procedure.steps, targets[target.casefold()],
-                                                trapping):
+            for line, handler, raised in trapped_raises(procedure.steps,
+                                                        targets[target.casefold()], trapping):
                 messages.setdefault((line, handler.casefold()), (
-                    f"Err.Raise after Resume {target} is trapped again by handler "
+                    f"{raised} after Resume {target} is trapped again by handler "
                     f"{handler!r} of procedure {procedure.name}; put On Error GoTo 0 "
                     f"before the raise"))
     return [Finding(path, line, message) for (line, _), message in sorted(messages.items())]
