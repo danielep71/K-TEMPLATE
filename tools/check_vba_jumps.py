@@ -21,9 +21,10 @@ after ``On Error GoTo 0``. The model of the handler state:
   ``Resume`` before any handler label is not followed.
 - From the ``Resume`` target, the check follows the text of the procedure.
   ``If``, ``Select Case`` and loop blocks merge the states of their
-  branches, and the statements after a one-line ``If ... Then`` on the same
-  line are conditional. Where the branches disagree, the state is unknown
-  and nothing is reported.
+  branches. A one-line ``If ... Then a: b Else c: d`` is read as a block
+  ``If`` whose branches hold the statements in order, up to the end of the
+  line. Where the branches disagree, the state is unknown and nothing is
+  reported.
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
   ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
   end of the procedure. Jumps are not followed, and a label on the path does
@@ -78,7 +79,9 @@ ON_ERROR_SET = re.compile(r"(?<![\w.])On\s+Error\s+(?:GoTo\s+(-1|[A-Za-z_]\w*|\d
                           re.IGNORECASE)
 ERR_RAISE = re.compile(r"(?<![\w.])Err\s*\.\s*Raise\b", re.IGNORECASE)
 RESUME_TO_LABEL = re.compile(r"^Resume\s+([A-Za-z_]\w*|\d+)$", re.IGNORECASE)
-SINGLE_LINE_IF = re.compile(r"^If\b(?!.*\bThen$)", re.IGNORECASE)
+ONE_LINE_IF = re.compile(r"^(If\b.*?\bThen)\s+(\S.*)$", re.IGNORECASE)
+ONE_LINE_ELSE = re.compile(r"(?<![\w.])Else\b", re.IGNORECASE)
+CASE_ELSE = re.compile(r"^Case\s+Else$", re.IGNORECASE)
 BLOCK_IF = re.compile(r"^If\b.*\bThen$", re.IGNORECASE)
 SELECT = re.compile(r"^Select\s+Case\b", re.IGNORECASE)
 BRANCH = re.compile(r"^(?:ElseIf\b|Else$|Case\b)", re.IGNORECASE)
@@ -99,7 +102,6 @@ class Step:
     line: int
     label: str | None = None
     code: str = ""
-    conditional: bool = False
 
 
 @dataclass
@@ -175,24 +177,28 @@ def scan(path: str, text: str) -> tuple[list[Procedure], list[Finding]]:
             else:
                 current.labels[label.casefold()] = line
             current.steps.append(Step(line, label=label))
-        conditional = False
+        # The statements of each procedure on this line, recorded once the
+        # line, or the procedure, ends, so that a one-line If spans them all.
+        owner, texts = current, []
         for index, statement in enumerate(split_statements(code)):
             # The label opens the first statement, as in "Cleanup" or "100 Exit Sub".
             text = statement[len(label):].strip() if index == 0 and label else statement
-            current = scan_statement(path, line, statement, current, procedures, findings,
-                                     Step(line, code=text, conditional=conditional))
-            # The statements after a one-line If on its line belong to that If.
-            conditional = conditional or bool(SINGLE_LINE_IF.match(text))
+            before = current
+            current = scan_statement(path, line, statement, current, procedures, findings)
+            if before is not None and current is before:
+                texts.append(text)
+            else:
+                record_steps(owner, line, texts)
+                owner, texts = current, []
+        record_steps(owner, line, texts)
     if current is not None:
         findings.append(Finding(path, current.line, f"procedure {current.name} is not closed"))
     return procedures, findings
 
 
 def scan_statement(path: str, line: int, statement: str, current: Procedure | None,
-                   procedures: list[Procedure], findings: list[Finding],
-                   step: Step | None = None) -> Procedure | None:
-    """Apply one statement, recorded in its procedure as ``step``; return the
-    procedure open after it."""
+                   procedures: list[Procedure], findings: list[Finding]) -> Procedure | None:
+    """Apply one statement; return the procedure open after it."""
     opener = is_procedure(statement)
     if opener:
         if current is not None:
@@ -208,9 +214,60 @@ def scan_statement(path: str, line: int, statement: str, current: Procedure | No
     elif current is not None:
         current.jumps.extend((line, operation, target)
                              for operation, target in statement_jumps(statement))
-        if step is not None and step.code:
-            current.steps.append(step)
     return current
+
+
+def record_steps(procedure: Procedure | None, line: int, statements: list[str]) -> None:
+    """Append the statements of one line to ``procedure``, in block form."""
+    if procedure is not None:
+        procedure.steps.extend(Step(line, code=code) for code in block_form(statements)
+                               if code)
+
+
+def one_line_parts(statement: str) -> list[tuple[str, str]]:
+    """``(kind, code)`` parts of a statement: ``"if"`` for the head of a
+    one-line If, ``"else"`` for its Else, ``"code"`` for anything else."""
+    match = ONE_LINE_IF.match(statement)
+    if match:
+        return [("if", match.group(1)), *one_line_parts(match.group(2))]
+    pieces = ONE_LINE_ELSE.split(statement)
+    if len(pieces) == 1 or CASE_ELSE.match(statement):
+        return [("code", statement)]
+    parts: list[tuple[str, str]] = []
+    for index, piece in enumerate(pieces):
+        if index:
+            parts.append(("else", "Else"))
+        if piece.strip():
+            parts.extend(one_line_parts(piece.strip()))
+    return parts
+
+
+def block_form(statements: list[str]) -> list[str]:
+    """The statements of one line, with each one-line ``If ... Then a: b
+    Else c`` written as a block ``If`` that ends with the line. An Else
+    belongs to the nearest open one-line If, as in VBA."""
+    parts = [part for statement in statements for part in one_line_parts(statement)]
+
+    def branch(index: int, nested: bool) -> tuple[list[str], int]:
+        codes: list[str] = []
+        while index < len(parts):
+            kind, code = parts[index]
+            if kind == "else" and nested:
+                return codes, index
+            if kind == "if":
+                then, index = branch(index + 1, True)
+                codes += [code, *then]
+                if index < len(parts):
+                    other, index = branch(index + 1, True)
+                    codes += ["Else", *other]
+                codes.append("End If")
+                continue
+            # A block If's Else, as in "Else: x = 1", stays a statement.
+            codes.append(code)
+            index += 1
+        return codes, index
+
+    return branch(0, False)[0]
 
 
 def enabled(state: str) -> bool:
@@ -280,8 +337,7 @@ def trapped_raises(steps: list[Step], handler: str) -> list[tuple[int, str]]:
             # Another jump may reach a label in a branch this path left.
             state = UNKNOWN if state == DEAD else state
             continue
-        conditional = step.conditional or bool(SINGLE_LINE_IF.match(step.code))
-        after = None if conditional else block_statement(step.code, state, blocks)
+        after = block_statement(step.code, state, blocks)
         if after is not None:
             state = after
             continue
@@ -289,9 +345,7 @@ def trapped_raises(steps: list[Step], handler: str) -> list[tuple[int, str]]:
             continue
         if ERR_RAISE.search(step.code) and enabled(state):
             found.append((step.line, state))
-        if conditional:
-            state = merge([state, handler_after(step.code, state)])
-        elif PATH_END.match(step.code):
+        if PATH_END.match(step.code):
             if not blocks:
                 break
             state = DEAD

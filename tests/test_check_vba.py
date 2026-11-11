@@ -698,6 +698,13 @@ class JumpTest(unittest.TestCase):
             # The exit in one branch leaves the other branch on the path.
             "exit-in-one-branch": "        If SavedNumber = 0 Then\n            Exit Sub\n"
                                   "        End If\n",
+            # A one-line If keeps its branch's state across its ":" statements.
+            "handler-enabled-in-a-one-line-if":
+                "        On Error GoTo 0\n"
+                "        If SavedNumber <> 0 Then On Error GoTo Handler: Err.Raise 5\n",
+            "handler-enabled-in-a-one-line-else":
+                "        On Error GoTo 0\n        If SavedNumber = 0 Then Debug.Print 0 "
+                "Else On Error GoTo Handler: Err.Raise 5\n",
         }
         for name, before in cases.items():
             with self.subTest(name=name):
@@ -716,6 +723,10 @@ class JumpTest(unittest.TestCase):
             "goto-zero": reraise("        On Error GoTo 0\n"),
             "goto-zero-in-the-raising-branch": reraise(fixture=RERAISE.replace(
                 "Then Err.Raise", "Then On Error GoTo 0: Err.Raise")),
+            "handler-enabled-in-the-other-one-line-branch": reraise(
+                "        On Error GoTo 0\n", RERAISE.replace(
+                    "If SavedNumber <> 0 Then Err.Raise",
+                    "If SavedNumber = 0 Then On Error GoTo Handler: Debug.Print 0 Else Err.Raise")),
             "goto-zero-in-a-block-if": reraise(fixture=RERAISE.replace(
                 "        If SavedNumber <> 0 Then Err.Raise SavedNumber, \"TEST_Fixture.First\"\n",
                 "        If SavedNumber <> 0 Then\n            On Error GoTo 0\n"
