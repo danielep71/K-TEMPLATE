@@ -137,9 +137,10 @@ ignores, with:
   `tests/modules/` and `examples/modules/`. Each sheet's document module
   comes from `src/workbook/<code name>.cls`, when that file exists.
 
-Excel compiles the project from source when the workbook opens
-([HB-05](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the
-build needs no *Trust access to the VBA project object model*. Two builds of
+The project holds no compiled code, so Excel reads it from source and
+compiles each module when it is first used
+([HB-05](docs/methodology/VALIDATION_PLAN.md#host-behaviour)): the build
+needs no *Trust access to the VBA project object model*. Two builds of
 the same commit and working tree are byte-identical. The build stops on a form,
 which needs a designer the builder does not write; import forms by hand
 (step 4). It also stops on a module too dense to fit the VBA compression
@@ -161,10 +162,11 @@ Python UNO bridge are installed, `python3 tools/devbuild/lo_smoke.py` builds
 the development workbook and runs the harness certification in headless
 LibreOffice; `python3 tools/devbuild/lo_smoke.py WORKBOOK` runs a workbook
 you built. It reports only failures that LibreOffice is not known to cause,
-and exits 0 when there is none, 1 on such a failure or when LibreOffice cannot
-run the workbook, and 2 for an unknown option, a missing workbook, a missing
-or malformed evidence policy, or a missing LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is never Excel
-evidence.
+and exits 0 when there is none, 1 on such a failure, when the build fails or
+when LibreOffice cannot run the workbook, and 2 for an unknown option, a
+missing workbook, a missing or malformed evidence policy, or a missing
+LibreOffice or UNO bridge. LibreOffice is not a supported host, and this is
+never Excel evidence.
 
 <a id="running-the-harness"></a>
 
@@ -270,18 +272,19 @@ step 10 says.
 
 There is no export: the check proves identity by rebuilding the commit in a
 temporary worktree. The workbook Excel ran must hold the same parts as that
-build, byte for byte once decompressed, the VBA project included. Excel
-compiles the project from source on open
-([HB-05](docs/methodology/VALIDATION_PLAN.md#host-behaviour)), so the code
-that ran is the commit's.
+build, byte for byte once decompressed, the VBA project included, so it holds
+the commit's source. That project holds no compiled code, so Excel reads it
+from source and compiles each module when it is first used
+([HB-05](docs/methodology/VALIDATION_PLAN.md#host-behaviour)): the code that
+ran is the commit's.
 
 Without Trust access no automated run can compile the whole project. VBA
-then compiles on demand only the modules the run calls, and `compile=ON_DEMAND`
-says so; a module the run never calls is not compiled. `check_excel_run.py`
-accepts `ON_DEMAND` only with identity by rebuild, `--workbook` and no
-`exported\` folder, as this command checks it. A run by hand compiles with
-**Debug → Compile VBAProject**, which needs no Trust access, and records
-`compile=PASS`.
+then compiles only the modules the run calls, each when it is first used, and
+`compile=ON_DEMAND` says so; a module the run never calls is not compiled.
+`check_excel_run.py` accepts `ON_DEMAND` only with identity by rebuild,
+`--workbook` and no `exported\` folder, as this command checks it. A run by
+hand compiles with **Debug → Compile VBAProject**, which needs no Trust
+access, and records `compile=PASS`.
 
 Excel opens visibly while the run lasts. Apart from **Enable Content**, leave
 it alone: a dialog it shows stops the run until you close it, and the command
@@ -416,7 +419,9 @@ accuracy contracts, as step 3 says.
     [host policy](#%EF%B8%8F-host-policy). The folder stays outside Git: its
     exported modules would be second copies of the VBA components.
 
-`check_excel_run.py` reads only the folder and the commit:
+`check_excel_run.py` reads the evidence folder and the commit and, with
+`--workbook`, the workbook; with `--workbook` and no `exported\` folder, it
+also rebuilds the commit in a temporary Git worktree:
 
 | It fails when | Because |
 | --- | --- |

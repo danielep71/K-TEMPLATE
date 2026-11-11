@@ -773,6 +773,21 @@ class LibreOfficeSmoke(unittest.TestCase):
                       "RuntimeError: cannot load)", output.getvalue())
         popen.return_value.wait.assert_called_once_with(timeout=60)
 
+    def test_a_build_failure_exits_1_without_a_traceback_before_starting_libreoffice(
+            self) -> None:
+        failure = build_workbook.BuildError("src/forms: forms are not built (frmInput)")
+        with unittest.mock.patch("shutil.which", return_value="soffice"), \
+                unittest.mock.patch("importlib.util.find_spec", return_value=object()), \
+                unittest.mock.patch.object(build_workbook, "build",
+                                           side_effect=failure) as build, \
+                unittest.mock.patch("subprocess.Popen") as popen, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(lo_smoke.main([]), 1)
+        build.assert_called_once()
+        popen.assert_not_called()
+        self.assertEqual(output.getvalue().strip(),
+                         "lo-smoke: FAIL (build: src/forms: forms are not built (frmInput))")
+
     def test_the_entry_point_logs_and_results_file_come_from_the_evidence_policy(self) -> None:
         data = json.loads((ROOT / check_excel_run.POLICY).read_text(encoding="utf-8"))
         data["suite"]["source"] = "tests/modules/TEST_Renamed.bas"

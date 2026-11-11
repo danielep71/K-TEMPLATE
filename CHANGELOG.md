@@ -61,6 +61,21 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Fixed
+
+- `tools/devbuild/lo_smoke.py` reports a failed build of the development
+  workbook, such as one stopped by a form, as `lo-smoke: FAIL (build: ...)`
+  and exits 1, without a traceback. The Excel-run guides, `SECURITY.md` and
+  the tools' docstrings now match the build and evidence tools: Excel reads
+  the built project from source and compiles each module when it is first
+  used (`HB-05`); `tools/check_excel_run.py` also reads the workbook and
+  rebuilds the commit in a temporary Git worktree; `SECURITY.md` lists that
+  worktree, the second build and the `Visible` and `DisplayAlerts` settings
+  of the Excel instance `tools/devbuild/excel_run.py` starts; the evidence
+  policy and the harness guide name every tool that reads the policy, and a
+  changed reference also changes `REFERENCES` in
+  `tools/devbuild/vba_project.py` (#383).
+
 ## [1.0.0] - 2026-11-10
 
 Changes made before this changelog existed are described by the closed
