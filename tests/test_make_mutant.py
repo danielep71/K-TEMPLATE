@@ -34,8 +34,9 @@ def git(root: Path, *args: str) -> None:
                     *args], capture_output=True, check=True)
 
 
-@unittest.skipUnless(shutil.which("git"), "needs Git")
-class MakeMutantTest(unittest.TestCase):
+class Fixture(unittest.TestCase):
+    """A temporary Git repository that ignores /test-results/ and holds MODULE."""
+
     def setUp(self) -> None:
         temporary = tempfile.TemporaryDirectory(prefix="mutant-")
         self.addCleanup(temporary.cleanup)
@@ -69,6 +70,9 @@ class MakeMutantTest(unittest.TestCase):
         self.assertFalse(self.mutants.exists())
         self.assertEqual((self.root / MODULE).read_bytes(), CRLF_MODULE)
 
+
+@unittest.skipUnless(shutil.which("git"), "needs Git")
+class MakeMutantTest(Fixture):
     def test_one_occurrence_is_replaced_under_the_same_relative_path(self) -> None:
         code, out, err = self.run_tool("--find", "a > 0", "--replace", "a >= 0")
         self.assertEqual(code, 0, err)
@@ -91,6 +95,17 @@ class MakeMutantTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("occurs 2 times", err)
         self.assert_nothing_written()
+
+    def test_overlapping_occurrences_are_refused(self) -> None:
+        with self.assertRaisesRegex(make_mutant.Refusal, "occurs 2 times"):
+            make_mutant.mutate(b"aaa", b"aa", b"X", False)
+        with self.assertRaisesRegex(make_mutant.Refusal, "occurs 3 times"):
+            make_mutant.mutate(b"abababa", b"aba", b"X", False)
+        self.put("notes/run.txt", b"x = aaa\n")
+        code, _, err = self.run_tool("--find", "aa", "--replace", "b", file="notes/run.txt")
+        self.assertEqual(code, 1)
+        self.assertIn("occurs 2 times", err)
+        self.assertFalse(self.mutants.exists())
 
     def test_an_unchanged_replacement_is_refused(self) -> None:
         code, _, err = self.run_tool("--find", "a > 0", "--replace", "a > 0")
@@ -219,6 +234,59 @@ class MakeMutantTest(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("outside the repository", err)
         self.assertFalse(self.mutants.exists())
+
+
+def symlink(link: Path, target: Path, directory: bool = False) -> bool:
+    """Create ``link`` to ``target``; False where the platform or user cannot."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link.symlink_to(target, target_is_directory=directory)
+    except (OSError, NotImplementedError):
+        return False
+    return True
+
+
+@unittest.skipUnless(shutil.which("git"), "needs Git")
+class SymlinkDestinationTest(Fixture):
+    """A link left at the mutant's path never redirects the write."""
+
+    def link_or_skip(self, link: Path, target: Path, directory: bool = False) -> None:
+        if not symlink(link, target, directory):
+            self.skipTest("cannot create symbolic links here")
+
+    def assert_refused(self, code: int, err: str) -> None:
+        self.assertEqual(code, 1)
+        self.assertIn("symbolic link", err)
+
+    def test_a_link_at_the_mutant_path_to_the_source_is_refused(self) -> None:
+        self.link_or_skip(self.mutants / MODULE, self.root / MODULE)
+        code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b")
+        self.assertEqual((self.root / MODULE).read_bytes(), CRLF_MODULE)
+        self.assert_refused(code, err)
+
+    def test_a_link_at_the_mutant_path_elsewhere_is_refused(self) -> None:
+        elsewhere = self.put("notes/elsewhere.txt", b"kept\n")
+        self.link_or_skip(self.mutants / MODULE, elsewhere)
+        code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b")
+        self.assertEqual(elsewhere.read_bytes(), b"kept\n")
+        self.assert_refused(code, err)
+
+    def test_a_linked_folder_under_the_output_is_refused(self) -> None:
+        self.link_or_skip(self.mutants / "src", self.root / "src", directory=True)
+        code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b")
+        self.assertEqual((self.root / MODULE).read_bytes(), CRLF_MODULE)
+        self.assert_refused(code, err)
+
+    def test_a_link_at_the_frx_path_is_refused_and_nothing_is_written(self) -> None:
+        form = b'VERSION 5.00\r\nAttribute VB_Name = "F_Input"\r\nPrivate X As Long\r\n'
+        self.put("src/forms/F_Input.frm", form)
+        frx = self.put("src/forms/F_Input.frx", b"\0\1binary")
+        self.link_or_skip(self.mutants / "src/forms/F_Input.frx", frx)
+        code, _, err = self.run_tool("--find", "Long", "--replace", "Integer",
+                                     file="src/forms/F_Input.frm")
+        self.assertEqual(frx.read_bytes(), b"\0\1binary")
+        self.assertFalse((self.mutants / "src/forms/F_Input.frm").exists())
+        self.assert_refused(code, err)
 
 
 @unittest.skipUnless(shutil.which("git"), "needs Git")

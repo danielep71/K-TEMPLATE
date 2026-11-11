@@ -74,7 +74,8 @@ Use only the categories an entry needs.
   the text replaced, under the ignored `test-results/mutants/`, with every
   other byte, CRLF line endings and `Attribute VB_Name` kept, and the SHA-256
   of the source and the mutant printed. It refuses a text that does not occur
-  exactly once and an output folder that Git does not ignore (#400).
+  exactly once, overlapping occurrences included, an output folder that Git
+  does not ignore, and a symbolic link at the mutant's path (#400).
 
 ### Fixed
 

@@ -24,10 +24,14 @@ mutant, since the VBE imports a form only with it.
 
 It refuses, and writes nothing, when:
 
-- the text to find is not in FILE exactly once (it reports the count);
+- the text to find is not in FILE exactly once, overlapping occurrences
+  included, so "aa" in "aaa" counts twice (it reports the count);
 - the replacement would leave FILE unchanged;
 - the replacement would change, remove or add an Attribute VB_Name line;
 - the text spans lines and FILE mixes CRLF and LF line endings;
+- the mutant's path, a form's .frx beside it or a folder between them and
+  the output folder is a symbolic link, or the path resolves outside the
+  output folder, so that a link left there never redirects the write;
 - the output folder holds a tracked file, lies in a source directory (src/,
   tests/, tools/, docs/, .github/ or examples/), or Git does not ignore the
   mutant's path, so that a mutant can never be committed or replace a source;
@@ -43,6 +47,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
 import subprocess
 import sys
@@ -91,12 +96,22 @@ def as_file_text(text: bytes, data: bytes) -> bytes:
     return text.replace(b"\r\n", b"\n").replace(b"\n", ending)
 
 
+def occurrences(data: bytes, find: bytes) -> int:
+    """How often ``find`` occurs in ``data``, overlapping occurrences included."""
+    count, position = 0, data.find(find)
+    while position >= 0:
+        count += 1
+        position = data.find(find, position + 1)
+    return count
+
+
 def mutate(data: bytes, find: bytes, replace: bytes, vba: bool) -> Mutant:
     """Replace the only occurrence of ``find`` in ``data`` with ``replace``."""
     find, replace = as_file_text(find, data), as_file_text(replace, data)
-    count = data.count(find)
+    count = occurrences(data, find)
     if count != 1:
-        raise Refusal(f"the text to find occurs {count} times; it must occur exactly once")
+        raise Refusal(f"the text to find occurs {count} times, overlapping occurrences "
+                      f"included; it must occur exactly once")
     if find == replace:
         raise Refusal("the replacement equals the text to find; the mutant would not differ")
     start = data.index(find)
@@ -153,6 +168,30 @@ def check_output(root: Path, output: Path, target: Path) -> None:
                       f"{ignored.stderr.strip()}")
 
 
+def check_destination(output: Path, path: Path, source: Path) -> None:
+    """Refuse a destination that a symbolic link could redirect, or that is the source."""
+    current = output
+    for part in path.relative_to(output).parts:
+        current = current / part
+        if current.is_symlink():
+            raise Refusal(f"{current} is a symbolic link; delete it, since writing "
+                          f"through it could change another file")
+    if path.exists() and not path.is_file():
+        raise Refusal(f"{path} exists and is not a file")
+    resolved = path.resolve()
+    if resolved == source or not inside(resolved, output):
+        raise Refusal(f"the mutant path {path} resolves to {resolved}, outside {output}")
+
+
+def write_new(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` without following a symbolic link at ``path``."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_BINARY", 0)
+    descriptor = os.open(path, flags, 0o666)
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(data)
+
+
 def read_text(value: str | None, path: Path | None) -> bytes:
     if path is not None:
         return path.read_bytes()
@@ -178,20 +217,23 @@ def write(root: Path, source: Path, output: Path, find: bytes, replace: bytes) -
     target = output / relative
     if target == source:
         raise Refusal(f"the mutant would overwrite {relative.as_posix()}")
+    check_destination(output, target, source)
     check_output(root, output, target)
     data = source.read_bytes()
     vba = source.suffix.lower() in VBA_SUFFIXES
     mutant = mutate(data, find, replace, vba)
     companion = source.with_suffix(".frx") if source.suffix.lower() == ".frm" else None
     extra = companion if companion is not None and companion.is_file() else None
+    if extra is not None:
+        check_destination(output, target.with_suffix(extra.suffix), extra.resolve())
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes(mutant.data)
+    write_new(target, mutant.data)
     report = [f"mutant: {target.relative_to(root).as_posix()}",
               f"changed at {relative.as_posix()} line {mutant.line}:",
               *show(mutant.before, "-"), *show(mutant.after, "+")]
     if extra is not None:
         copy = target.with_suffix(extra.suffix)
-        copy.write_bytes(extra.read_bytes())
+        write_new(copy, extra.read_bytes())
         report.append(f"copied {extra.relative_to(root).as_posix()} unchanged beside it")
     report += [f"source SHA-256 {digest(data)}",
                f"mutant SHA-256 {digest(mutant.data)}"]

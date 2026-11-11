@@ -83,9 +83,10 @@ defective code in one of two ways:
   ```
 
   The tool writes the copy under `test-results/mutants/`, which Git ignores,
-  at the source's relative path, and never over the source. It refuses
-  unless the text occurs exactly once, and it keeps every other byte, CRLF
-  line endings and `Attribute VB_Name` included. It prints the changed lines
+  at the source's relative path, and never over the source or through a
+  symbolic link. It refuses unless the text occurs exactly once, overlapping
+  occurrences included, and it keeps every other byte, CRLF line endings and
+  `Attribute VB_Name` included. It prints the changed lines
   and the SHA-256 of the source and of the mutant. The text is literal; for a
   text that spans lines, pass `--find-file` and `--replace-file` with files
   that hold it. It exits with 0 when it writes the mutant, 1 when it refuses
