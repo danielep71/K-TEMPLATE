@@ -6,7 +6,9 @@ the general repository settings, the security features, the GitHub Actions
 settings (reported, never written) and the repository rulesets. Preview (the
 default) and --check only read and print the plan with its SHA-256; --apply
 writes that approved plan, journaling before the first write and after each,
-then reads everything back.
+then reads everything back. --check --token-scope workflow compares only what a
+workflow GITHUB_TOKEN with contents: read can read, lists the rest as not
+checked and plans nothing.
 """
 # Postponed annotations let the version check in main() run on older Python versions.
 from __future__ import annotations
@@ -68,6 +70,12 @@ DIGEST_PATTERN = re.compile(r'[0-9a-fA-F]{64}')
 SATISFIED = ('matches', 'covered')
 NOT_APPLIED = 'not applied (public repositories only)'
 DISTRIBUTION = 'docs/repo_governance/DISTRIBUTION.md'
+# What the token reads: everything that an administrator's token can ('full'), or
+# only what a workflow GITHUB_TOKEN with contents: read can ('workflow').
+TOKEN_SCOPES = ('full', 'workflow')
+# Endpoints that the workflow scope never reads: they need Administration: read,
+# which no workflow permission grants.
+WORKFLOW_UNREAD = 'not read: needs Administration: read, which a workflow token cannot have'
 
 # GitHub API values are JSON; a call takes a method, an endpoint and an optional payload.
 # The aliases appear only in annotations, which are never evaluated, so Python 3.8
@@ -233,16 +241,8 @@ def load_config(path: Path) -> dict[str, Json]:
 # Observation: read-only, and tolerant of what a token without administrator access cannot read.
 
 
-def security_states(call: Call, root: str, metadata: dict[str, Json], public: bool) -> dict[str, Row]:
-    """Each security feature as observed: True, False or None when GitHub does not say."""
-    states: dict[str, Row] = {}
-    if public:
-        value, failure = read(call, root + '/private-vulnerability-reporting')
-        states['private_vulnerability_reporting'] = (
-            {'observed': bool((value or {}).get('enabled')), 'source': 'GET private-vulnerability-reporting enabled'}
-            if failure is None else
-            {'observed': None, 'source': f'GET private-vulnerability-reporting (HTTP {failure}: unreadable)'})
-
+def dependabot_states(call: Call, root: str) -> tuple[Row, Row]:
+    """Dependabot alerts and security updates as observed: True, False or None when GitHub does not say."""
     value, failure = read(call, root + '/automated-security-fixes')
     if failure is None:
         value = value or {}
@@ -259,17 +259,35 @@ def security_states(call: Call, root: str, metadata: dict[str, Json], public: bo
     # they are off. Enabled security updates prove them on: GitHub requires them.
     _, failure = read(call, root + '/vulnerability-alerts')
     if failure is None:
-        states['vulnerability_alerts'] = {'observed': True, 'source': 'GET vulnerability-alerts (on)'}
+        alerts: Row = {'observed': True, 'source': 'GET vulnerability-alerts (on)'}
     elif failure == '404':
-        states['vulnerability_alerts'] = {'observed': False, 'source': 'GET vulnerability-alerts (HTTP 404: off)'}
+        alerts = {'observed': False, 'source': 'GET vulnerability-alerts (HTTP 404: off)'}
     elif fixes['observed'] is True:
-        states['vulnerability_alerts'] = {
-            'observed': True, 'source': f'GET vulnerability-alerts (HTTP {failure}: unreadable); on, '
-                                        'because Dependabot security updates are enabled and require them'}
+        alerts = {'observed': True, 'source': f'GET vulnerability-alerts (HTTP {failure}: unreadable); on, '
+                                              'because Dependabot security updates are enabled and require them'}
     else:
+        alerts = {'observed': None, 'source': f'GET vulnerability-alerts (HTTP {failure}: unreadable)'}
+    return alerts, fixes
+
+
+def security_states(call: Call, root: str, metadata: dict[str, Json], public: bool,
+                    scope: str = 'full') -> dict[str, Row]:
+    """Each security feature as observed: True, False or None when GitHub does not say."""
+    states: dict[str, Row] = {}
+    if public:
+        value, failure = read(call, root + '/private-vulnerability-reporting')
+        states['private_vulnerability_reporting'] = (
+            {'observed': bool((value or {}).get('enabled')), 'source': 'GET private-vulnerability-reporting enabled'}
+            if failure is None else
+            {'observed': None, 'source': f'GET private-vulnerability-reporting (HTTP {failure}: unreadable)'})
+    if scope == 'workflow':
+        # Never read: what GitHub answers a token without the permission could look like "off".
         states['vulnerability_alerts'] = {'observed': None,
-                                          'source': f'GET vulnerability-alerts (HTTP {failure}: unreadable)'}
-    states['automated_security_fixes'] = fixes
+                                          'source': f'GET vulnerability-alerts ({WORKFLOW_UNREAD})'}
+        states['automated_security_fixes'] = {'observed': None, 'paused': False,
+                                              'source': f'GET automated-security-fixes ({WORKFLOW_UNREAD})'}
+    else:
+        states['vulnerability_alerts'], states['automated_security_fixes'] = dependabot_states(call, root)
 
     # GitHub reports this block only to administrators of the repository.
     analysis = metadata.get('security_and_analysis')
@@ -286,7 +304,7 @@ def security_states(call: Call, root: str, metadata: dict[str, Json], public: bo
     return {feature: states[feature] for feature in SECURITY_PUBLIC_ONLY}
 
 
-def actions_states(call: Call, root: str, public: bool) -> dict[str, Row]:
+def actions_states(call: Call, root: str, public: bool, scope: str = 'full') -> dict[str, Row]:
     """Each Actions setting as observed, or None with the reason it is not known."""
     answers: dict[str, tuple[Json, str | None]] = {}
     states: dict[str, Row] = {}
@@ -295,6 +313,9 @@ def actions_states(call: Call, root: str, public: bool) -> dict[str, Row]:
             states[setting] = {'observed': None, 'source': NOT_APPLIED, 'applies': False}
             continue
         endpoint = 'actions/permissions' + suffix
+        if scope == 'workflow':
+            states[setting] = {'observed': None, 'source': f'GET {endpoint} ({WORKFLOW_UNREAD})'}
+            continue
         if endpoint not in answers:
             answers[endpoint] = read(call, f'{root}/{endpoint}')
         value, failure = answers[endpoint]
@@ -307,8 +328,8 @@ def actions_states(call: Call, root: str, public: bool) -> dict[str, Row]:
     return states
 
 
-def observe(call: Call, repo: str, config: dict[str, Json]) -> dict[str, Json]:
-    """Read every value the configuration manages. Read-only."""
+def observe(call: Call, repo: str, config: dict[str, Json], scope: str = 'full') -> dict[str, Json]:
+    """Read every value the configuration manages, within the token scope. Read-only."""
     root = f'repos/{repo}'
     metadata = call('GET', root)
     public = metadata.get('visibility') == 'public'
@@ -324,8 +345,8 @@ def observe(call: Call, repo: str, config: dict[str, Json]) -> dict[str, Json]:
         'public': public,
         'rulesets': [call('GET', f'{root}/rulesets/{r["id"]}') for r in own],
         'inherited': [r['name'] for r in listed if r.get('source_type', 'Repository') != 'Repository'],
-        'security': security_states(call, root, metadata, public),
-        'actions': actions_states(call, root, public),
+        'security': security_states(call, root, metadata, public, scope),
+        'actions': actions_states(call, root, public, scope),
     }
 
 
@@ -507,8 +528,47 @@ def effective_rulesets(config: dict[str, Json], state: dict[str, Json], rows: li
             for live in state['rulesets']]
 
 
-def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
-    """Compare every managed value with what GitHub reports."""
+def with_unreported_bypass(state: dict[str, Json]) -> tuple[dict[str, Json], list[str]]:
+    """The state with each unreported bypass list taken as empty, and the names of those rulesets.
+
+    GitHub never shows a workflow token a ruleset's bypass list. The workflow scope
+    compares the rest of the ruleset and lists the bypass list as not checked.
+    """
+    unreported = sorted({str(r.get('name')) for r in state['rulesets'] if 'bypass_actors' not in r})
+    rulesets = [r if 'bypass_actors' in r else dict(r, bypass_actors=[]) for r in state['rulesets']]
+    return dict(state, rulesets=rulesets), unreported
+
+
+def not_checked(report: dict[str, Json], unreported: list[str]) -> list[str]:
+    """Each managed value that the workflow scope could not read; its row is neither drift nor a match."""
+    found: list[str] = []
+    for row in report['settings']:
+        if row['observed'] is None:
+            row['matches'] = None
+            found.append(f'setting {row["setting"]}: not reported to this token')
+    for group, key in (('security', 'feature'), ('actions', 'setting')):
+        for row in report[group]:
+            if row['matches'] is not None and row['observed'] is None:
+                row['matches'] = None
+                found.append(f'{group} {row[key]}: {row["source"]}')
+    # Only the bypass lists of the named rulesets and of those that cover one matter.
+    relevant = {row['name'] for row in report['rulesets'] if row['id'] is not None}
+    relevant |= {name for row in report['rulesets'] for name in row['covered_by']}
+    found += [f'ruleset "{name}" bypass_actors: not reported (needs write access to the ruleset)'
+              for name in unreported if name in relevant]
+    return found
+
+
+def assess(config: dict[str, Json], state: dict[str, Json], scope: str = 'full') -> dict[str, Json]:
+    """Compare every managed value with what GitHub reports.
+
+    In the workflow scope a value the token cannot read is listed in not_checked
+    and is neither drift nor a match; the result is PARTIAL when everything read
+    matches and something is not checked.
+    """
+    unreported: list[str] = []
+    if scope == 'workflow':
+        state, unreported = with_unreported_bypass(state)
     metadata = state['metadata']
     configured_visibility = config['visibility']
     visibility = {'configured': configured_visibility, 'observed': metadata.get('visibility'),
@@ -530,13 +590,18 @@ def assess(config: dict[str, Json], state: dict[str, Json]) -> dict[str, Json]:
             if names:
                 row.update(status='covered', covered_by=names)
     managed = {r['name'] for r in config['rulesets']}
+    report: dict[str, Json] = {
+        'result': None, 'visibility': visibility,
+        'settings': settings, 'security': security, 'actions': actions, 'rulesets': rulesets,
+        'unmanaged_rulesets': [r['name'] for r in state['rulesets'] if r.get('name') not in managed],
+        'inherited_rulesets': sorted(state['inherited'])}
+    if scope == 'workflow':
+        report['not_checked'] = not_checked(report, unreported)
     drift = (not visibility['matches']
              or any(row['matches'] is False for row in settings + security + actions)
              or any(row['status'] not in SATISFIED for row in rulesets))
-    return {'result': 'DRIFT' if drift else 'VERIFIED', 'visibility': visibility,
-            'settings': settings, 'security': security, 'actions': actions, 'rulesets': rulesets,
-            'unmanaged_rulesets': [r['name'] for r in state['rulesets'] if r.get('name') not in managed],
-            'inherited_rulesets': sorted(state['inherited'])}
+    report['result'] = 'DRIFT' if drift else 'PARTIAL' if report.get('not_checked') else 'VERIFIED'
+    return report
 
 
 def plan_digest(repo: str, config_sha256: str, report: dict[str, Json], steps: Plan) -> str:
@@ -624,7 +689,8 @@ def print_notes(config: dict[str, Json], state: dict[str, Json], report: dict[st
               f'{detail.get("enforcement", "unknown enforcement")}) stays active. This script '
               'never changes or deletes it; delete it in the repository settings if a managed '
               'ruleset replaces it.')
-    skipped = [row['feature'] for row in report['security'] if row['matches'] is None and row['configured']]
+    skipped = [row['feature'] for row in report['security']
+               if row['source'] == NOT_APPLIED and row['configured']]
     if skipped:
         print(f'NOTE: {", ".join(skipped)} apply only to public repositories here; they are not '
               f'applied while the destination is {metadata.get("visibility")}. Rerun the check '
@@ -639,34 +705,42 @@ def print_notes(config: dict[str, Json], state: dict[str, Json], report: dict[st
               'count as drift, and an apply that does not resume them fails its read-back.')
 
 
-def print_differences(report: dict[str, Json]) -> None:
-    """One line per managed value that differs from the configuration."""
+def difference_lines(report: dict[str, Json]) -> list[str]:
+    """One line per managed value that differs from the configuration, and one per covered ruleset."""
+    lines: list[str] = []
     visibility = report['visibility']
     if not visibility['matches']:
-        print(f'DIFF visibility: observed {visibility["observed"]}, configured {visibility["configured"]} '
-              f'(never changed by this tool; see {DISTRIBUTION})')
+        lines.append(f'DIFF visibility: observed {visibility["observed"]}, configured {visibility["configured"]} '
+                     f'(never changed by this tool; see {DISTRIBUTION})')
     for row in report['settings']:
-        if not row['matches']:
-            print(f'DIFF setting {row["setting"]}: observed {json.dumps(row["observed"])}, '
-                  f'configured {json.dumps(row["configured"])}')
+        if row['matches'] is False:
+            lines.append(f'DIFF setting {row["setting"]}: observed {json.dumps(row["observed"])}, '
+                         f'configured {json.dumps(row["configured"])}')
     for row in report['security']:
         if row['matches'] is False:
-            print(f'DIFF security {row["feature"]}: observed {shown(row)}, '
-                  f'configured {json.dumps(row["configured"])} [{row["source"]}]')
+            lines.append(f'DIFF security {row["feature"]}: observed {shown(row)}, '
+                         f'configured {json.dumps(row["configured"])} [{row["source"]}]')
     for row in report['actions']:
         if row['matches'] is False:
-            print(f'DIFF actions {row["setting"]}: observed {shown(row)}, '
-                  f'configured {json.dumps(row["configured"])} [{row["source"]}]')
+            lines.append(f'DIFF actions {row["setting"]}: observed {shown(row)}, '
+                         f'configured {json.dumps(row["configured"])} [{row["source"]}]')
     for row in report['rulesets']:
         if row['status'] == 'covered':
             names = ', '.join(f'"{name}"' for name in row['covered_by'])
-            print(f'NOTE: ruleset "{row["name"]}" is covered by {names}: every configured rule '
-                  'is enforced at least as strictly there, so no write is planned for it.')
+            lines.append(f'NOTE: ruleset "{row["name"]}" is covered by {names}: every configured rule '
+                         'is enforced at least as strictly there, so no write is planned for it.')
             continue
         if row['status'] == 'missing':
-            print(f'DIFF ruleset "{row["name"]}": missing')
-        for line in row['differences']:
-            print(f'DIFF ruleset "{row["name"]}" ({row["id"]}) {line}')
+            lines.append(f'DIFF ruleset "{row["name"]}": missing')
+        lines += [f'DIFF ruleset "{row["name"]}" ({row["id"]}) {line}' for line in row['differences']]
+    return lines
+
+
+def print_differences(report: dict[str, Json]) -> None:
+    for line in difference_lines(report):
+        print(line)
+    for line in report.get('not_checked', []):
+        print(f'NOT CHECKED {line}')
 
 
 def print_plan(steps: Plan) -> None:
@@ -754,6 +828,34 @@ def evidence_record(config_path: Path, config_sha256: str, repo: str, state: dic
         'scope': 'Only the settings that the configuration manages are recorded; '
                  'everything else is outside this record.',
     }
+
+
+def markdown_summary(state: dict[str, Json], report: dict[str, Json], scope: str) -> str:
+    """A short Markdown summary of the comparison, for a workflow's job summary."""
+    metadata = state['metadata']
+    lines = ['## Repository settings drift', '',
+             f'- Destination: `{metadata.get("full_name")}`; default branch: `{metadata.get("default_branch")}`',
+             '- Token scope: ' + ('workflow: what a workflow token with contents: read can read; '
+                                  'the values it cannot read are not checked'
+                                  if scope == 'workflow' else 'full: every unreadable value counts as drift'),
+             f'- Result: **{report["result"]}**', '']
+    found = difference_lines(report)
+    sections = [('Drift', [line for line in found if line.startswith('DIFF ')]),
+                ('Notes', [line for line in found if not line.startswith('DIFF ')])]
+    if scope == 'workflow':
+        sections.append(('Not checked', report['not_checked']))
+    for title, items in sections:
+        if items or title == 'Drift':
+            lines += [f'### {title}', ''] + ([f'- {item}' for item in items] or ['None.']) + ['']
+    if report.get('not_checked'):
+        lines.append("Only `tools/setup_repository.py --check` with an administrator's token compares them.")
+    return '\n'.join(lines).rstrip('\n') + '\n'
+
+
+def append_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open('a', encoding='utf-8', newline='\n') as handle:
+        handle.write(text)
 
 
 def write_text(path: Path, text: str, what: str) -> None:
@@ -892,19 +994,46 @@ def apply(call: Call, args: argparse.Namespace, config: dict[str, Json], state: 
     return state, report, steps
 
 
+def write_summary(args: argparse.Namespace, state: dict[str, Json], report: dict[str, Json],
+                  scope: str) -> None:
+    if getattr(args, 'summary', None):
+        append_text(args.summary, markdown_summary(state, report, scope))
+
+
+def workflow_result(report: dict[str, Json]) -> int:
+    """The exit status of a workflow-scope check: 1 for drift in what it read, else 0."""
+    if report['result'] == 'DRIFT':
+        print('DRIFT: documented settings that this token can read do not match.')
+        return 1
+    if report['result'] == 'PARTIAL':
+        print(f'PARTIAL: every documented value that this token can read matches; '
+              f'{len(report["not_checked"])} value(s) listed as NOT CHECKED were not compared. '
+              'Only --check with an administrator\'s token verifies them.')
+        return 0
+    print('VERIFIED: all documented settings match. Unmanaged settings are outside this verification.')
+    return 0
+
+
 def run(args: argparse.Namespace, call: Call = api, now: datetime | None = None) -> int:
     if not REPOSITORY_PATTERN.fullmatch(args.repo) or args.repo.split('/')[1] in ('.', '..'):
         raise SetupError('Destination must be an explicit owner/repository on github.com.')
     config = load_config(args.config)
     config_sha256 = hashlib.sha256(args.config.read_bytes()).hexdigest()
     mode = 'apply' if args.apply else 'check' if args.check else 'preview'
+    scope = getattr(args, 'token_scope', 'full')
+    if scope == 'workflow' and (mode != 'check' or getattr(args, 'report', None)
+                                or getattr(args, 'evidence', None)):
+        raise SetupError('--token-scope workflow works only with --check, without --report or --evidence.')
     started = now or datetime.now(timezone.utc)
-    state = observe(call, args.repo, config)
-    report = assess(config, state)
-    steps = plan(config, report, args.repo)
-    digest = plan_digest(state['metadata'].get('full_name', args.repo), config_sha256, report, steps)
+    state = observe(call, args.repo, config, scope)
+    report = assess(config, state, scope)
     print_notes(config, state, report)
     print_differences(report)
+    if scope == 'workflow':
+        write_summary(args, state, report, scope)
+        return workflow_result(report)
+    steps = plan(config, report, args.repo)
+    digest = plan_digest(state['metadata'].get('full_name', args.repo), config_sha256, report, steps)
     print_plan(steps)
     print(f'PLAN SHA-256: {digest}')
     if args.apply:
@@ -919,6 +1048,7 @@ def run(args: argparse.Namespace, call: Call = api, now: datetime | None = None)
         target = Path(str(args.evidence).replace('{date}', stamp.strftime('%Y-%m-%d')))
         record = evidence_record(args.config, config_sha256, args.repo, state, report, steps, digest, mode, stamp)
         write_text(target, json.dumps(record, indent=2) + '\n', 'Evidence')
+    write_summary(args, state, report, scope)
     if report['result'] == 'VERIFIED':
         print('VERIFIED: all documented settings match' + (' after apply' if args.apply else '')
               + '. Unmanaged settings are outside this verification.')
@@ -953,10 +1083,16 @@ def main() -> int:
     parser.add_argument('--report', type=Path, help='Write a dated Markdown evidence record of the managed settings')
     parser.add_argument('--evidence', type=Path,
                         help='Write a JSON evidence record of the managed settings ({date} becomes YYYY-MM-DD, UTC)')
+    parser.add_argument('--summary', type=Path, help='Append a Markdown summary of the comparison to this file')
+    parser.add_argument('--token-scope', choices=TOKEN_SCOPES, default='full',
+                        help='workflow: with --check, compare only what a workflow GITHUB_TOKEN with '
+                             'contents: read can read and list the rest as not checked')
     args = parser.parse_args()
     for option in ('approve_plan', 'journal', 'update_existing'):
         if getattr(args, option) and not args.apply:
             parser.error(f'--{option.replace("_", "-")} requires --apply')
+    if args.token_scope == 'workflow' and (not args.check or args.report or args.evidence):
+        parser.error('--token-scope workflow requires --check and takes no --report or --evidence')
     if args.apply and (args.approve_plan is None or args.journal is None):
         parser.error('--apply requires --approve-plan SHA256 and --journal PATH')
     if args.approve_plan is not None and not DIGEST_PATTERN.fullmatch(args.approve_plan):

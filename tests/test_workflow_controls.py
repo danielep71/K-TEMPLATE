@@ -395,6 +395,34 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertEqual(step['env'], {'GH_TOKEN': '${{ github.token }}'})
         self.assertNotIn('${{', step['run'])
 
+    def test_settings_drift_checks_on_a_schedule_with_the_read_only_token(self):
+        document = workflows()['settings-drift.yml']
+        self.assertEqual(set(document['on']), {'schedule', 'workflow_dispatch'})
+        crons = [entry['cron'] for entry in document['on']['schedule']]
+        self.assertEqual(len(crons), 1)
+        self.assertNotEqual(crons[0].split()[0], '0', 'schedule off the hour')
+        # Contents read only: no administrator token, no secret and no write.
+        self.assertEqual(document['permissions'], {'contents': 'read'})
+        self.assertNotIn('secrets.', str(document))
+        jobs = document['jobs']
+        self.assertEqual(list(jobs), ['detect'])
+        job = jobs['detect']
+        self.assertEqual(job['permissions'], {'contents': 'read'})
+        self.assertNotIn('if', job)
+        steps = job['steps']
+        step = next(step for step in steps if 'setup_repository.py' in (step.get('run') or ''))
+        self.assertEqual(step['env']['GH_TOKEN'], '${{ github.token }}')
+        self.assertNotIn('continue-on-error', step)
+        for argument in ('python tools/setup_repository.py', '--repo "$GITHUB_REPOSITORY"', '--check',
+                         '--token-scope workflow', '--summary "$GITHUB_STEP_SUMMARY"'):
+            with self.subTest(argument=argument):
+                self.assertIn(argument, step['run'])
+        for option in ('--apply', '--report', '--evidence'):
+            with self.subTest(option=option):
+                self.assertNotIn(option, step['run'])
+        setup = [i for i, s in enumerate(steps) if str(s.get('uses', '')).startswith('actions/setup-python@')]
+        self.assertTrue(setup and setup[0] < steps.index(step), 'set up Python before the check')
+
     def test_scorecard_publishes_only_from_the_default_branch_of_a_public_repository(self):
         document = workflows()['scorecard.yml']
         self.assertNotIn('pull_request', document['on'])

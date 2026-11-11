@@ -37,6 +37,9 @@ ACTIONS: dict[str, dict[str, Any]] = {
     'actions/permissions/fork-pr-contributor-approval': {'approval_policy': 'all_external_contributors'},
     'actions/permissions/artifact-and-log-retention': {'days': 90, 'maximum_allowed_days': 400},
 }
+# The merge-related settings, which GitHub reports only to a token that can write contents.
+WORKFLOW_HIDDEN = ('allow_merge_commit', 'allow_squash_merge', 'allow_rebase_merge', 'allow_auto_merge',
+                   'allow_update_branch', 'delete_branch_on_merge')
 
 
 class FakeAPI:
@@ -64,6 +67,8 @@ class FakeAPI:
         self.attempts = 0
         self.journal: Path | None = None
         self.journal_seen: list[bool] = []
+        # Fields of the repository that its GET leaves out.
+        self.hidden_fields: set[str] = set()
 
     def not_found(self, endpoint: str) -> Any:
         raise setup.ApiError('GET', endpoint, '404')
@@ -151,12 +156,21 @@ class FakeAPI:
         if not repo['permissions']['admin']:
             # GitHub shows this block to administrators only.
             del repo['security_and_analysis']
+        for field in self.hidden_fields:
+            repo.pop(field, None)
         return repo
 
     def forbid_administration_reads(self) -> None:
         """What a token without administrator access cannot read."""
         self.repo['permissions']['admin'] = False
         self.forbidden |= {'vulnerability-alerts', 'automated-security-fixes', *ACTIONS}
+
+    def use_workflow_token(self) -> None:
+        """What a workflow GITHUB_TOKEN with contents: read can read: no bypass lists,
+        no administration endpoints and no merge-related settings, which GitHub
+        returns only to a token that can also write contents."""
+        self.forbid_administration_reads()
+        self.hidden_fields = set(WORKFLOW_HIDDEN)
 
 
 class SetupTests(unittest.TestCase):
@@ -441,6 +455,128 @@ class SetupTests(unittest.TestCase):
         state = {'metadata': {'permissions': {'admin': True}}}
         with self.assertRaisesRegex(setup.SetupError, 'unknown: ruleset "Protect main"'):
             setup.check_prerequisites(state, report)
+
+    # The workflow token scope: only what a workflow GITHUB_TOKEN with contents: read can read.
+
+    def run_workflow_check(self) -> tuple[int, str, str]:
+        """A --check in the workflow scope: its status, its output and the summary it appended."""
+        self.api.use_workflow_token()
+        self.args.check, self.args.token_scope = True, 'workflow'
+        with tempfile.TemporaryDirectory() as directory:
+            self.args.summary = Path(directory) / 'summary.md'
+            self.args.summary.write_text('# Earlier step\n', encoding='utf-8')
+            code, output = self.run_output()
+            summary = self.args.summary.read_text(encoding='utf-8')
+        self.args.summary = None
+        return code, output, summary
+
+    def test_workflow_scope_passes_what_it_reads_and_lists_the_rest_as_not_checked(self) -> None:
+        self.configure()
+        self.api.reads.clear()
+        code, output, summary = self.run_workflow_check()
+        self.assertEqual(code, 0)
+        self.assertIn('PARTIAL: every documented value that this token can read matches', output)
+        self.assertNotIn('VERIFIED', output)
+        self.assertNotIn('DIFF', output)
+        for line in ('NOT CHECKED ruleset "Protect main" bypass_actors: not reported '
+                     '(needs write access to the ruleset)',
+                     'NOT CHECKED setting allow_merge_commit: not reported to this token',
+                     'NOT CHECKED security vulnerability_alerts: GET vulnerability-alerts '
+                     f'({setup.WORKFLOW_UNREAD})',
+                     'NOT CHECKED actions retention_days: GET actions/permissions/artifact-and-log-retention '
+                     f'({setup.WORKFLOW_UNREAD})'):
+            with self.subTest(line=line):
+                self.assertIn(line, output)
+        self.assertEqual(output.count('NOT CHECKED ruleset'), 5)
+        # The settings that GitHub reports to the token are compared, not listed.
+        self.assertNotIn('NOT CHECKED setting has_wiki', output)
+        # It plans nothing and never reads an endpoint that needs Administration: read.
+        self.assertNotIn('PLAN SHA-256', output)
+        self.assertFalse([e for e in self.api.reads if 'vulnerability-alerts' in e
+                          or 'automated-security-fixes' in e or 'actions/permissions' in e])
+        self.assertEqual(self.api.writes, [])
+        self.assertTrue(summary.startswith('# Earlier step\n## Repository settings drift\n'), summary)
+        self.assertIn('- Result: **PARTIAL**', summary)
+        self.assertIn('### Drift\n\nNone.\n', summary)
+        self.assertIn('### Not checked\n\n- setting allow_merge_commit: not reported to this token\n', summary)
+        self.assertIn('\n- ruleset "Protect main" bypass_actors: not reported', summary)
+        # The same token in the full scope counts every unreadable value as drift.
+        self.args.token_scope = 'full'
+        self.assertEqual(self.run_output()[0], 1)
+
+    def test_workflow_scope_never_counts_a_hidden_bypass_list_as_checked(self) -> None:
+        self.configure()
+        main = next(r for r in self.api.rules if r['name'] == 'Protect main')
+        main['bypass_actors'] = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
+        code, output, summary = self.run_workflow_check()
+        # Neither drift, which it cannot see, nor a pass of the bypass list: it is not checked.
+        self.assertEqual(code, 0)
+        self.assertIn('NOT CHECKED ruleset "Protect main" bypass_actors', output)
+        self.assertIn('- Result: **PARTIAL**', summary)
+
+    def test_workflow_scope_fails_on_ruleset_drift(self) -> None:
+        cases: dict[str, Callable[[dict[str, Any]], None]] = {
+            'rules.non_fast_forward: observed "<absent>"': lambda main: main.update(
+                rules=[rule for rule in main['rules'] if rule['type'] != 'non_fast_forward']),
+            'enforcement: observed "disabled"': lambda main: main.update(enforcement='disabled'),
+            'missing': lambda main: self.api.rules.remove(main),
+        }
+        for expected, change in cases.items():
+            with self.subTest(change=expected):
+                self.api = FakeAPI()
+                self.args.token_scope = 'full'
+                self.configure()
+                change(next(r for r in self.api.rules if r['name'] == 'Protect main'))
+                code, output, summary = self.run_workflow_check()
+                self.assertEqual(code, 1)
+                self.assertRegex(output, rf'DIFF ruleset "Protect main".*{re.escape(expected)}')
+                self.assertIn('DRIFT: documented settings that this token can read do not match.', output)
+                self.assertIn('- Result: **DRIFT**', summary)
+                self.assertIn('### Drift\n\n- DIFF ruleset "Protect main"', summary)
+
+    def test_workflow_scope_fails_on_drift_in_the_other_values_it_reads(self) -> None:
+        self.api.repo['visibility'] = 'public'
+        self.configure()
+        self.api.repo['has_wiki'] = not self.api.repo['has_wiki']
+        self.api.reporting = False
+        code, output, _ = self.run_workflow_check()
+        self.assertEqual(code, 1)
+        self.assertIn('DIFF setting has_wiki', output)
+        # Private vulnerability reporting needs only Metadata: read; secret scanning is shown
+        # to administrators only.
+        self.assertIn('DIFF security private_vulnerability_reporting: observed false', output)
+        self.assertIn('NOT CHECKED security secret_scanning: security_and_analysis.secret_scanning '
+                      '(not reported without administrator access)', output)
+
+    def test_workflow_scope_names_the_bypass_lists_of_covering_rulesets(self) -> None:
+        self.configure()
+        self.rename('Protect release tags', 'Tags')
+        self.api.use_workflow_token()
+        config = setup.load_config(self.args.config)
+        report = setup.assess(config, setup.observe(self.api, 'example/project', config, 'workflow'), 'workflow')
+        row = next(r for r in report['rulesets'] if r['name'] == 'Protect release tags')
+        self.assertEqual((row['status'], row['covered_by']), ('covered', ['Tags']))
+        self.assertIn('ruleset "Tags" bypass_actors: not reported (needs write access to the ruleset)',
+                      report['not_checked'])
+        self.assertEqual(report['result'], 'PARTIAL')
+
+    def test_workflow_scope_only_checks(self) -> None:
+        for options in (['--token-scope', 'workflow'], ['--apply', '--approve-plan', '0' * 64, '--journal',
+                                                         'journal.json', '--token-scope', 'workflow'],
+                        ['--check', '--token-scope', 'workflow', '--report', 'settings.md'],
+                        ['--check', '--token-scope', 'workflow', '--evidence', 'evidence.json']):
+            with self.subTest(options=options):
+                stderr = io.StringIO()
+                with patch.object(sys, 'argv', ['setup_repository.py', '--repo', 'example/project', *options]), \
+                        patch.object(setup, 'run', side_effect=AssertionError('run was called')), \
+                        redirect_stderr(stderr), self.assertRaises(SystemExit) as caught:
+                    setup.main()
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn('--token-scope workflow requires --check', stderr.getvalue())
+        self.args.token_scope = 'workflow'
+        with self.assertRaisesRegex(setup.SetupError, 'works only with --check'):
+            self.run_setup()
+        self.assertEqual(self.api.reads, [])
 
     def test_public_secret_scanning_is_unknown_without_administrator_access(self) -> None:
         self.api.repo['visibility'] = 'public'
