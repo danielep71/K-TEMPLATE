@@ -63,6 +63,14 @@ Use only the categories an entry needs.
 
 ### Fixed
 
+- The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims
+  only what the checks enforce: the static checks enforce the dependency
+  direction for core, classes and examples, and the facade's and adapters'
+  direction is checked in review; only the standard modules in `src/modules/`
+  can hold supported API, so a class is never listed in the inventory; and
+  only an Office Open XML package is inspected for macros and personal
+  metadata, which the [distribution guide](docs/repo_governance/DISTRIBUTION.md)
+  now also says (#382).
 - Label, settings and traffic messages and guides now match what the tools
   do (#386). Label synchronization reports a label as outside the catalogue,
   the core plus the selected overlays, and advises adding it to the catalogue
