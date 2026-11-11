@@ -1756,10 +1756,21 @@ ERRORS_VALID = {
     "vba-qualified-pure-functions": handler(
         "        Number = VBA.CLng(Err.Number)\n        Number = VBA.Len(Err.Source)\n"
         "        Text = vba.cstr(Err.Description)\n        Source = Err.Source\n"),
+    "redim-and-erase-are-statements": handler(
+        "        Dim Values() As Long\n        ReDim Values(1 To 2)\n"
+        "        ReDim Preserve Values(1 To 3)\n        Erase Values\n"
+        "        Number = Err.Number\n"),
+    "statement-targets-and-file-statements": handler(
+        "        Dim Book As Object\n        Set Book = Nothing\n"
+        '        Mid$(Text, 1, 1) = "x"\n        LSet Text = Source\n        Let Number = 1\n'
+        "        Open Text For Input Access Read Shared As #1\n        Line Input #1, Text\n"
+        "        Print #1, Spc(2); Text\n        Close #1\n        Number = Err.Number\n"),
 }
-# Procedures that the fixtures call without parentheses.
+# Procedures that the fixtures call without parentheses or assign to.
 DESCRIBE = "\n\nPrivate Function Describe() As Long\nEnd Function\n"
 LABEL = "\n\nPrivate Property Get Label() As String\nEnd Property\n"
+STATUS = "\n\nPrivate Property Let Status(ByVal Value As String)\nEnd Property\n"
+OWNER = "\n\nPrivate Property Set Owner(ByVal Value As Object)\nEnd Property\n"
 ERRORS_INVALID = {
     "after-a-call": (handler("        Helper\n        Report Err.Description\n"), 10,
                      "Err.Description read in First after line 9, which may have changed Err "
@@ -1813,6 +1824,23 @@ ERRORS_INVALID = {
     "after-a-host-global-without-parentheses": (
         handler("        Text = ActiveCell\n        Number = Err.Number\n"), 10,
         "Err.Number read in First after line 9"),
+    "after-a-property-let": (
+        handler('        Status = "failed"\n        Number = Err.Number\n') + STATUS, 10,
+        "Err.Number read in First after line 9, which may have changed Err"),
+    "after-a-property-let-with-let": (
+        handler('        Let Status = "failed"\n        Text = Err.Description\n') + STATUS, 10,
+        "Err.Description read in First after line 9"),
+    "after-a-property-set": (
+        handler("        Set Owner = Nothing\n        Source = Err.Source\n") + OWNER, 10,
+        "Err.Source read in First after line 9"),
+    "after-a-function-in-redim-bounds": (
+        handler("        Dim Values() As Long\n        ReDim Values(1 To Describe)\n"
+                "        Number = Err.Number\n") + DESCRIBE, 11,
+        "Err.Number read in First after line 10"),
+    "after-a-with-block-member": (
+        handler("        Dim Book As Object\n        With Book\n            .Saved = True\n"
+                "        End With\n        Number = Err.Number\n"), 13,
+        "Err.Number read in First after line 11"),
 }
 ALL_ENVIRONMENTS = "[vba6-win32, vba7-win32, vba7-win64]"
 

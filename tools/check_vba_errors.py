@@ -13,6 +13,11 @@ cleared or may have replaced the error it means to read:
   is a variable, a constant, an Enum member or a component: a function,
   property or Declare of the project, or a host global such as ActiveCell.
   Names that start with ``vb`` or ``xl`` are the constants of VBA and Excel.
+  In the same way, an assignment (``=``, ``Let``, ``Set``, ``LSet``,
+  ``RSet``) to anything but a variable, an array element or a statement
+  target (``Date``, ``Mid(Text, 1, 1)``) sets a property, a call made once
+  the value is read: a Property Let or Set of the project, a member
+  (``.Value = x`` in a ``With`` block) or a property of the host.
 
 After ``On Error Resume Next``, and outside a handler, ``Err`` belongs to the
 most recent statement that can fail, so a read after such a statement checks
@@ -21,7 +26,10 @@ that statement and is not reported. A plain copy into a variable
 PURE_FUNCTIONS (``CLng``, ``CStr``, ``Len``, ..., also written ``VBA.CLng``),
 arithmetic, concatenation and an array element can fail but run no code that
 clears ``Err``: in a handler they change nothing, and after ``On Error Resume
-Next`` they are a statement that can fail.
+Next`` they are a statement that can fail. So are the VBA statements of
+BUILTIN_STATEMENT (``ReDim``, ``Erase``, ``Open``, ``Print #``, ...), whose
+operands alone are read as expressions; a statement that starts with any
+other name is a call.
 
 A segment starts at each label and after each branch or loop statement:
 ``If``, ``Select Case``, ``Do``, ``For``, ``While``, ``Exit``, ``Resume``,
@@ -72,11 +80,17 @@ JOIN = re.compile(r"^(?:ElseIf|Else|Case|Loop|Next|Wend|End\s+If|End\s+Select)\b
 DECLARATION = re.compile(r"^(?:Dim|Static|Const)\b", re.IGNORECASE)
 WITH = re.compile(r"^With\b", re.IGNORECASE)
 END_WITH = re.compile(r"^End\s+With\b", re.IGNORECASE)
-# Statements of the VBA language that can fail but run no project code.
+# Statements of the VBA language that can fail but run no project code: only
+# their operands are expressions, and the words of their syntax are not names.
 BUILTIN_STATEMENT = re.compile(
-    r"^(?:ReDim|Erase|Open|Close|Print|Write|Input|Line\s+Input|Get|Put|Seek|Lock|Unlock|Kill"
-    r"|MkDir|RmDir|ChDir|ChDrive|FileCopy|Name|SetAttr|Randomize|Beep|Reset|Width|Error)\b",
-    re.IGNORECASE)
+    r"^(?:ReDim(?:\s+Preserve)?|Erase|Open|Close|Print|Write|Input|Line\s+Input|Get|Put|Seek"
+    r"|Lock|Unlock|Kill|MkDir|RmDir|ChDir|ChDrive|FileCopy|Name|SetAttr|Randomize|Beep|Reset"
+    r"|Width|Error|AppActivate|SaveSetting|DeleteSetting|SendKeys)\b", re.IGNORECASE)
+STATEMENT_SYNTAX = re.compile(r"\b(?:Access|Append|Binary|Input|Lock|Output|Random|Read|Shared"
+                              r"|Write)\b", re.IGNORECASE)
+# Assignment targets that are VBA statements: Date = x sets the system date,
+# Mid(Text, 1, 1) = x replaces characters.
+BUILTIN_TARGETS = frozenset({"date", "time", "mid", "midb"})
 ASSIGNMENT_KEYWORD = re.compile(r"^(?:Let|Set|LSet|RSet)\s+", re.IGNORECASE)
 TARGET = re.compile(r"\.?[A-Za-z_]\w*[%&!#@$]?(?:\(\))?(?:[.!][A-Za-z_]\w*[%&!#@$]?(?:\(\))?)*")
 PLAIN_TARGET = re.compile(r"[A-Za-z_]\w*[%&!#@$]?")
@@ -96,7 +110,7 @@ PURE_FUNCTIONS = frozenset("""
     abs array asc ascw cbool cbyte ccur cdate cdbl cdec chr chrw cint clng clnglng clngptr csng
     cstr cvar cverr dateserial day fix format hex iif instr instrrev int isarray isdate isempty
     iserror ismissing isnull isnumeric isobject join lbound lcase left len lenb ltrim mid month
-    now oct replace right round rtrim sgn space split str strcomp string time timer trim typename
+    midb now oct replace right round rtrim sgn space spc split str strcomp string tab time timer trim typename
     ubound ucase val vartype year
 """.split())
 # The same functions qualified by their library, as in VBA.CLng(x): not a
@@ -221,24 +235,36 @@ def statement_effect(statement: str, variables: frozenset[str]) -> tuple[Effect,
     if WITH.match(statement):
         found = effect(statement[4:], variables)
         return found, found
-    if BUILTIN_STATEMENT.match(statement):
-        found = effect(statement, variables)
-        return found, found | Effect(fails=True)
     pair = assignment(statement)
     if pair is not None:
-        target, value = pair
-        found = effect(value, variables)
-        if PLAIN_TARGET.fullmatch(target):
-            return found, found
-        head = Effect(True, True)
-        index = target.find("(")
-        if index > 0 and "." not in target and "!" not in target and \
-                target[:index].rstrip("%&!#@$ ").casefold() in variables | PURE_FUNCTIONS:
-            head = Effect(fails=True)  # An array element, or Mid(Text, 1, 1) = "x".
-        return found, found | head | effect(target[index:] if index > 0 else "", variables)
+        found = effect(pair[1], variables)
+        return found, found | target_effect(pair[0], variables)
+    builtin = BUILTIN_STATEMENT.match(statement)
+    if builtin:
+        found = effect(STATEMENT_SYNTAX.sub(" ", statement[builtin.end():]), variables)
+        return found, found | Effect(fails=True)
     head_match = HEAD.match(statement)
     found = effect(statement[head_match.end():] if head_match else statement, variables)
     return found, found | Effect(True, True)
+
+
+def target_effect(target: str, variables: frozenset[str]) -> Effect:
+    """What assigning to ``target`` can do to Err, once the value is read.
+
+    A variable of the procedure or the module (and the procedure's own name)
+    is a plain copy, an array element can fail, and a statement target such
+    as Date or Mid(Text, 1, 1) can fail. Any other target is a property: a
+    Property Let or Set of the project, a member (x.y = 1, .y = 1 in a With
+    block), or a property of the host, such as Caption, which runs code."""
+    index = target.find("(")
+    name = (target[:index] if index > 0 else target).rstrip("%&!#@$ ").casefold()
+    indices = effect(target[index:], variables) if index > 0 else Effect()
+    if PLAIN_TARGET.fullmatch(target) or (index > 0 and PLAIN_TARGET.fullmatch(name)):
+        if name in variables:
+            return indices | Effect(fails=index > 0)
+        if name in BUILTIN_TARGETS:
+            return indices | Effect(fails=True)
+    return indices | Effect(True, True)
 
 
 def handler_labels(procedure: Procedure) -> set[str]:
