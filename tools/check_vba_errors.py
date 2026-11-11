@@ -37,10 +37,15 @@ operands alone are read as expressions; a statement that starts with any
 other name is a call.
 
 Within a statement, the check follows VBA's evaluation order: a read inside
-the arguments of a call, as in ``CLng(Err.Number)``, runs before that call,
-and only what runs before a read can refresh ``Err`` for it. An operator
-written before a read may run after it, as ``&`` in ``a & b / Err.Number``;
-it counts as running before, so that no read is claimed stale on a guess.
+the arguments of a call, as in ``CLng(Err.Number)``, runs before that call.
+Only what runs before a read counts for it, under the same rules as the
+statements before: after ``On Error Resume Next`` it can refresh ``Err``, and
+in a handler a call or member access makes the read stale, as in
+``Report Helper(), Err.Number``. An operator written before a read may run
+after it, as ``&`` in ``a & b / Err.Number``; it counts as running before.
+A name qualified by the VBA library or one of its modules (``VBA.CLng``,
+``VBA.Strings.Len``, ``VBA.vbCrLf``, ``VBA.Beep``, ``VBA.Mid``) is VBA's, as
+unqualified, whatever the project declares.
 Assigning a property of ``Err`` (``Err.Description = x``) writes it and
 reads nothing, and ``.Number`` inside ``With Err`` reads ``Err.Number``.
 ``Err`` read through its default member (``n = Err``), ``Err`` passed to a
@@ -94,7 +99,14 @@ WITH_MEMBER = re.compile(r"(?<![\w)\].!])\.(?=\s*[A-Za-z_])")
 # What an operand is an argument or operand of, before it: the name of an
 # enclosing call (the last name only, as in .Method of obj.Method(), since
 # obj is read first) and an operator, which both run after the operand.
-ENCLOSING_CALL = re.compile(r"\.?\s*[A-Za-z_]\w*[%&!#@$]?\s*$")
+# The VBA library and its modules, as in VBA.CLng, VBA.Strings.Len or
+# Strings.Len: what they qualify is VBA's, whatever the project declares.
+VBA_MODULE = (r"(?:Constants|Conversion|DateTime|FileSystem|Financial|Information|Interaction"
+              r"|Math|Strings)\s*\.\s*")
+VBA_QUALIFIER = rf"(?:VBA\s*\.\s*(?:{VBA_MODULE})?|{VBA_MODULE})"
+VBA_HEAD = re.compile(rf"^{VBA_QUALIFIER}", re.IGNORECASE)
+ENCLOSING_CALL = re.compile(rf"(?:(?<![\w.!]){VBA_QUALIFIER}|\.\s*)?[A-Za-z_]\w*[%&!#@$]?\s*$",
+                            re.IGNORECASE)
 TRAILING_OPERATOR = re.compile(r"(?:[-&+*/\\^<>=]|\b(?:Mod|Not|And|Or|Xor|Eqv|Imp|Like|Is)\b)\s*$",
                                re.IGNORECASE)
 LABEL_PREFIX = re.compile(r"^\s*(?:[A-Za-z_]\w*:(?!=)|\d+:?)")
@@ -140,10 +152,12 @@ PURE_FUNCTIONS = frozenset("""
     month now oct replace right round rtrim sgn space spc split str strcomp string tab time timer
     trim typename ubound ucase val vartype year
 """.split())
-# The same functions qualified by their library, as in VBA.CLng(x): neither a
-# member access of an object nor a procedure of the project of that name.
-VBA_PURE = re.compile(rf"(?<![\w.!])VBA\s*\.\s*(?:{'|'.join(sorted(PURE_FUNCTIONS))})\b"
+# The same functions qualified by their library, as in VBA.CLng(x), and the
+# constants of VBA so qualified, as in VBA.vbCrLf: neither a member access of
+# an object nor a procedure of the project of that name.
+VBA_PURE = re.compile(rf"(?<![\w.!]){VBA_QUALIFIER}(?:{'|'.join(sorted(PURE_FUNCTIONS))})\b"
                       r"[%&!#@$]?", re.IGNORECASE)
+VBA_CONSTANT = re.compile(rf"(?<![\w.!]){VBA_QUALIFIER}vb\w*", re.IGNORECASE)
 # Prefixes of the constants of VBA (vbCrLf) and Excel (xlUp), which are values.
 CONSTANT_PREFIXES = ("vb", "xl")
 # Words that may stand in an expression without being a value that can fail.
@@ -227,9 +241,12 @@ def effect(text: str, names: Names) -> Effect:
     global object, such as ActiveSheet, called without parentheses. Only a
     name the project does not declare can be a VBA function or constant."""
     text = ERR_READ.sub(lambda match: "0" * len(match.group()), text)
+    # A qualified VBA function can fail, as CLng("x") does, but runs no project code.
+    qualified = VBA_PURE.search(text) is not None
     text = VBA_PURE.sub(lambda match: "0" * len(match.group()), text)
+    text = VBA_CONSTANT.sub(lambda match: "0" * len(match.group()), text)
     text = NUMBER_LITERAL.sub(lambda match: "0" * len(match.group()), dates_as_values(text))
-    result = Effect(fails=arithmetic(text))
+    result = Effect(fails=arithmetic(text) or qualified)
     if MEMBER.search(text) or NEW.search(text):
         result = Effect(True, True)
     for match in CALL.finditer(text):
@@ -285,10 +302,13 @@ def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
         index = target.find("(")
         reads = value + (" , " + target[index:] if index > 0 else "")
         return reads, effect(value, names) | target_effect(target, names)
-    builtin = BUILTIN_STATEMENT.match(statement)
-    # A procedure of the project named like a VBA statement, such as Beep, shadows it.
-    if builtin and statement.split(None, 1)[0].casefold() not in names.callables:
-        operands = STATEMENT_SYNTAX.sub(" ", statement[builtin.end():])
+    # A procedure of the project named like a VBA statement, such as Beep,
+    # shadows it, unless the statement is qualified, as in VBA.Beep.
+    qualifier = VBA_HEAD.match(statement)
+    unqualified = statement[qualifier.end():] if qualifier else statement
+    builtin = BUILTIN_STATEMENT.match(unqualified)
+    if builtin and (qualifier or unqualified.split(None, 1)[0].casefold() not in names.callables):
+        operands = STATEMENT_SYNTAX.sub(" ", unqualified[builtin.end():])
         return operands, effect(operands, names) | Effect(fails=True)
     head_match = HEAD.match(statement)
     arguments = statement[head_match.end():] if head_match else statement
@@ -327,7 +347,13 @@ def target_effect(target: str, names: Names) -> Effect:
     as Date or Mid(Text, 1, 1) can fail. Any other target is a property: a
     Property Let or Set of the project, which shadows a statement target of
     its name, a member (x.y = 1, .y = 1 in a With block), or a property of
-    the host, such as Caption, which runs code."""
+    the host, such as Caption, which runs code. VBA.Mid(Text, 1, 1) is Mid."""
+    qualifier = VBA_HEAD.match(target)
+    if qualifier:
+        rest = target[qualifier.end():]
+        index = rest.find("(")
+        if (rest[:index] if index > 0 else rest).rstrip("%&!#@$ ").casefold() in BUILTIN_TARGETS:
+            return (effect(rest[index:], names) if index > 0 else Effect()) | Effect(fails=True)
     index = target.find("(")
     name = (target[:index] if index > 0 else target).rstrip("%&!#@$ ").casefold()
     indices = effect(target[index:], names) if index > 0 else Effect()
@@ -346,10 +372,31 @@ def handler_labels(procedure: Procedure) -> set[str]:
             if match.group(1) not in {"0"}}
 
 
-def stale_message(procedure: str, reads: list[re.Match[str]], stale: tuple[int, str]) -> str:
+def stale_message(procedure: str, reads: list[re.Match[str]], cause: str) -> str:
     fields = list(dict.fromkeys(f"Err.{match.group(1).capitalize()}" for match in reads))
-    return (f"{', '.join(fields)} read in {procedure} after line {stale[0]}, {stale[1]}; "
+    return (f"{', '.join(fields)} read in {procedure} after {cause}; "
             "save Err.Number, Err.Source and Err.Description into variables first")
+
+
+def stale_reads(reads: str, segment: Segment, names: Names) -> list[re.Match[str]]:
+    """The reads of Err in ``reads`` that are stale, each judged on what the
+    statement evaluates before it as well as on ``segment``.
+
+    After On Error Resume Next or outside a handler, code that runs before a
+    read and can fail may be the error it checks: the read is stale only when
+    Err already was and no such code runs. In a handler, a read is stale when
+    Err already was, or when a call or member access runs before it in the
+    same statement, as in Report Helper(), Err.Number. A call that a read is
+    an argument of, as in CLng(Err.Number), runs after it."""
+    stale = []
+    for match in ERR_READ.finditer(reads):
+        before = effect(evaluated_before(reads, match.start()), names)
+        if segment.follows_last_failure:
+            if segment.stale and not before.fails:
+                stale.append(match)
+        elif segment.stale or before.changes:
+            stale.append(match)
+    return stale
 
 
 def check_statement(path: str, procedure: Procedure, line: int, statement: str,
@@ -369,15 +416,11 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
         total = Effect()
     else:
         reads, total = statement_effect(statement, names)
-    # A read after code of the same statement that can fail, evaluated before
-    # it, may be that code's error: no claim then, unless no failure can
-    # refresh Err. A call that a read is an argument of runs after it.
-    stale = [match for match in ERR_READ.finditer(reads)
-             if not (segment.follows_last_failure
-                     and effect(evaluated_before(reads, match.start()), names).fails)]
-    if segment.stale and stale:
-        findings.append(Finding(path, line, stale_message(procedure.name, stale,
-                                                          segment.stale)))
+    stale = stale_reads(reads, segment, names)
+    if stale:
+        cause = (f"line {segment.stale[0]}, {segment.stale[1]}" if segment.stale else
+                 "a call or member access that the same statement evaluates first")
+        findings.append(Finding(path, line, stale_message(procedure.name, stale, cause)))
     if branch:
         segment.restart()
     elif segment.follows_last_failure:

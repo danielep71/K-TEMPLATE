@@ -1779,6 +1779,20 @@ ERRORS_VALID = {
     "with-err-copied-first": handler(
         "        With Err\n            Number = .Number\n            Text = .Description\n"
         "        End With\n        Helper\n"),
+    "read-before-a-call-in-the-same-statement": handler(
+        "        Number = Err.Number + Describe()\n")
+    + "\n\nPrivate Function Describe() As Long\nEnd Function\n",
+    "read-as-an-argument-before-a-call": handler(
+        "        Report Err.Number, Describe()\n")
+    + "\n\nPrivate Function Describe() As Long\nEnd Function\n",
+    "resume-next-qualified-conversion-can-fail": guarded(
+        '        Number = VBA.CLng("bad")\n        Number = Err.Number\n'),
+    "resume-next-qualified-len-can-fail": guarded(
+        "        Number = VBA.Len(Text)\n        Number = Err.Number\n"),
+    "qualified-vba-names-are-vba": handler(
+        "        Text = VBA.vbCrLf & Err.Description\n        VBA.Beep\n"
+        '        VBA.Mid$(Text, 1, 1) = "x"\n        Number = VBA.Conversion.CLng(Err.Number)\n'
+        "        Source = Err.Source\n"),
 }
 # Procedures that the fixtures call without parentheses or assign to.
 DESCRIBE = "\n\nPrivate Function Describe() As Long\nEnd Function\n"
@@ -1874,6 +1888,16 @@ ERRORS_INVALID = {
         handler("        Helper\n        With Err\n            Number = .Number\n"
                 "        End With\n"), 11,
         "Err.Number read in First after line 9"),
+    "call-before-a-read-in-the-same-statement": (
+        handler("        Number = Describe() + Err.Number\n") + DESCRIBE, 9,
+        "Err.Number read in First after a call or member access that the same statement "
+        "evaluates first"),
+    "call-argument-before-a-read": (
+        handler("        Report Describe(), Err.Number\n") + DESCRIBE, 9,
+        "Err.Number read in First after a call or member access"),
+    "member-access-before-a-read": (
+        handler("        Text = Application.Name & Err.Description\n"), 9,
+        "Err.Description read in First after a call or member access"),
     "err-write-reads-its-value-after-a-call": (
         handler('        Helper\n        Err.Description = "context: " & Err.Description\n'), 10,
         "Err.Description read in First after line 9"),
