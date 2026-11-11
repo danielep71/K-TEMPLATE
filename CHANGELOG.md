@@ -15,9 +15,11 @@ neither a commit log nor release evidence.
 - Link the issue or pull request that holds the detail.
 - Record only evidence that was produced. A static check is not an Excel run:
   say what was and was not run in Excel.
-- Until a version is released, edit an existing entry rather than adding one
-  that describes a change to unreleased work: an entry describes what the
-  release contains.
+- Once a version has been released, edit an existing entry of the next
+  version rather than adding one that describes a change to its unreleased
+  work: an entry describes what the release contains. The first release's
+  section also records, as **Changed** and **Fixed**, how its additions
+  changed while it was prepared.
 - Entries move into a dated section only when a release is prepared, as
   [RELEASING.md](RELEASING.md) describes. After that, until the tag exists,
   a fix for a release gate that failed on the candidate records its change in
@@ -71,6 +73,33 @@ Use only the categories an entry needs.
   only an Office Open XML package is inspected for macros and personal
   metadata, which the [distribution guide](docs/repo_governance/DISTRIBUTION.md)
   now also says (#382).
+- The test-case checks now enforce what `TEST_CASES.md` and the validation
+  plan state. An invalid file-based case scopes a result only to a dataset of
+  its manifest. An invalid JSON fixture may break or omit its calculation
+  inputs, but a key outside the fixture keys fails. A code, ID, quantity or
+  rule must be the whole value with ASCII digits, so `"EUR\n"` and a rule
+  step in another script's digits fail, in `check_test_cases.py`,
+  `check_accuracy.py` and `check_independent.py`. A *Traceability* row may
+  name a procedure of a form under `src/`. `check_independent.py` fails on
+  any expected value citing an adapter's source that the adapter does not
+  print, not only an `independent` one. The setup guide's `DS-01` row now
+  says to remove both illustrative cases and their *Traceability* row, and
+  to replace `ACC-01`, in the same change (#384).
+- `tools/release.py verify` and the **Release** workflow accept a tag
+  message whose `Deviations:` line is followed by a `- ` or `* ` list on the
+  next lines, as well as by text such as `none` on the same line, and reject
+  `Deviations:` with nothing after it, with an error that names both forms.
+  `RELEASING.md` shows both forms, defines a released version as one whose
+  section is dated and a published one as one with a tag and a GitHub
+  Release, and says that `RELEASE_ATTESTATIONS` without GitHub Enterprise
+  Cloud fails the attestation and creates no draft. The changelog policy,
+  `SECURITY.md` and the setup and structure guides match (#385).
+- **Repository integrity** no longer reports a Dependabot `target-branch` as
+  missing in a single-branch or shallow clone: `dependabot-target-branches`
+  asks the `origin` remote for a branch that has no remote-tracking branch,
+  and is skipped, or fails under `--strict`, when `origin` cannot answer. The
+  check table in `CONTRIBUTING.md` shows the `changelog` check with
+  `--repository OWNER/REPOSITORY`, as CI runs it (#381).
 - **Repository integrity** accepts the bytes that `.gitattributes`,
   `.editorconfig` and the formatter keep. `git diff --check` reports no
   white-space error in the regulatory source copies under
