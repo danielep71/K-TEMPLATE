@@ -90,9 +90,9 @@ when it exists, holds aggregate counts only; it is scanned with the rest.
 ## 📗 Workbooks
 
 A workbook holds content that its exported source and a text diff do not
-show. **Repository integrity** already fails a committed Office package,
-other than a regulatory source copy, that carries macros or names a person or
-organization in `docProps/core.xml` (author, last editor) or
+show. **Repository integrity** already fails a committed Office Open XML
+package, other than a regulatory source copy, that carries macros or names a
+person or organization in `docProps/core.xml` (author, last editor) or
 `docProps/app.xml` (company, manager); it checks only the current tree.
 Open each workbook ever committed in Excel and run **File → Info → Check for
 Issues → Inspect Document**, or unzip a `.xlsx`, `.xlsm` or `.xltx` and read
