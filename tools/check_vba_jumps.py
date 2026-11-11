@@ -61,7 +61,10 @@ without ``Call`` and named arguments, or the ``Error`` statement; a
   finding. ``Stop`` only pauses, so the path goes on.
   Jumps are not followed: the path goes on after an
   ``On ... GoTo`` list, which falls through when no target is chosen, and a
-  label on the path does not merge the states of other jumps to it.
+  label on the path does not merge the states of other jumps to it. In a
+  branch the path has left, a label that some statement jumps to makes the
+  state unknown; a label nothing jumps to, such as a line number kept for
+  ``Erl``, leaves the branch ended.
 - ``Resume`` and ``Resume Next`` continue at a statement that cannot be known
   statically, so no path starts from them. A raise inside a handler before
   its ``Resume`` is not trapped by that handler, so it is not reported.
@@ -114,7 +117,9 @@ ERR_RAISE = re.compile(r"(?<![\w.])(?:VBA\s*\.\s*)?Err\s*\.\s*Raise\b", re.IGNOR
 # The Error statement, as in "Error 5"; Error$ and Error(...) in an
 # expression are functions, and never start a statement.
 ERROR_STATEMENT = re.compile(r"^Error\b(?!\s*\$)\s*\S", re.IGNORECASE)
-COMBINED_NEXT = re.compile(r"^Next\s+(\w+(?:\s*,\s*\w+)+)$", re.IGNORECASE)
+# A statement that is only a line number: in "If x Then 100", VBA jumps there.
+IMPLICIT_GOTO = re.compile(r"^\d+$")
+COMBINED_NEXT =re.compile(r"^Next\s+(\w+(?:\s*,\s*\w+)+)$", re.IGNORECASE)
 # A jump or exit that keeps a subroutine from running straight to its Return.
 BRANCH_JUMP = re.compile(r"(?<![\w.])(?:GoTo|GoSub|Resume|Return)\b|^(?:Exit|End)\b",
                          re.IGNORECASE)
@@ -499,6 +504,15 @@ def subroutine_changes_handler(steps: list[Step], code: str) -> bool:
                if operation.casefold() == "gosub")
 
 
+def jump_targets(steps: list[Step]) -> set[str]:
+    """The labels that some statement may jump to: ``GoTo``, ``GoSub``,
+    ``On ... GoTo`` and ``GoSub``, ``Resume <label>``, ``On Error GoTo
+    <label>``, and the line number alone after a one-line ``If ... Then`` or
+    ``Else``, which VBA reads as ``GoTo``."""
+    return {target.casefold() for step in steps for _, target in statement_jumps(step.code)} \
+        | {step.code for step in steps if IMPLICIT_GOTO.match(step.code)}
+
+
 def trapped_raises(steps: list[Step], start: int, handler: str
                    ) -> list[tuple[int, str, str]]:
     """``(line, handler, raise)`` for each ``Err.Raise`` or ``Error``
@@ -507,6 +521,7 @@ def trapped_raises(steps: list[Step], start: int, handler: str
     found: list[tuple[int, str, str]] = []
     state = handler
     blocks = enclosing_blocks(steps, start)
+    targeted = jump_targets(steps)
     # While the path skips the other branches of an enclosing block: the
     # depth of the blocks nested in them.
     skipping: int | None = None
@@ -529,8 +544,10 @@ def trapped_raises(steps: list[Step], start: int, handler: str
             skipping = 0 if skip else None
             continue
         if step.label is not None:
-            # Another jump may reach a label in a branch this path left.
-            state = UNKNOWN if state == DEAD else state
+            # Another jump may reach a label in a branch this path left; a
+            # label nothing jumps to, such as a line number for Erl, cannot.
+            if state == DEAD and step.label.casefold() in targeted:
+                state = UNKNOWN
             continue
         after = block_statement(steps, index, state, blocks)
         if after is not None:

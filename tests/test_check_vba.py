@@ -990,6 +990,23 @@ Report:
         Loop
         Err.Raise 5
 ''', "Err.Raise"),
+            # Nothing jumps to Unused, so the branch stays ended after Exit Sub.
+            "raise-after-an-untargeted-label-in-an-ended-branch": ('''Cleanup:
+        If Flag Then
+            Exit Sub
+Unused:
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''', "Err.Raise"),
+            # A line number kept for Erl is no jump target either.
+            "raise-after-an-erl-line-number-in-an-ended-branch": ('''Cleanup:
+        If Flag Then
+            Exit Sub
+100         On Error GoTo 0
+        End If
+        Err.Raise 5
+''', "Err.Raise"),
             # Under On Error Resume Next a raise falls through.
             "raise-after-a-raise-under-resume-next": (
                 "Cleanup:\n        On Error Resume Next: Err.Raise 5: "
@@ -1057,6 +1074,25 @@ Cleanup:
         Do While Flag
             On Error GoTo Handler
         Loop
+        Err.Raise 5
+''',
+            # A jump may reach Disarm, so the state after End If is unknown.
+            "raise-after-a-targeted-label-in-an-ended-branch": '''        If Index = 2 Then GoTo Disarm
+Cleanup:
+        If Flag Then
+            Exit Sub
+Disarm:
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
+            # "If ... Then 100" jumps to line 100.
+            "raise-after-an-implicitly-targeted-line-number": '''        If Index = 2 Then 100
+Cleanup:
+        If Flag Then
+            Exit Sub
+100         On Error GoTo 0
+        End If
         Err.Raise 5
 ''',
             # The subroutine branches before its Return, so the state is unknown.
