@@ -26,9 +26,10 @@ Its VBA project is written from source by vba_project.py:
 the standard modules (.bas) and class modules (.cls) of the configuration's
 directories, plus a document module for ThisWorkbook and for each sheet. A
 document module comes from src/workbook/<code name>.cls when that file
-exists. Excel compiles the project from source on open
-(docs/methodology/VALIDATION_PLAN.md, HB-05), so the build needs no Trust
-access to the VBA project object model.
+exists. The project holds no compiled code, so Excel reads it from source
+and compiles each module when it is first used
+(docs/methodology/VALIDATION_PLAN.md, HB-05): the build needs no Trust access
+to the VBA project object model.
 
 Forms are not built: a .frm in a source directory stops the build, and forms
 are imported by hand. For a given commit and working tree the output is

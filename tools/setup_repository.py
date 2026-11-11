@@ -881,10 +881,11 @@ def apply(call: Call, args: argparse.Namespace, config: dict[str, Json], state: 
         entry['status'] = 'done'
         write_json_atomically(args.journal, journal)
         print(f'Applied {method} {endpoint}')
-    if steps:
-        state = observe(call, args.repo, config)
-        report = assess(config, state)
-        steps = plan(config, report, args.repo)
+    # Read back after every apply, an empty one included, so that the journal
+    # records a fresh observation, never the one the plan was built from.
+    state = observe(call, args.repo, config)
+    report = assess(config, state)
+    steps = plan(config, report, args.repo)
     journal['readback'] = report['result']
     write_json_atomically(args.journal, journal)
     print(f'Journal written to {args.journal}')

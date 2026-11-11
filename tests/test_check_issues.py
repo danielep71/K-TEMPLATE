@@ -65,6 +65,11 @@ class MetadataTests(unittest.TestCase):
         findings = check_issues.audit([issue(1, "P3", "ready")], {1: "open"}, REPOSITORY,
                                       catalogue={"P3"}, assignee="triage-person")
         self.assertEqual([(f.number, f.rule) for f in findings], [(1, "catalogue")])
+        # The catalogue is what the manifest resolves, not every label the file defines:
+        # a label of an unselected overlay is in the file but outside the catalogue.
+        self.assertEqual(findings[0].message,
+                         "has label 'ready', which is not in the catalogue that "
+                         ".github/labels.json resolves (core and selected overlays)")
 
 
 class TargetDateTests(unittest.TestCase):

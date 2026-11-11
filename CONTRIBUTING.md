@@ -102,7 +102,10 @@ there, as CI does.
 
 The last command runs every check of **Repository integrity**, the tests
 included, and writes a log for each, `report.json` and `summary.md` under
-`test-results/integrity/`, which Git ignores. It runs these checks, in this order:
+`test-results/integrity/`, which Git ignores. It runs these checks, in this
+order. `OWNER/REPOSITORY` is the repository that `--repository` names, as CI
+passes it, or else the GitHub repository of the `origin` remote; without
+either, `changelog` runs without `--repository`.
 
 <!-- BEGIN generated: integrity-checks -->
 | Check | Runs |
@@ -127,6 +130,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `vba-public-api` | `python tools/check_vba_public_api.py` |
 | `vba-dependencies` | `python tools/check_vba_dependencies.py` |
 | `vba-identifiers` | `python tools/check_vba_identifiers.py` |
+| `vba-errors` | `python tools/check_vba_errors.py` |
 | `vba-calls` | `python tools/check_vba_calls.py` (advisory: findings warn, never fail the run) |
 | `data-contract` | `python tools/check_data_contract.py` |
 | `test-cases` | `python tools/check_test_cases.py` |
@@ -134,7 +138,7 @@ included, and writes a log for each, `report.json` and `summary.md` under
 | `independent-implementations` | `python tools/check_independent.py` |
 | `accuracy` | `python tools/check_accuracy.py` |
 | `workbook-protection` | `python tools/check_workbook_protection.py` |
-| `changelog` | `python tools/check_changelog.py` |
+| `changelog` | `python tools/check_changelog.py --repository OWNER/REPOSITORY` |
 | `generated-docs` | `python tools/render_docs.py --check` |
 | `markdown-links` | `python tools/check_links.py` |
 | `documented-commands` | `python tools/check_doc_commands.py` |
@@ -150,7 +154,9 @@ blocks between `BEGIN generated` and `END generated` markers from the code;
 **Repository integrity** fails while one differs from a fresh render. Edit
 the renderer in `tools/render_docs.py`, never the block. A check whose tool or GitHub
 context is missing locally, such as Ruff or the default branch, is reported as
-skipped; `--strict` fails it instead, as CI does. CI also passes `--ci`, which
+skipped, as is `dependabot-target-branches` when a `target-branch` has no
+remote-tracking branch and the `origin` remote cannot be asked whether it
+exists; `--strict` fails it instead, as CI does. CI also passes `--ci`, which
 adds a last check, `clean-working-tree`: it fails when a file is changed,
 deleted, or added and not ignored, so that the results describe the commit
 itself. To run a single check, use

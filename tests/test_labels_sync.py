@@ -123,12 +123,32 @@ class ReconcileOrderTests(unittest.TestCase):
                       unselected.stdout)
         self.assertEqual(self.api.writes, [])
 
+    def test_a_label_of_an_unselected_overlay_is_outside_the_catalogue(self) -> None:
+        # The label is defined in the manifest, but the catalogue holds only the
+        # core and the selected overlays: the remedy is to select the overlay.
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        label = {"name": "zz-regime", "color": "ABCDEF", "description": "overlay label"}
+        manifest["overlays"] = {"regime": [label]}
+        manifest["selected_overlays"] = []
+        self.api.labels = [entry for entry in self.api.labels if entry["name"] != "legacy"] + [label]
+        self.api.issue_labels = ["zz-regime"]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "labels.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            result = self.run_script("--dry-run", manifest=path)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("| delete | `zz-regime` | outside the catalogue; still in use, a real run would refuse it |",
+                      result.stdout)
+        self.assertIn("Remove each label from its issues and pull requests, or add it to the catalogue "
+                      "or select its overlay.", result.stdout)
+        self.assertEqual(self.api.writes, [])
+
     def test_a_dry_run_previews_the_deletion_a_real_run_would_refuse(self) -> None:
         result = self.run_script("--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("(dry run)", result.stdout)
         self.assertIn("- Deletions still in use: **1**", result.stdout)
-        self.assertIn("| delete | `legacy` | outside the manifest; still in use, a real run would refuse it |",
+        self.assertIn("| delete | `legacy` | outside the catalogue; still in use, a real run would refuse it |",
                       result.stdout)
         self.assertIn('A real run would refuse every change. Refusing to prune labels still used by an issue '
                       'or pull request: "legacy". No change was applied.', result.stdout)

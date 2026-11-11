@@ -42,7 +42,8 @@ Excel run, and never needs Trust access to the VBA project object model:
    beside the evidence folder as <folder>-report.txt.
 
 It exits 0 when the check passes, 1 when it fails or the run could not
-complete, and 2 when it is not run on Windows. Standard library only.
+complete, and 2 for an invalid option, or when it is not run on Windows.
+Standard library only.
 It reads the macro setting and the Trust access only; it changes neither.
 """
 

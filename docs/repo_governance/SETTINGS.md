@@ -204,8 +204,9 @@ process; it is not a required check.
 The **Release** workflow (`.github/workflows/release.yml`) attests the build
 provenance of its source bundle on a public repository. A private one needs
 GitHub Enterprise Cloud for attestations and the repository variable
-`RELEASE_ATTESTATIONS` set to `enabled`; without them the workflow skips the
-attestation and still drafts the release, whose notes say so.
+`RELEASE_ATTESTATIONS` set to `enabled`. Without the variable the workflow
+skips the attestation and still drafts the release, whose notes say so; with
+it but without Enterprise Cloud the attestation fails and no draft is created.
 `Protect main` targets `~DEFAULT_BRANCH`, so it follows the default branch under
 any name. The script matches each configured ruleset by name; one with no ruleset of
 its name is covered when other active rulesets with no bypass actors or excluded

@@ -14,7 +14,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | Location | Holds | In the template |
 | --- | --- | --- |
 | Repository root | The README; the contribution, conduct, security, installation and release guides (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `INSTALLATION.md`, `RELEASING.md`); `CHANGELOG.md`, `AGENTS.md` and `LICENSE`; the Ruff and mypy settings in `pyproject.toml`; and the Git and editor rules in `.gitattributes`, `.gitignore` and `.editorconfig` | Present |
-| `VERSION` | The newest released version, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md)) | Present: the newest released version, which [current status](../RELEASING.md#current-status) also states; `tools/initialize_repository.py` deletes it in a new repository |
+| `VERSION` | The newest released version, published or not, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md#current-status)) | Present: the newest released version, which [current status](../RELEASING.md#current-status) also states; `tools/initialize_repository.py` deletes it in a new repository |
 | `.github/` | Workflows (`workflows/`) and the label scripts they run (`scripts/`); issue forms (`ISSUE_TEMPLATE/`) and the pull request template; the label catalogue `labels.json`; the Dependabot configuration and the hash-locked configuration parser of the workflow tests (`requirements.txt`); the binary allowlist `binary-allowlist.json`; the Excel evidence policy `excel-evidence-policy.json`; and, when needed, the expiring link exceptions `link-exceptions.json` | Present, without `link-exceptions.json` |
 | `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
 | `docs/methodology/` | The [index](methodology/README.md) of the guides: sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format, [workbook contract](methodology/WORKBOOK_CONTRACT.md) and [VBA test harness](methodology/TEST_HARNESS.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
@@ -49,8 +49,9 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
   (`tests/fixtures/<case-id>/<variant>/`) and the `.frx` beside its `.frm`. To keep another binary, such as an
   image for the documentation, review it and add its path, SHA-256 and reason
   to `.github/binary-allowlist.json`; a later change to the file fails until
-  the entry is updated. An Office package outside `docs/methodology/sources/`
-  also fails while it carries macros or personal document metadata.
+  the entry is updated. An Office Open XML package outside
+  `docs/methodology/sources/` also fails while it carries macros or personal
+  document metadata.
 - **Forms.** A form's `.frx` stays beside its `.frm`.
 
 ## Dependencies
@@ -73,17 +74,21 @@ calls back the other way, so there are no cycles.
   ([validation plan](methodology/VALIDATION_PLAN.md#reference-values)).
 - Repository tooling is not a second implementation of the calculation.
 
-The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations,
-the role prefixes and this dependency direction by name, and match the
-inventory below against `src/modules/`.
+The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations
+and the role prefixes, and match the inventory below against `src/modules/`.
+They enforce this dependency direction by name for core, classes and
+examples only; the direction of the facade and the adapters is checked in
+review.
 
 ## Public API inventory
 
 [PUBLIC_API.txt](PUBLIC_API.txt) lists the supported declarations; in the
 template it lists none. A `Public` declaration is supported only if it is
-listed there. `Option Private Module` limits visibility between projects; it
-is not a security boundary. Test and example modules are never part of a
-production workbook.
+listed there, and only the public declarations of the standard modules in
+`src/modules/` can be listed. A class is reached through the facade; its
+public members are not listed. `Option Private Module` limits visibility
+between projects; it is not a security boundary. Test and example modules
+are never part of a production workbook.
 
 Each supported declaration is recorded as two tab-separated lines:
 
@@ -104,8 +109,7 @@ Each supported declaration is recorded as two tab-separated lines:
   branches has one row. Its `# SIG` lines give each distinct signature once,
   so a declaration whose parameters differ between branches has one `# SIG`
   line per branch signature.
-- Blank lines and other lines starting with `#` are ignored. Public members of
-  a class follow the same format once the class is supported.
+- Blank lines and other lines starting with `#` are ignored.
 
 A change to the supported API needs an issue and an update, in the same pull
 request, to:

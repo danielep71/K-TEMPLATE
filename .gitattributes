@@ -13,8 +13,9 @@
 #   - GitHub Linguist reports exported modules as VBA.
 #   - Text and binary handling depends on file type, except for the copies of
 #     regulatory sources in docs/methodology/sources/ and the variant files of
-#     file-based test cases, which are stored byte for byte; the only other
-#     path rules are the archive exclusions under ARCHIVE HYGIENE.
+#     file-based test cases, which are stored byte for byte with no white-space
+#     check; the only other path rules are the archive exclusions under
+#     ARCHIVE HYGIENE.
 #     Other locations use file-type rules for their handling;
 #     Linguist already treats docs/ and
 #     examples/ as documentation. Add a path rule only with a layout change
@@ -72,9 +73,12 @@
 #------------------------------------------------------------------------------
 # EXPORTED VBA SOURCE
 #------------------------------------------------------------------------------
+# The header the VBE writes for a form keeps its bytes, and a form's Begin
+# line ends with a blank, so git diff --check does not report trailing blanks
+# in a .frm file; tools/check_vba_source.py checks every line after the header.
 *.bas   vba-source
 *.cls   vba-source
-*.frm   vba-source
+*.frm   vba-source whitespace=-blank-at-eol
 *.frx   vba-form-bin
 
 
@@ -248,10 +252,12 @@ VERSION         text eol=lf
 #------------------------------------------------------------------------------
 # Reserve this directory for byte-preserved source copies. Record each
 # copy's SHA-256 in the register of docs/methodology/SOURCES.md.
-# Never normalized, so the checked-out bytes keep the registered hash. A
-# README in the directory, by convention, is ordinary documentation.
-docs/methodology/sources/**             -text
-docs/methodology/sources/README.md      text eol=lf
+# Never normalized, so the checked-out bytes keep the registered hash, and
+# never checked for white space, because a copy keeps the line endings and
+# trailing blanks of its issuer. A README in the directory, by convention, is
+# ordinary documentation.
+docs/methodology/sources/**             -text -whitespace
+docs/methodology/sources/README.md      text eol=lf !whitespace
 
 
 #------------------------------------------------------------------------------

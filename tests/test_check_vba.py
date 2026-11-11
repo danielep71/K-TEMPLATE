@@ -25,6 +25,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import check_vba_calls  # noqa: E402
 import check_vba_conditionals  # noqa: E402
 import check_vba_dependencies  # noqa: E402
+import check_vba_errors  # noqa: E402
 import check_vba_identifiers  # noqa: E402
 import check_vba_jumps  # noqa: E402
 import check_vba_public_api  # noqa: E402
@@ -303,6 +304,23 @@ class SourceTest(unittest.TestCase):
                                    "\tIsPositive ="), "tab character")
         self.assertFinding(changed("src/core/CORE_Validation.bas", "Exit Function",
                                    "Exit Function  "), "trailing white space")
+
+    def test_form_header_keeps_the_bytes_the_vbe_writes(self) -> None:
+        # The VBE ends a form's Begin line with a blank and may write other
+        # trailing blanks or a tab there; tools/format_vba.py keeps them.
+        header = changed("src/forms/frmRunOptions.frm", "frmRunOptions\n   Caption",
+                         "frmRunOptions \n\tClientHeight    =   3015\n   Caption")
+        header = changed("src/forms/frmRunOptions.frm", '"Run options"', '"Run options"   ',
+                         header)
+        self.assertEqual(self.findings(header), [])
+        code = changed("src/forms/frmRunOptions.frm", "Option Explicit\n",
+                       "Option Explicit \n\tPrivate X As Long\n", header)
+        self.assertEqual(self.findings(code), [
+            "src/forms/frmRunOptions.frm:12: trailing white space",
+            "src/forms/frmRunOptions.frm:13: tab character; indent with spaces"])
+        # A module's header has no such exemption.
+        self.assertFinding(changed("src/core/CORE_Validation.bas", '"CORE_Validation"',
+                                   '"CORE_Validation" '), "CORE_Validation.bas:1: trailing")
 
     def test_unclosed_string_literal(self) -> None:
         self.assertFinding(changed("tests/modules/TEST_Harness.bas", 'Debug.Print "It',
@@ -1667,6 +1685,472 @@ class CallTest(unittest.TestCase):
                     contextlib.redirect_stdout(io.StringIO()) as output:
                 self.assertEqual(check_vba_calls.main(["--root", str(root)]), expected)
                 self.assertIn("resolved call(s); static check", output.getvalue())
+
+
+def handler(statements: str) -> str:
+    """A procedure whose handler, from line 9, runs ``statements``; the
+    module header takes lines 1 to 3."""
+    return ("Private Sub First(ByVal Retry As Boolean)\n"
+            "        Dim Number As Long, Source As String, Text As String\n"
+            "        On Error GoTo Handler\n"
+            "        Exit Sub\n"
+            "Handler:\n" + statements + "End Sub\n\n\n"
+            "Private Sub Helper()\nEnd Sub\n\n\n"
+            "Private Sub Report(ByVal Value As Variant)\nEnd Sub\n")
+
+
+def guarded(statements: str) -> str:
+    """A procedure that runs ``statements`` from line 7, after On Error Resume
+    Next at line 6."""
+    return ("Private Sub First(ByVal Retry As Boolean)\n"
+            "        Dim Number As Long, Flag As Boolean, Text As String\n"
+            "        On Error Resume Next\n" + statements + "End Sub\n\n\n"
+            "Private Sub Helper()\nEnd Sub\n\n\n"
+            "Private Sub Report(ByVal Value As Variant)\nEnd Sub\n")
+
+
+def fetch(result: str, statements: str) -> str:
+    """A function declared with ``result``, whose handler, from line 9, runs
+    ``statements``."""
+    return (f"Private Function Fetch(ByVal Retry As Boolean){result}\n"
+            "        Dim Number As Long\n        On Error GoTo Handler\n"
+            "        Exit Function\nHandler:\n" + statements + "End Function\n")
+
+
+ERRORS_VALID = {
+    "copied-before-any-call": handler(
+        "        Number = Err.Number\n        Source = Err.Source\n"
+        "        Text = Err.Description\n        Helper\n        Debug.Print Text\n"
+        "        Err.Raise Number, Source, Text\n"),
+    "arguments-read-before-the-call": handler(
+        '        Report "failed: " & Err.Description\n'),
+    "raise-again-first": handler("        Err.Raise Err.Number, Err.Source, Err.Description\n"),
+    "pure-conversions": handler(
+        "        Number = CLng(Err.Number)\n"
+        '        Source = IIf(Len(Err.Source) > 0, Err.Source, "First")\n'
+        "        Text = CStr(Err.Description)\n        Helper\n"),
+    "plain-copies-and-literals": handler(
+        "        Retry = False\n        Number = -1\n        Text = Source\n"
+        "        Number = Err.Number\n"),
+    "concatenation-in-a-handler": handler(
+        '        Text = "failed: " & Source\n        Number = Err.Number\n'),
+    "resume-next-guard": guarded(
+        "        Helper\n        If Err.Number <> 0 Then Exit Sub\n        On Error GoTo 0\n"),
+    "resume-next-copy-after-the-call": guarded(
+        "        Helper\n        Number = Err.Number\n        Text = Err.Description\n"
+        "        On Error GoTo 0\n"),
+    "resume-next-concatenation-is-the-operation": guarded(
+        '        Text = "failed: " & Text\n        Number = Err.Number\n'),
+    "block-if-ends-the-segment": handler(
+        "        If Retry Then\n            Helper\n        End If\n"
+        "        Report Err.Description\n"),
+    "single-line-if-ends-the-segment": handler(
+        "        If Retry Then Helper\n        Report Err.Source\n"),
+    "loop-ends-the-segment": handler(
+        "        Do While Retry\n            Helper\n        Loop\n        Report Err.Number\n"),
+    "label-starts-a-segment": handler(
+        "        Helper\nAgain:\n        Report Err.Number\n"),
+    "err-in-strings-and-comments": handler(
+        "        Helper\n        Debug.Print \"Err.Number\" ' Err.Description\n"),
+    "array-element-in-a-handler": handler(
+        "        Dim Values(1 To 2) As Long\n        Number = Values(1)\n"
+        "        Text = Err.Description\n"),
+    "values-without-parentheses": (
+        "Private Const LIMIT As Long = 3\nPrivate Enum Mode\n    mdFirst = 1\nEnd Enum\n"
+        "Private mCount As Long\n\n\n" + handler(
+            "        Number = LIMIT\n        Number = mCount\n        Number = mdFirst\n"
+            "        Text = vbNullString\n        Text = Source\n        Number = First\n"
+            "        Number = Err.Number\n")),
+    "vba-qualified-pure-functions": handler(
+        "        Number = VBA.CLng(Err.Number)\n        Number = VBA.Len(Err.Source)\n"
+        "        Text = vba.cstr(Err.Description)\n        Source = Err.Source\n"),
+    "redim-and-erase-are-statements": handler(
+        "        Dim Values() As Long\n        ReDim Values(1 To 2)\n"
+        "        ReDim Preserve Values(1 To 3)\n        Erase Values\n"
+        "        Number = Err.Number\n"),
+    "statement-targets-and-file-statements": handler(
+        "        Dim Book As Object\n        Set Book = Nothing\n"
+        '        Mid$(Text, 1, 1) = "x"\n        LSet Text = Source\n        Let Number = 1\n'
+        "        Open Text For Input Access Read Shared As #1\n        Line Input #1, Text\n"
+        "        Print #1, Spc(2); Text\n        Close #1\n        Number = Err.Number\n"),
+    "resume-next-operation-evaluated-before-the-read": guarded(
+        "        Text = CStr(Number / 2) & Err.Description\n"),
+    "err-writes-are-not-reads": handler(
+        '        Err.Clear\n        Err.Description = "custom"\n        Err.Number = 5\n'
+        '        Let Err.Source = "First"\n        VBA.Err.HelpContext = 0\n'),
+    "context-added-then-raised-again": handler(
+        '        Err.Description = "context: " & Err.Description\n'
+        "        Err.Raise Err.Number, Err.Source, Err.Description\n"),
+    "with-err-context-added-then-raised-again": handler(
+        '        With Err\n            .Description = "context: " & .Description\n'
+        "            .Raise .Number, .Source, .Description\n        End With\n"),
+    "with-err-copied-first": handler(
+        "        With Err\n            Number = .Number\n            Text = .Description\n"
+        "        End With\n        Helper\n"),
+    "read-before-a-call-in-the-same-statement": handler(
+        "        Number = Err.Number + Describe()\n")
+    + "\n\nPrivate Function Describe() As Long\nEnd Function\n",
+    "read-as-an-argument-before-a-call": handler(
+        "        Report Err.Number, Describe()\n")
+    + "\n\nPrivate Function Describe() As Long\nEnd Function\n",
+    "single-line-if-branch-reads-first": handler("        If Retry Then Report Err.Number\n"),
+    "single-line-if-branches-exclude-each-other": handler(
+        "        If Retry Then Helper Else Report Err.Number\n"),
+    "nested-single-line-if-else-belongs-to-the-inner-if": handler(
+        "        If Retry Then If Number = 0 Then Helper Else Report Err.Number\n"),
+    "own-name-is-the-result-variable": fetch(
+        " As Long", "        Fetch = 1\n        Number = Fetch\n        Number = Err.Number\n"),
+    "own-name-indexes-an-array-result": fetch(
+        " As Long()", "        Number = Fetch(1)\n        Number = Err.Number\n"),
+    "own-name-indexes-a-variant-result": fetch(
+        "", "        Number = Fetch(1)\n        Number = Err.Number\n"),
+    "other-err-properties-are-data": handler(
+        "        Text = Err.HelpFile\n        Number = Err.HelpContext\n"
+        "        Number = Err.LastDllError\n        Number = VBA.Err.HelpContext\n"
+        "        Number = Err.Number\n"),
+    "context-added-then-raised-again-with-help": handler(
+        '        Err.Description = "context: " & Err.Description\n'
+        "        Err.Raise Err.Number, Err.Source, Err.Description, Err.HelpFile, "
+        "Err.HelpContext\n"),
+    "with-err-other-properties": handler(
+        "        With Err\n            Text = .HelpFile\n            Number = .HelpContext\n"
+        "            Number = .Number\n        End With\n"),
+    "help-properties-are-not-checked-for-staleness": handler(
+        "        Helper\n        Text = Err.HelpFile\n        Number = Err.HelpContext\n"),
+    "resume-next-qualified-conversion-can-fail": guarded(
+        '        Number = VBA.CLng("bad")\n        Number = Err.Number\n'),
+    "resume-next-qualified-len-can-fail": guarded(
+        "        Number = VBA.Len(Text)\n        Number = Err.Number\n"),
+    "qualified-vba-names-are-vba": handler(
+        "        Text = VBA.vbCrLf & Err.Description\n        VBA.Beep\n"
+        '        VBA.Mid$(Text, 1, 1) = "x"\n        Number = VBA.Conversion.CLng(Err.Number)\n'
+        "        Source = Err.Source\n"),
+}
+# Procedures that the fixtures call without parentheses or assign to.
+DESCRIBE = "\n\nPrivate Function Describe() As Long\nEnd Function\n"
+LABEL = "\n\nPrivate Property Get Label() As String\nEnd Property\n"
+STATUS = "\n\nPrivate Property Let Status(ByVal Value As String)\nEnd Property\n"
+OWNER = "\n\nPrivate Property Set Owner(ByVal Value As Object)\nEnd Property\n"
+ERRORS_INVALID = {
+    "after-a-call": (handler("        Helper\n        Report Err.Description\n"), 10,
+                     "Err.Description read in First after line 9, which may have changed Err "
+                     "with a call or member access"),
+    "after-debug-print": (handler('        Debug.Print "failed"\n'
+                                  "        Err.Raise Err.Number, Err.Source, Err.Description\n"),
+                          10, "Err.Number, Err.Source, Err.Description read in First after line 9"),
+    "after-a-host-property": (handler("        Application.StatusBar = False\n"
+                                      "        Number = Err.Number\n"), 10,
+                              "Err.Number read in First after line 9, which may have changed"),
+    "after-err-clear": (handler("        Err.Clear\n        Number = Err.Number\n"), 10,
+                        "Err.Number read in First after line 9"),
+    "after-a-function-result": (handler("        Text = Format$(Now, \"yyyy\") & Describe(1)\n"
+                                        "        Source = Err.Source\n"), 10,
+                                "Err.Source read in First after line 9"),
+    "after-on-error-in-a-handler": (handler("        On Error GoTo 0\n"
+                                            "        Report Err.Description\n"), 10,
+                                    "Err.Description read in First after line 9, which cleared "
+                                    "Err with an On Error statement"),
+    "after-a-plain-copy-only": (handler("        Helper\n        Retry = False\n"
+                                        "        Number = Err.Number\n"), 11,
+                                "Err.Number read in First after line 9"),
+    "inside-a-branch": (handler("        If Retry Then\n            Helper\n"
+                                "            Report Err.Number\n        End If\n"), 11,
+                        "Err.Number read in First after line 10"),
+    "on-the-line-of-the-handler-label": (
+        handler("").replace("Handler:\n", "Handler: Helper: Number = Err.Number\n"), 8,
+        "Err.Number read in First after line 8"),
+    "guard-after-on-error-goto-0": (guarded("        Helper\n        On Error GoTo 0\n"
+                                            "        If Err.Number <> 0 Then Exit Sub\n"), 9,
+                                    "Err.Number read in First after line 8, which cleared Err"),
+    "resume-next-before-any-operation": (guarded("        Report Err.Description\n"), 7,
+                                         "Err.Description read in First after line 6"),
+    "resume-next-declaration-blank-line-and-comment-run-nothing": (
+        guarded("        Dim Local As Long\n\n        ' a comment\n        Number = Err.Number\n"),
+        10, "Err.Number read in First after line 6"),
+    "resume-next-err-write-runs-nothing": (
+        guarded("        Err.Number = 0\n        Number = Err.Number\n"), 8,
+        "Err.Number read in First after line 6"),
+    "resume-next-err-clear": (
+        guarded("        Helper\n        Err.Clear\n        Text = Err.Description\n"), 9,
+        "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
+    "resume-next-call-err-clear": (
+        guarded("        Helper\n        Call Err.Clear\n        Text = Err.Description\n"), 9,
+        "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
+    "resume-next-call-err-clear-with-parentheses": (
+        guarded("        Helper\n        Call VBA.Err.Clear()\n        Number = Err.Number\n"), 9,
+        "Err.Number read in First after line 8, which cleared Err with Err.Clear"),
+    "select-case-after-on-error": (guarded("        Helper\n        On Error GoTo 0\n"
+                                           "        Select Case Err.Number\n"
+                                           "        End Select\n"), 9,
+                                   "Err.Number read in First after line 8"),
+    "after-a-function-without-parentheses": (
+        handler("        Number = Describe\n        Text = Err.Description\n") + DESCRIBE, 10,
+        "Err.Description read in First after line 9, which may have changed Err"),
+    "after-a-property-without-parentheses": (
+        handler("        Text = Label\n        Number = Err.Number\n") + LABEL, 10,
+        "Err.Number read in First after line 9"),
+    "after-a-declare-without-parentheses": (
+        'Private Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long\n'
+        + handler("        Number = GetTickCount\n        Source = Err.Source\n"), 11,
+        "Err.Source read in First after line 10"),
+    "after-a-host-global-without-parentheses": (
+        handler("        Text = ActiveCell\n        Number = Err.Number\n"), 10,
+        "Err.Number read in First after line 9"),
+    "after-a-property-let": (
+        handler('        Status = "failed"\n        Number = Err.Number\n') + STATUS, 10,
+        "Err.Number read in First after line 9, which may have changed Err"),
+    "after-a-property-let-with-let": (
+        handler('        Let Status = "failed"\n        Text = Err.Description\n') + STATUS, 10,
+        "Err.Description read in First after line 9"),
+    "after-a-property-set": (
+        handler("        Set Owner = Nothing\n        Source = Err.Source\n") + OWNER, 10,
+        "Err.Source read in First after line 9"),
+    "after-a-function-in-redim-bounds": (
+        handler("        Dim Values() As Long\n        ReDim Values(1 To Describe)\n"
+                "        Number = Err.Number\n") + DESCRIBE, 11,
+        "Err.Number read in First after line 10"),
+    "after-a-with-block-member": (
+        handler("        Dim Book As Object\n        With Book\n            .Saved = True\n"
+                "        End With\n        Number = Err.Number\n"), 13,
+        "Err.Number read in First after line 11"),
+    "resume-next-read-inside-a-conversion": (
+        guarded("        Number = CLng(Err.Number)\n"), 7,
+        "Err.Number read in First after line 6, which cleared Err"),
+    "resume-next-read-inside-len-in-a-condition": (
+        guarded("        If Len(Err.Description) > 0 Then Exit Sub\n"), 7,
+        "Err.Description read in First after line 6"),
+    "resume-next-read-inside-iif": (
+        guarded('        Text = IIf(Len(Err.Description) > 0, Err.Description, "none")\n'), 7,
+        "Err.Description read in First after line 6"),
+    "resume-next-read-inside-a-call-argument": (
+        guarded("        Call Report(CStr(Err.Number))\n"), 7,
+        "Err.Number read in First after line 6"),
+    "resume-next-argument-read-before-a-later-one-calls": (
+        guarded("        Report Err.Number, Describe()\n") + DESCRIBE, 7,
+        "Err.Number read in First after line 6"),
+    "with-err-member-read-after-a-call": (
+        handler("        Helper\n        With Err\n            Number = .Number\n"
+                "        End With\n"), 11,
+        "Err.Number read in First after line 9"),
+    "single-line-if-call-then-read-in-the-same-branch": (
+        handler("        If Retry Then Helper: Report Err.Number\n"), 9,
+        "Err.Number read in First after line 9, which may have changed Err"),
+    "single-line-if-call-then-read-in-the-else-branch": (
+        handler("        If Retry Then Report 1 Else Helper: Report Err.Source\n"), 9,
+        "Err.Source read in First after line 9"),
+    "single-line-if-condition-call-then-read": (
+        handler("        If Describe() Then Report Err.Number\n") + DESCRIBE, 9,
+        "Err.Number read in First after line 9"),
+    "recursive-call": (
+        fetch(" As Long", "        Number = Fetch(True)\n        Number = Err.Number\n"), 10,
+        "Err.Number read in Fetch after line 9, which may have changed Err"),
+    "module-name-that-is-a-parameter": (
+        handler("        Number = Strings.Len(1)\n        Number = Err.Number\n").replace(
+            "ByVal Retry As Boolean", "ByVal Strings As Object"), 10,
+        "Err.Number read in First after line 9"),
+    "call-before-a-read-in-the-same-statement": (
+        handler("        Number = Describe() + Err.Number\n") + DESCRIBE, 9,
+        "Err.Number read in First after a call or member access that the same statement "
+        "evaluates first"),
+    "call-argument-before-a-read": (
+        handler("        Report Describe(), Err.Number\n") + DESCRIBE, 9,
+        "Err.Number read in First after a call or member access"),
+    "member-access-before-a-read": (
+        handler("        Text = Application.Name & Err.Description\n"), 9,
+        "Err.Description read in First after a call or member access"),
+    "err-write-reads-its-value-after-a-call": (
+        handler('        Helper\n        Err.Description = "context: " & Err.Description\n'), 10,
+        "Err.Description read in First after line 9"),
+}
+ALL_ENVIRONMENTS = "[vba6-win32, vba7-win32, vba7-win64]"
+# VBA statements and functions that run no project code, with literals and
+# declared variables as operands: none may make the next read of Err stale.
+STATEMENT_SWEEP = [
+    "Open Text For Input As #1", "Open Text For Append Shared As FileNumber",
+    "Open Text For Random Access Read Write Lock Read Write As #FileNumber Len = 128",
+    "Close #1", "Close", "Reset", "Get #1, , Number", "Put #1, 1, Text", "Seek #1, 1",
+    "Lock #1", "Unlock #1, 1 To 2", "Width #1, 80", "Write #1, Text, Number",
+    "Input #1, Text, Number", "Line Input #1, Text", "Print #1, Text; Number",
+    "Print #1, Spc(2); Tab(4); Text", "Name Text As Text", "Erase Values",
+    "Erase Values, Other", "ReDim Values(1 To 2)", "ReDim Values(1 To 2) As Long",
+    "ReDim Preserve Values(1 To Number), Other(2) As String",
+    "ReDim Values(0 To 1, 1 To 3) As Long", "Date = Now", "Time = #12:00:00 PM#",
+    'Mid(Text, 1, 1) = "x"', "Mid$(Text, 2) = Text", 'MidB(Text, 1, 2) = "ab"',
+    'LSet Text = "x"', "RSet Text = Text", "Let Number = 1", "Set Item = Nothing",
+    "Static Count As Long", "Dim Local As Long", "Dim Fixed As String * 10",
+    "Dim Things As New Collection", "Const LIMIT As Long = 3", "Stop",
+    "Number = Sqr(4) + Abs(-1) + Rnd", "FileNumber = FreeFile", "Number = LOF(1) + Loc(1)",
+    "Flag = EOF(1)", 'Text = Format(Date, "yyyy") & Dir(Text) & Environ("TEMP")',
+    'Number = DateDiff("d", Date, Now)', "If TypeOf Item Is Collection Then Number = 1",
+    "If TypeOf Item Is VBA.Collection Then Number = 1",
+]
+# Procedures of the VBA library that are written as statements, with the
+# module of the library that holds them, as in VBA.Interaction.Beep.
+LIBRARY_STATEMENTS = [
+    ("Beep", "", "Interaction"),
+    ("SaveSetting", '"App", "Section", "Key", Text', "Interaction"),
+    ("DeleteSetting", '"App", "Section", "Key"', "Interaction"),
+    ("AppActivate", "Text", "Interaction"), ("SendKeys", '"{ENTER}", True', "Interaction"),
+    ("Kill", "Text", "FileSystem"), ("MkDir", "Text", "FileSystem"),
+    ("RmDir", "Text", "FileSystem"), ("ChDir", "Text", "FileSystem"),
+    ("ChDrive", "Text", "FileSystem"), ("FileCopy", "Text, Text", "FileSystem"),
+    ("SetAttr", "Text, vbNormal", "FileSystem"), ("Randomize", "", "Math"),
+    ("Randomize", "42", "Math"),
+]
+
+
+# Statements that run code, so that after On Error Resume Next each can fail
+# and be the error a read of Err checks.
+RESUME_NEXT_OPERATIONS = [
+    "Matches = Text Like Pattern", "Flag = A = B", "Flag = Not Flag", "Flag = A And B",
+    "Number = Text", "Set Item = Other", "Number = 1", "If A > B Then Number = 1",
+    "Number = A Mod B", "Flag = Item Is Nothing", "Flag = False",
+]
+
+
+def resume_next_operation(statement: str) -> str:
+    """``statement`` after On Error Resume Next, then a read of Err.Number."""
+    return ("Private Sub First()\n"
+            "        Dim Matches As Boolean, Text As String, Pattern As String, Flag As Boolean\n"
+            "        Dim A As Long, B As Long, Number As Long, Item As Object, Other As Object\n"
+            "        On Error Resume Next\n"
+            f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
+
+
+def sweep_statements() -> list[str]:
+    """Each statement of the sweep, and each library statement written
+    plain, with Call, and qualified by VBA. and by its module."""
+    statements = list(STATEMENT_SWEEP)
+    for name, arguments, library in LIBRARY_STATEMENTS:
+        for qualifier in ("", "VBA.", f"VBA.{library}."):
+            statements.append(f"{qualifier}{name} {arguments}".rstrip())
+            statements.append(f"Call {qualifier}{name}({arguments})" if arguments
+                              else f"Call {qualifier}{name}")
+    return statements
+
+
+def sweep_handler(statement: str) -> str:
+    """A handler that runs ``statement`` at line 11, then reads Err.Number."""
+    return ("Private Sub First()\n"
+            "        Dim Number As Long, Text As String, Flag As Boolean, Item As Object\n"
+            "        Dim Values() As Long, Other() As String, FileNumber As Integer\n"
+            "        On Error GoTo Handler\n        Exit Sub\nHandler:\n"
+            f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
+
+
+class ErrorTest(unittest.TestCase):
+    def test_valid_fixtures_pass(self) -> None:
+        self.assertEqual(run_check(check_vba_errors.check, VALID), [])
+        for name, body in ERRORS_VALID.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_errors.check, standalone(module(body))), [])
+
+    def test_invalid_fixtures_fail(self) -> None:
+        for name, (body, line, text) in ERRORS_INVALID.items():
+            with self.subTest(name=name):
+                findings = run_check(check_vba_errors.check, standalone(module(body)))
+                self.assertEqual(len(findings), 1, findings)
+                self.assertTrue(findings[0].startswith(f"tests/modules/TEST_Fixture.bas:{line}: "),
+                                findings)
+                self.assertIn(text, findings[0])
+                self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
+
+    def test_every_statement_can_fail_after_resume_next(self) -> None:
+        for statement in RESUME_NEXT_OPERATIONS:
+            with self.subTest(statement=statement):
+                files = standalone(module(resume_next_operation(statement)))
+                self.assertEqual(run_check(check_vba_errors.check, files), [])
+        # Nothing but On Error itself comes before this read.
+        findings = run_check(check_vba_errors.check,
+                             standalone(module(resume_next_operation("").replace(
+                                 "        \n", ""))))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertIn("Err.Number read in First after line 7, which cleared Err with an On "
+                      "Error statement", findings[0])
+
+    def test_vba_statements_and_functions_change_nothing(self) -> None:
+        # A table of every VBA statement and function the check knows to run
+        # no project code: in a handler, none makes the read after it stale.
+        files = {f"tests/modules/TEST_Sweep{index}.bas":
+                 module(sweep_handler(statement)).replace("TEST_Fixture", f"TEST_Sweep{index}")
+                 for index, statement in enumerate(sweep_statements())}
+        findings = run_check(check_vba_errors.check, {**files, "docs/PUBLIC_API.txt": "# None\n"})
+        statements = sweep_statements()
+        for finding in findings:
+            index = int(finding.split(".bas")[0].removeprefix("tests/modules/TEST_Sweep"))
+            with self.subTest(statement=statements[index]):
+                self.fail(finding)
+        self.assertGreater(len(statements), 100)
+
+    def test_project_declarations_shadow_vba_built_ins(self) -> None:
+        # A procedure of the project named like a VBA function, statement,
+        # constant or statement target is called instead; VBA.Format still
+        # names the VBA function.
+        shadows = ("\n\nPrivate Function Format(ByVal Value As Variant) As String\nEnd Function\n"
+                   "\n\nPrivate Sub Beep()\nEnd Sub\n"
+                   "\n\nPrivate Function vbLimit() As Long\nEnd Function\n"
+                   "\n\nPrivate Property Let Mid(ByVal Value As String)\nEnd Property\n")
+        other = ('Attribute VB_Name = "TEST_Shadow"\nOption Explicit\nOption Private Module\n'
+                 "Public Function Trim(ByVal Value As String) As String\nEnd Function\n")
+        # A project module named like a module of the VBA library.
+        math = ('Attribute VB_Name = "Math"\nOption Explicit\nOption Private Module\n'
+                "Public Function Abs(ByVal Value As Double) As Double\nEnd Function\n")
+        cases = {
+            "        Text = Format(1)\n        Number = Err.Number\n": 10,
+            "        Beep\n        Number = Err.Number\n": 10,
+            "        Number = vbLimit\n        Number = Err.Number\n": 10,
+            '        Mid = "x"\n        Number = Err.Number\n': 10,
+            "        Text = Trim(Text)\n        Number = Err.Number\n": 10,
+            "        Text = VBA.Format(1)\n        Number = Err.Number\n": None,
+            "        Text = VBA.Trim$(Text)\n        Number = Err.Number\n": None,
+            "        Number = Math.Abs(1)\n        Number = Err.Number\n": 10,
+            "        Number = VBA.Math.Abs(1)\n        Number = Err.Number\n": None,
+            "        Call Beep\n        Number = Err.Number\n": 10,
+            "        Call VBA.Beep\n        Number = Err.Number\n": None,
+        }
+        for statements, line in cases.items():
+            with self.subTest(statements=statements):
+                files = {**standalone(module(handler(statements) + shadows)),
+                         "tests/modules/TEST_Shadow.bas": other, "tests/modules/Math.bas": math}
+                findings = run_check(check_vba_errors.check, files)
+                if line is None:
+                    self.assertEqual(findings, [])
+                else:
+                    self.assertEqual(len(findings), 1, findings)
+                    self.assertTrue(findings[0].startswith(
+                        f"tests/modules/TEST_Fixture.bas:{line}: Err.Number read in First after "
+                        f"line {line - 1}, which may have changed Err"), findings)
+
+    def test_each_environment_is_analyzed_separately(self) -> None:
+        # The call that makes the read stale exists in one #If branch only;
+        # the finding names the environments of that branch, once.
+        body = handler("#If VBA7 Then\n        Helper\n#Else\n        Number = 0\n#End If\n"
+                       "        Report Err.Description\n")
+        findings = run_check(check_vba_errors.check, standalone(module(body)))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].startswith("tests/modules/TEST_Fixture.bas:14: "), findings)
+        self.assertIn("after line 10, which may have changed Err", findings[0])
+        self.assertTrue(findings[0].endswith("[vba7-win32, vba7-win64]"), findings)
+        legacy = body.replace("#If VBA7 Then", "#If Not VBA7 Then")
+        findings = run_check(check_vba_errors.check, standalone(module(legacy)))
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].endswith("[vba6-win32]"), findings)
+
+    def test_counts_and_exit_codes(self) -> None:
+        invalid = standalone(module(ERRORS_INVALID["after-a-call"][0]))
+        for files, expected, counted in (({}, 0, "0 VBA component(s), 0 procedure(s)"),
+                                         (VALID, 0, "7 VBA component(s), 6 procedure(s)"),
+                                         (invalid, 1, "1 VBA component(s), 3 procedure(s)")):
+            with self.subTest(counted=counted), repository(files) as root, \
+                    contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(check_vba_errors.main(["--root", str(root)]), expected)
+                verdict = output.getvalue().splitlines()[-1]
+                self.assertIn("PASS" if expected == 0 else "FAIL", verdict)
+                self.assertIn(f"({counted}; static check, nothing compiled or run)", verdict)
+
+    def test_repository_vba_has_no_findings(self) -> None:
+        findings, _, _ = check_vba_errors.check(ROOT)
+        self.assertEqual(findings, [])
 
 
 class MainTest(unittest.TestCase):

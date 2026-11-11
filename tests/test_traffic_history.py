@@ -503,6 +503,31 @@ class AlertTests(unittest.TestCase):
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["title"],
                              "Traffic alert: 2026-10-15")
 
+    def test_the_decision_needs_no_milestone_and_names_the_snapshot_date(self) -> None:
+        # The workflow decides first and looks up a milestone due after this date only then.
+        with workspace() as ws:
+            self.history(ws, (50, 20, 1), (50, 20, 1))
+            output = ws.raw.parent / "snapshot.txt"
+            arguments = ["alert", "--data", str(ws.data), "--snapshot-output", str(output)]
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(traffic_history.main(arguments), 0)
+            self.assertFalse(output.exists())
+            ws.collect([("2026-10-15", 500, 1)], clones=[("2026-10-15", 20, 1)])
+            ws.merge("2026-10-15T23:59:00")
+            printed = io.StringIO()
+            with contextlib.redirect_stdout(printed):
+                self.assertEqual(traffic_history.main(arguments), 0)
+            self.assertEqual(output.read_text(encoding="utf-8"), "2026-10-15\n")
+            self.assertIn("Alert due for the snapshot of 2026-10-15: views spike.", printed.getvalue())
+
+    def test_the_alert_command_decides_or_writes_the_issue(self) -> None:
+        for extra in ([], ["--milestone-due", "2026-12-20"], ["--output", "alert.json"],
+                      ["--snapshot-output", "s.txt", "--milestone-due", "2026-12-20"],
+                      ["--snapshot-output", "s.txt", "--output", "alert.json"]):
+            with self.subTest(extra=extra), contextlib.redirect_stderr(io.StringIO()), \
+                    self.assertRaises(SystemExit):
+                traffic_history.parse_args(["alert", "--data", "data", *extra])
+
 
 class FailureTests(unittest.TestCase):
     def assert_refused(self, ws: Workspace, message: str) -> None:

@@ -280,6 +280,11 @@ class RepositoryTest(unittest.TestCase):
         self.assertNotIn(sys.executable, text)
         self.assertNotIn("Built in: |", text)
 
+    def test_the_changelog_check_is_shown_as_ci_runs_it(self) -> None:
+        text = render_docs.integrity_checks(ROOT)
+        self.assertIn("| `changelog` | `python tools/check_changelog.py --repository "
+                      "OWNER/REPOSITORY` |", text)
+
     def test_a_check_without_a_description_is_refused(self) -> None:
         def undocumented(context: check_repository.Context) -> list[tuple[str, str]]:
             return []

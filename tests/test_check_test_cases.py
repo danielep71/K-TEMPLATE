@@ -223,6 +223,34 @@ class FixtureTest(FindingTest):
         self.assertFinding(run(lambda f, e: f["datasets"]["DS-02"][1]["inputs"]
                                .pop("currency_code")), "amount but no currency_code")
 
+    def test_codes_and_ids_are_whole_values_with_ascii_digits(self) -> None:
+        def record(key: str, value: object) -> Edit:
+            return lambda f, e: f["datasets"]["DS-02"][0]["inputs"].update({key: value})
+        cases: list[tuple[Edit, str]] = [
+            (lambda f, e: f.update(reporting_currency_code="EUR\n"),
+             "reporting_currency_code is not a currency code"),
+            (record("currency_code", "EUR\n"), "invalid value for its suffix _code"),
+            (record("notional_amount\n", 1), "is not lower snake case"),
+            (lambda f, e: f.update(calculation="CALC-02\n"), "is not an ID of the form"),
+            (lambda f, e: f.update(calculation="CALC-0\u0662"), "is not an ID of the form"),
+            (lambda f, e: f.update(datasets={"DS-0\u0662": FIXTURE["datasets"]["DS-02"]}),
+             "is not an ID of the form"),
+            (lambda f, e: output(e).update(unit="EUR\n"), "is not a currency code, 1 or years"),
+            (lambda f, e: output(e).update(quantity="total_notional_amount\n"),
+             "is not lower snake case"),
+            (lambda f, e: output(e).update(rule="CALC-02.1\n"), "is not a calculation step"),
+            (lambda f, e: output(e).update(rule="CALC-02.\u0661"), "is not a calculation step"),
+        ]
+        for edit, text in cases:
+            with self.subTest(text=text):
+                self.assertFinding(run(edit), text)
+
+    def test_a_step_number_has_ascii_digits(self) -> None:
+        contracts = CONTRACTS.replace("| 2 | Average |", "| \u0662 | Average |")
+        self.assertFinding(run(lambda f, e: output(e).update(rule="CALC-02.2"),
+                               extra={"docs/methodology/CALCULATION_CONTRACTS.md": contracts}),
+                           "rule CALC-02.2 is not a step that the Rules table of CALC-02 lists")
+
     def test_null_input_is_not_applicable(self) -> None:
         def edit(f: dict[str, Any], e: dict[str, Any]) -> None:
             f["datasets"]["DS-02"][0]["inputs"]["maturity_years"] = None
@@ -242,6 +270,15 @@ class FixtureTest(FindingTest):
         self.assertFinding(run(no_status), "needs a _status text output")
         self.assertFinding(run(lambda f, e: f.update(category="invalid", synthetic=False)),
                            "synthetic is not true")
+
+    def test_invalid_case_holds_no_other_key(self) -> None:
+        # Only the calculation inputs may be invalid or missing.
+        def edit(f: dict[str, Any], e: dict[str, Any]) -> None:
+            f.update(category="invalid", extra=1)
+            f.pop("datasets")
+        findings = run(edit)
+        self.assertIn("tests/fixtures/case-one.json: unknown extra", findings)
+        self.assertFalse([item for item in findings if "missing" in item], findings)
 
 
 class ExpectedTest(FindingTest):
@@ -383,6 +420,14 @@ class TraceabilityTest(FindingTest):
                 self.assertFinding(findings, text)
                 self.assertEqual(len(findings), 1, findings)
                 self.assertTrue(findings[0].startswith("docs/methodology/VALIDATION_PLAN.md:7: "))
+
+    def test_a_procedure_of_a_form_counts(self) -> None:
+        files = plan(traced("VBA procedure", "`F_Main.ApplyRule`"))
+        files["src/forms/F_Main.frm"] = (
+            "VERSION 5.00\nBegin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} F_Main\n"
+            '   Caption         =   "Main"\nEnd\nAttribute VB_Name = "F_Main"\n'
+            "Option Explicit\n\nPrivate Sub ApplyRule()\nEnd Sub\n")
+        self.assertEqual(run(extra=files), [])
 
     def test_a_procedure_outside_src_does_not_count(self) -> None:
         files = plan(TRACED)
@@ -554,6 +599,18 @@ class FileBasedCaseTest(FindingTest):
             def edit(m: dict[str, Any], e: dict[str, Any]) -> None:
                 e["variants"]["lf"] = [{**OUTPUT, "scope": {"dataset": dataset,
                                                             "record": "line 2"}}]
+            return edit
+        self.assertEqual(file_case(scoped("DS-02")), [])
+        self.assertFinding(file_case(scoped("DS-09")), "is not a dataset of the case")
+
+    def test_an_invalid_case_scopes_a_dataset_of_its_manifest(self) -> None:
+        def scoped(dataset: str) -> Edit:
+            def edit(m: dict[str, Any], e: dict[str, Any]) -> None:
+                m["category"] = "invalid"
+                status = {"quantity": "import_status", "text": "REJECTED", "rule": "CALC-02.1",
+                          "scope": {"dataset": dataset, "record": "line 2"},
+                          "reference": OUTPUT["reference"]}
+                e["variants"] = {"lf": [status], "crlf": [status]}
             return edit
         self.assertEqual(file_case(scoped("DS-02")), [])
         self.assertFinding(file_case(scoped("DS-09")), "is not a dataset of the case")

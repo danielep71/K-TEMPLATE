@@ -93,8 +93,35 @@ class FileCheckTest(RepositoryTest):
         self.assertIn("reads other/template",
                       check_repository.traffic_badges(self.context())[0][1])
 
-    def test_dependabot_target_branches(self) -> None:
+    def origin(self, *branches: str) -> Path:
+        """A bare repository with main and these branches, as origin would be."""
         self.commit({"README.md": "x\n"})
+        bare = self.root.parent / f"{self.root.name}-origin.git"
+        self.addCleanup(shutil.rmtree, bare, ignore_errors=True)
+        self.git("init", "-q", "--bare", str(bare))
+        for branch in ("main", *branches):
+            self.git("push", "-q", str(bare), f"HEAD:refs/heads/{branch}")
+        return bare
+
+    def single_branch_clone(self, *branches: str) -> Path:
+        """A clone of main only: no remote-tracking branch for the other branches."""
+        clone = self.root.parent / f"{self.root.name}-clone"
+        self.addCleanup(shutil.rmtree, clone, ignore_errors=True)
+        subprocess.run(["git", "clone", "-q", "--single-branch", "--branch", "main",
+                        str(self.origin(*branches)), str(clone)], capture_output=True,
+                       check=True)
+        for branch in branches:
+            self.assertEqual(subprocess.run(["git", "rev-parse", "--verify", "--quiet",
+                                             f"refs/remotes/origin/{branch}"], cwd=clone,
+                                            capture_output=True, check=False).returncode, 1)
+        (clone / ".github").mkdir()
+        (clone / ".github/dependabot.yml").write_text(
+            "updates:\n  - package-ecosystem: pip\n    target-branch: release/1.0.0\n",
+            encoding="utf-8")
+        return clone
+
+    def test_dependabot_target_branches(self) -> None:
+        self.git("remote", "add", "origin", str(self.origin()))
         self.git("update-ref", "refs/remotes/origin/release/1.0.0", "HEAD")
         self.write({".github/dependabot.yml":
                     "updates:\n  - package-ecosystem: pip\n    target-branch: release/1.0.0\n"
@@ -103,6 +130,17 @@ class FileCheckTest(RepositoryTest):
         self.assertEqual([message for _, message in findings],
                          ["target-branch release/0.9.0 does not exist; set it to the active "
                           "release branch or remove it."])
+
+    def test_dependabot_target_branch_only_on_origin_passes(self) -> None:
+        clone = self.single_branch_clone("release/1.0.0")
+        self.assertEqual(check_repository.dependabot_branches(Context(clone)), [])
+
+    def test_dependabot_target_branch_nowhere_fails(self) -> None:
+        # A longer name that ends with the branch's name is not the branch.
+        clone = self.single_branch_clone("old/release/1.0.0")
+        self.assertEqual(check_repository.dependabot_branches(Context(clone)),
+                         [(".github/dependabot.yml", "target-branch release/1.0.0 does not "
+                           "exist; set it to the active release branch or remove it.")])
 
     @NEEDS_YAML
     def test_codeql_default_branch(self) -> None:
@@ -179,6 +217,31 @@ class WhitespaceTest(RepositoryTest):
                      "notes.txt": "clean\n", "run.cmd": b"echo clean\r\n",
                      "data.bin": b"\x00binary \n"})
         self.assertEqual(set(self.outcomes().values()), {0})
+
+    def test_byte_preserved_files_pass_under_the_repository_attributes(self) -> None:
+        # Source copies keep their issuer's bytes; a form keeps the VBE header,
+        # whose Begin line ends with a blank (tools/check_vba_source.py checks
+        # the code after it).
+        header = ["VERSION 5.00", "Begin {C62A69F0-16DC-11CE-9E98-00AA00574A4F} frmRun ",
+                  "   Caption         =   \"Run\"   ", "\tClientHeight    =   3015", "End",
+                  "Attribute VB_Name = \"frmRun\"", "Option Explicit"]
+        self.commit({".gitattributes": (ROOT / ".gitattributes").read_bytes(),
+                     "docs/methodology/sources/SRC-01_rules.csv": b"a,b \r\nc,d\t\r\n",
+                     "docs/methodology/sources/SRC-02_rules.txt": b"no final newline  ",
+                     "src/forms/frmRun.frm": "".join(f"{line}\r\n" for line in header)
+                     .encode("ascii")})
+        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(self.outcomes(), {"whitespace-committed": 0, "whitespace-local": 0})
+
+    def test_ordinary_text_beside_byte_preserved_files_is_checked(self) -> None:
+        self.commit({".gitattributes": (ROOT / ".gitattributes").read_bytes()})
+        for path in ("docs/methodology/sources/README.md", "docs/notes.md",
+                     "src/core/CORE_Probe.bas"):
+            with self.subTest(path=path):
+                self.commit({path: "trailing  \n"})
+                self.assertNotEqual(self.outcomes()["whitespace-committed"], 0)
+                self.git("rm", "-q", path)
+                self.commit()
 
     def test_local_white_space_fails(self) -> None:
         self.commit({"notes.txt": "clean\n"})
@@ -266,6 +329,21 @@ class RunTest(RepositoryTest):
         self.assertEqual(code, 1)
         self.assertEqual(report["status"], "fail")
 
+    def test_dependabot_target_branches_without_origin_are_skipped_unless_strict(self) -> None:
+        self.commit({".github/dependabot.yml":
+                     "updates:\n  - package-ecosystem: pip\n    target-branch: release/1.0.0\n"})
+        listed = [check for check in check_repository.checks(self.context())
+                  if check.name == "dependabot-target-branches"]
+        code, printed, report = self.run_checks(listed)
+        self.assertEqual(code, 0, printed)
+        # The rest is Git's own message, which a locale may translate.
+        self.assertIn("dependabot-target-branches: SKIP (origin cannot be asked whether branch "
+                      "release/1.0.0 exists (git ls-remote: ", printed)
+        self.assertEqual(report["checks"][0]["status"], "skip")
+        code, printed, report = self.run_checks(listed, strict=True)
+        self.assertEqual(code, 1, printed)
+        self.assertEqual(report["checks"][0]["status"], "fail")
+
     def test_codeql_default_branch_without_pyyaml_is_skipped_unless_strict(self) -> None:
         self.commit({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
                      ".github/workflows/codeql.yml": "on:\n  push:\n    branches: [main]\n"})
@@ -343,11 +421,14 @@ class RunTest(RepositoryTest):
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "secret-files",
-                         "vba-format", "vba-calls", "data-contract", "test-cases", "derivations",
-                         "independent-implementations", "workbook-protection",
+                         "vba-format", "vba-errors", "vba-calls", "data-contract", "test-cases",
+                         "derivations", "independent-implementations", "workbook-protection",
                          "changelog", "generated-docs", "markdown-links", "documented-commands",
                          "codeql-default-branch", "whitespace-committed"):
             self.assertIn(expected, names)
+        advisory = {check.name for check in check_repository.checks(self.context())
+                    if check.advisory}
+        self.assertNotIn("vba-errors", advisory)
         # Only --ci checks the working tree, after every other check.
         self.assertNotIn("clean-working-tree", names)
         in_ci = check_repository.checks(self.context(ci=True))

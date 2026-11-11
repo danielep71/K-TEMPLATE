@@ -12,12 +12,12 @@ test-results/integrity/:
   $GITHUB_STEP_SUMMARY.
 
 A check whose tool or GitHub context is missing is skipped and reported as
-such; --strict, which CI passes, makes it fail instead. An advisory check
-reports its findings as a warning and does not fail the run. --ci, which CI
-also passes, adds a last check that fails when the working tree differs from
-the commit, so that the result describes the commit and nothing a step
-changed. The run covers the repository only: it compiles no VBA, runs no Excel
-and certifies no figure.
+such, as is a check that cannot reach the origin remote; --strict, which CI
+passes, makes it fail instead. An advisory check reports its findings as a
+warning and does not fail the run. --ci, which CI also passes, adds a last
+check that fails when the working tree differs from the commit, so that the
+result describes the commit and nothing a step changed. The run covers the
+repository only: it compiles no VBA, runs no Excel and certifies no figure.
 """
 
 from __future__ import annotations
@@ -44,6 +44,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = Path("test-results/integrity")
 SCOPE = "Repository checks only: no VBA compilation, no Excel run, no numerical certification"
 TIMEOUT_SECONDS = 600
+# How long to wait for the origin remote to list a branch.
+REMOTE_TIMEOUT_SECONDS = 60
 REQUIRED_DOCUMENTS = ("README.md", "LICENSE", "docs/repo_governance/SETTINGS.md")
 BADGE = re.compile(r"raw\.githubusercontent\.com/([^/\s]+/[^/\s]+)/traffic-history/")
 CONTACT_URL = re.compile(r'^\s*url:\s*"?([^"\s]+)"?\s*$', re.M)
@@ -59,6 +61,14 @@ SECRET_FILES = (".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "*.pvk", "
 SECRET_FILE_EXCEPTIONS = (".env.example", "id_rsa*.pub", "id_ed25519*.pub")
 
 Finding = tuple[str, str]
+
+
+class MissingContext(Exception):
+    """Raised by a check function that cannot run here; the message says why.
+
+    The run reports it as it reports a Check's missing reason: skipped, or
+    failed under --strict.
+    """
 
 
 @dataclass
@@ -165,13 +175,43 @@ def dependabot_branches(context: Context) -> list[Finding]:
         return []
     findings = []
     for branch in sorted(set(TARGET_BRANCH.findall((context.root / path).read_text("utf-8")))):
-        found = subprocess.run(["git", "rev-parse", "--verify", "--quiet",
-                                f"refs/remotes/origin/{branch}"], cwd=context.root,
-                               capture_output=True, check=False)
-        if found.returncode:
+        if not origin_has_branch(context.root, branch):
             findings.append((path, f"target-branch {branch} does not exist; set it to the active "
                                    "release branch or remove it."))
     return findings
+
+
+def origin_has_branch(root: Path, branch: str) -> bool:
+    """Whether origin has the branch, by its remote-tracking branch or else by asking it.
+
+    A single-branch or shallow clone lacks the remote-tracking branch of a
+    branch that exists. Raises MissingContext when origin cannot answer: no
+    such remote, no network or no access.
+    """
+    tracked = subprocess.run(["git", "rev-parse", "--verify", "--quiet",
+                              f"refs/remotes/origin/{branch}"], cwd=root, capture_output=True,
+                             check=False)
+    if not tracked.returncode:
+        return True
+    ref = f"refs/heads/{branch}"
+    try:
+        # --exit-code exits with 2 when origin answers that it has no such branch.
+        asked = subprocess.run(["git", "ls-remote", "--exit-code", "--heads", "origin", ref],
+                               cwd=root, stdin=subprocess.DEVNULL, capture_output=True,
+                               text=True, timeout=REMOTE_TIMEOUT_SECONDS, check=False,
+                               env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
+    except subprocess.TimeoutExpired:
+        raise MissingContext(f"origin did not answer within {REMOTE_TIMEOUT_SECONDS} s whether "
+                             f"branch {branch} exists") from None
+    if asked.returncode == 2:
+        return False
+    if asked.returncode:
+        error = next((line for line in asked.stderr.splitlines() if line.strip()),
+                     f"exit code {asked.returncode}")
+        raise MissingContext(f"origin cannot be asked whether branch {branch} exists "
+                             f"(git ls-remote: {error.strip()})")
+    # A pattern also matches the end of a longer name: keep only the exact branch.
+    return any(line.split("\t")[-1] == ref for line in asked.stdout.splitlines())
 
 
 def codeql_default_branch(context: Context) -> list[Finding]:
@@ -271,7 +311,7 @@ def checks(context: Context) -> list[Check]:
         Check("vba-format", [python, "tools/format_vba.py", "--check"]),
         *[Check(f"vba-{name.replace('_', '-')}", [python, f"tools/check_vba_{name}.py"])
           for name in ("source", "conditionals", "jumps", "public_api", "dependencies",
-                       "identifiers")],
+                       "identifiers", "errors")],
         Check("vba-calls", [python, "tools/check_vba_calls.py"], advisory=True),
         Check("data-contract", [python, "tools/check_data_contract.py"]),
         Check("test-cases", [python, "tools/check_test_cases.py"]),
@@ -314,11 +354,12 @@ def run_check(check: Check, context: Context, strict: bool) -> Result:
 
 def run_one(check: Check, context: Context, strict: bool) -> Result:
     if check.missing:
-        status = "fail" if strict else "skip"
-        return Result(check.name, status, check.command, None, check.missing, check.missing)
+        return missing_result(check, check.missing, strict)
     if check.function is not None:
         try:
             findings = check.function(context)
+        except MissingContext as missing:
+            return missing_result(check, str(missing), strict)
         except Exception as error:  # noqa: BLE001 - reported as a failed check, not raised
             # A malformed file must fail its check, not stop the run before the
             # other checks, the report and the summary are written.
@@ -336,6 +377,11 @@ def run_one(check: Check, context: Context, strict: bool) -> Result:
         output, code = str(error), 1
     return Result(check.name, "pass" if code == 0 else "fail", check.command, code,
                   "" if code == 0 else f"exit code {code}", output)
+
+
+def missing_result(check: Check, reason: str, strict: bool) -> Result:
+    """A check that cannot run here: skipped, or failed under --strict."""
+    return Result(check.name, "fail" if strict else "skip", check.command, None, reason, reason)
 
 
 def tracked_hashes(root: Path) -> dict[str, str]:

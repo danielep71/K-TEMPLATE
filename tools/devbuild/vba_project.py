@@ -5,11 +5,12 @@ Implements, from the [MS-OVBA] and [MS-CFB] specifications:
   - the dir stream (2.3.4.2), PROJECT / PROJECTwm streams (2.3.1),
   - the Data Encryption of CMG / DPB / GC (2.4.3),
   - a version-3 compound file writer (512-byte sectors, mini stream).
-_VBA_PROJECT is written with Version 0xFFFF and no performance cache, which
-tells the host to compile from source on first load
-(docs/methodology/VALIDATION_PLAN.md, HB-05). Standard modules,
-class modules and document modules are supported; forms, which need a
-designer storage, are not. tests/test_devbuild.py reads the output back with
+_VBA_PROJECT is written with Version 0xFFFF and no performance cache, so the
+project holds no compiled code: the host reads it from source and compiles
+each module when it is first used, and needs no Trust access to the VBA
+project object model (docs/methodology/VALIDATION_PLAN.md, HB-05). Standard
+modules, class modules and document modules are supported; forms, which need
+a designer storage, are not. tests/test_devbuild.py reads the output back with
 an independent decoder.
 """
 from __future__ import annotations

@@ -37,7 +37,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_changelog import NO_RELEASE, VERSION_HEADING, foreign_references  # noqa: E402
-from check_repository import BADGE, CONTACT_URL, TARGET_BRANCH  # noqa: E402
+from check_repository import (  # noqa: E402
+    BADGE,
+    CONTACT_URL,
+    TARGET_BRANCH,
+    MissingContext,
+    origin_has_branch,
+)
 from vba_lexer import FACADE_ROW, HOUSE_STYLE, RESERVED_PREFIXES  # noqa: E402
 
 REPOSITORY = re.compile(r"[\w.-]+/[\w.-]+")
@@ -255,12 +261,23 @@ def dirty(root: Path) -> list[str]:
 
 
 def warnings(root: Path, options: Options) -> list[str]:
+    """Whether --release-branch exists on origin, asked as dependabot-target-branches asks it.
+
+    The check looks for the remote-tracking branch, and else asks origin, so a
+    single-branch or shallow clone of a repository that has the branch needs
+    no warning.
+    """
     branch = options.release_branch
-    if branch and git(root, "rev-parse", "--verify", "--quiet",
-                      f"refs/remotes/origin/{branch}").returncode:
-        return [f"origin/{branch} is not known here: push the branch, or fetch it, before "
-                "Repository integrity runs, or the dependabot-target-branches check fails"]
-    return []
+    if not branch:
+        return []
+    try:
+        if origin_has_branch(root, branch):
+            return []
+    except MissingContext as missing:
+        return [f"{missing}: make sure origin has it before Repository integrity runs, or "
+                "the dependabot-target-branches check fails there"]
+    return [f"origin has no branch {branch}: push it before Repository integrity runs, or the "
+            "dependabot-target-branches check fails"]
 
 
 def apply(root: Path, changes: Sequence[Change]) -> None:

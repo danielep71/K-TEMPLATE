@@ -14,7 +14,9 @@ merge it rewrites the README badge files under badges/ from the stored data.
 
 The alert command compares the two latest snapshots and, when traffic spikes,
 stars or forks increase, or a new referrer appears, writes the title and body
-of one alert issue for the workflow to open.
+of one alert issue for the workflow to open. With --snapshot-output it only
+decides, and writes the snapshot date when an alert is due, so that the
+workflow looks up a milestone only then.
 """
 
 from __future__ import annotations
@@ -471,14 +473,30 @@ def number(row: Mapping[str, str], key: str) -> int | None:
     return int(row[key]) if row[key] else None
 
 
-def alert(data: Path, milestone_due: str) -> dict[str, str] | None:
-    """The alert issue for the latest snapshot, or None when nothing stands out.
+@dataclass(frozen=True)
+class Findings:
+    """What stands out in the latest snapshot compared with the one before."""
+
+    previous: Row
+    current: Row
+    reasons: list[str]
+    new: list[Row]
+    today: list[Row]
+
+    @property
+    def snapshot_date(self) -> str:
+        return self.current["snapshot_date"]
+
+
+def findings(data: Path) -> Findings | None:
+    """The reasons for an alert on the latest snapshot, or None when nothing stands out.
 
     It compares the latest snapshot with the one before: a views spike, more
     stars or forks, or a referrer never seen before that brings at least
     NEW_REFERRER_VIEWS views. Clones never raise one (see SPIKE_GROWTH).
     Counts missing from the older snapshot (collected before they were
-    recorded) raise nothing.
+    recorded) raise nothing. It reads only the history: no milestone is needed
+    to decide.
     """
     snapshots = sorted(read_history(data / SNAPSHOTS), key=lambda row: row["snapshot_date"])
     if len(snapshots) < 2:
@@ -503,6 +521,17 @@ def alert(data: Path, milestone_due: str) -> dict[str, str] | None:
         reasons.append("New referrer")
     if not reasons:
         return None
+    return Findings(previous, current, reasons, new, today)
+
+
+def alert(data: Path, milestone_due: str) -> dict[str, str] | None:
+    """The alert issue for the latest snapshot, or None when nothing stands out (see findings)."""
+    found = findings(data)
+    if found is None:
+        return None
+    previous, current, reasons, new, today = (found.previous, found.current, found.reasons,
+                                              found.new, found.today)
+    day = found.snapshot_date
 
     def ranked(rows: Sequence[Row], label: str) -> list[str]:
         return [f"- {row[label]}: {row['count']} views, {row['uniques']} unique"
@@ -591,12 +620,22 @@ def parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     alert_command = commands.add_parser(
         "alert", help="write the alert issue for the latest snapshot, if one is due")
     alert_command.add_argument("--data", type=Path, required=True)
-    alert_command.add_argument("--milestone-due", type=date.fromisoformat, required=True,
+    alert_command.add_argument("--snapshot-output", type=Path,
+                               help="only decide: write the latest snapshot's date to this "
+                                    "file when an alert is due; not written otherwise")
+    alert_command.add_argument("--milestone-due", type=date.fromisoformat,
                                help="due date of the milestone the issue goes into")
-    alert_command.add_argument("--output", type=Path, required=True,
+    alert_command.add_argument("--output", type=Path,
                                help="JSON file for the issue's title and body; "
                                     "not written when no alert is due")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.command == "alert":
+        issue = args.milestone_due is not None or args.output is not None
+        if args.snapshot_output is not None and issue:
+            alert_command.error("--snapshot-output cannot be combined with --milestone-due or --output")
+        if args.snapshot_output is None and (args.milestone_due is None or args.output is None):
+            alert_command.error("give --snapshot-output, or both --milestone-due and --output")
+    return args
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -607,7 +646,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     if args.command == "alert":
         try:
-            issue = alert(args.data, args.milestone_due.isoformat())
+            if args.snapshot_output is not None:
+                found = findings(args.data)
+                if found is not None:
+                    args.snapshot_output.write_text(found.snapshot_date + "\n", encoding="utf-8")
+                    print(f"Alert due for the snapshot of {found.snapshot_date}: "
+                          + ", ".join(found.reasons).lower() + ".")
+                    return 0
+                issue = None
+            else:
+                issue = alert(args.data, args.milestone_due.isoformat())
         except TrafficError as error:
             print(f"ERROR: {error}", file=sys.stderr)
             return 2

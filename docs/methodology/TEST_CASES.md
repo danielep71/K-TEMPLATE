@@ -109,8 +109,8 @@ tests/fixtures/illustrative-file-import-example/
 
 - **Manifest.** `case.json` holds the keys of a [JSON fixture](#fixture-format)
   with `kind` `test-file-fixture`, and with `datasets` as a list of the `DS-`
-  IDs the case reads instead of records. Its `id` is the directory name. Every
-  key is checked in every category, `invalid` included.
+  IDs of the file datasets the case reads instead of records. Its `id` is the
+  directory name. Every key is checked in every category, `invalid` included.
 - **Variants.** Each other entry is a directory, one import of the case, named
   in lowercase kebab-case. It holds only files that the *Datasets* table of
   the data contract names for the manifest's datasets. A variant may omit a

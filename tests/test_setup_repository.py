@@ -995,6 +995,16 @@ class SetupTests(unittest.TestCase):
         self.assertEqual((record['writes'], record['readback']), ([], 'VERIFIED'))
         self.assertEqual(record['plan_sha256'], self.args.approve_plan)
 
+    def test_an_apply_with_no_steps_still_reads_back(self) -> None:
+        # The journal's read-back is a fresh observation, never the one the plan was built from.
+        self.configure()
+        journal = self.approve()
+        self.api.reads.clear()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.api.writes, [])
+        self.assertEqual(self.api.reads.count(REPO), 2, 'observed before the apply and read back after it')
+        self.assertEqual(json.loads(journal.read_text(encoding='utf-8'))['readback'], 'VERIFIED')
+
     # A configured ruleset covered by content, not only by name.
 
     def rename(self, name: str, new: str) -> dict[str, Any]:
