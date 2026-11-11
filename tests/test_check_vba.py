@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -1983,7 +1984,60 @@ STATEMENT_SWEEP = [
     "Flag = EOF(1)", 'Text = Format(Date, "yyyy") & Dir(Text) & Environ("TEMP")',
     'Number = DateDiff("d", Date, Now)', "If TypeOf Item Is Collection Then Number = 1",
     "If TypeOf Item Is VBA.Collection Then Number = 1",
+    # Error raises: in a handler the read after it is never reached, and after
+    # On Error Resume Next it reads the error Error raised, so no claim.
+    "Error 5",
 ]
+# One call of each VBA function of PURE_FUNCTIONS, with arguments it accepts;
+# Spc and Tab exist only in Print. The test checks that this table and the
+# check's set name the same functions.
+PURE_CALLS = {
+    **{name: f"Result = {name}(Number)" for name in """
+        Abs Atn CBool CByte CCur CDbl CDec Chr ChrB ChrW CInt CLng CLngLng CLngPtr Cos CSng CStr
+        CVar Exp Fix Hex Int IsEmpty IsError IsNull IsNumeric IsObject Log Oct QBColor Sgn Sin
+        Space Sqr Str Tan TypeName VarType MonthName WeekdayName
+        """.split()},
+    **{name: f"Result = {name}(Text)" for name in """
+        Asc AscB AscW CurDir Dir FileDateTime FileLen GetAttr IsDate LCase Len LenB LTrim RTrim
+        Split StrReverse Trim UCase Val
+        """.split()},
+    **{name: f"Result = {name}(Now)" for name in """
+        CDate CVDate Day FormatDateTime Hour Minute Month Second Weekday Year
+        """.split()},
+    **{name: f"Result = {name}" for name in "Date Now Rnd Time Timer FreeFile".split()},
+    "Array": "Result = Array(1, 2)", "Choose": "Result = Choose(1, Text)",
+    "CVErr": "Result = CVErr(2007)", "DateAdd": 'Result = DateAdd("d", 1, Now)',
+    "DateDiff": 'Result = DateDiff("d", Now, Now)', "DatePart": 'Result = DatePart("d", Now)',
+    "DateSerial": "Result = DateSerial(2026, 1, 1)",
+    "DateValue": 'Result = DateValue("2026-01-01")', "DDB": "Result = DDB(1000, 100, 5, 1)",
+    "Environ": 'Result = Environ("TEMP")', "EOF": "Result = EOF(1)", "Loc": "Result = Loc(1)",
+    "LOF": "Result = LOF(1)", "Filter": "Result = Filter(Other, Text)",
+    "Format": 'Result = Format(Number, "0.00")',
+    "FormatCurrency": "Result = FormatCurrency(Number)",
+    "FormatNumber": "Result = FormatNumber(Number, 2)",
+    "FormatPercent": "Result = FormatPercent(Number)", "FV": "Result = FV(0.1, 12, -100)",
+    "GetSetting": 'Result = GetSetting("App", "Section", "Key")',
+    "IIf": "Result = IIf(Flag, 1, 2)", "Input": "Result = Input(1, #1)",
+    "InputB": "Result = InputB(1, #1)", "InStr": 'Result = InStr(Text, "a")',
+    "InStrB": 'Result = InStrB(Text, "a")', "InStrRev": 'Result = InStrRev(Text, "a")',
+    "IPmt": "Result = IPmt(0.1, 1, 12, 1000)", "IRR": "Result = IRR(Amounts)",
+    "IsArray": "Result = IsArray(Values)", "IsMissing": "Result = IsMissing(Result)",
+    "Join": "Result = Join(Other)", "LBound": "Result = LBound(Values)",
+    "UBound": "Result = UBound(Values)", "Left": "Result = Left(Text, 1)",
+    "LeftB": "Result = LeftB(Text, 1)", "Right": "Result = Right(Text, 1)",
+    "RightB": "Result = RightB(Text, 1)", "Mid": "Result = Mid(Text, 1, 1)",
+    "MidB": "Result = MidB(Text, 1, 1)", "MIRR": "Result = MIRR(Amounts, 0.1, 0.1)",
+    "NPer": "Result = NPer(0.1, -100, 1000)", "NPV": "Result = NPV(0.1, Amounts)",
+    "Pmt": "Result = Pmt(0.1, 12, 1000)", "PPmt": "Result = PPmt(0.1, 1, 12, 1000)",
+    "PV": "Result = PV(0.1, 12, -100)", "Rate": "Result = Rate(12, -100, 1000)",
+    "Replace": 'Result = Replace(Text, "a", "b")', "RGB": "Result = RGB(1, 2, 3)",
+    "Round": "Result = Round(Number, 2)", "SLN": "Result = SLN(1000, 100, 5)",
+    "Spc": "Print #1, Spc(2); Text", "Tab": "Print #1, Tab(4); Text",
+    "StrComp": "Result = StrComp(Text, Text)", "StrConv": "Result = StrConv(Text, vbUpperCase)",
+    "String": 'Result = String(3, "x")', "Switch": "Result = Switch(Flag, 1)",
+    "SYD": "Result = SYD(1000, 100, 5, 1)", "TimeSerial": "Result = TimeSerial(1, 2, 3)",
+    "TimeValue": 'Result = TimeValue("12:00")',
+}
 # Procedures of the VBA library that are written as statements, with the
 # module of the library that holds them, as in VBA.Interaction.Beep.
 LIBRARY_STATEMENTS = [
@@ -2008,6 +2062,82 @@ RESUME_NEXT_OPERATIONS = [
 ]
 
 
+# A standard module of public error codes and records, as the house style
+# prescribes, and a procedure whose handler runs a statement at line 22 and
+# then reads Err.Number at line 23.
+CODES = """Attribute VB_Name = "TEST_Codes"
+Option Explicit
+Option Private Module
+
+Public Const LIMIT As Long = 3
+Public Enum RunStatus
+    rsOk = 0
+    rsFailed = 1
+End Enum
+Public Type SavedError
+    Number As Long
+    Source As String
+    Inner As InnerRecord
+End Type
+Public Type InnerRecord
+    Field As String
+End Type
+Public LastError As SavedError
+Private mHidden As Long
+
+
+Public Function Describe() As Long
+End Function
+"""
+
+
+def qualified(statement: str) -> str:
+    """``statement`` in a handler at line 22, then a read of Err.Number."""
+    return module("""Private Const OWN As Long = 1
+Private Enum Kind
+    kOne = 1
+End Enum
+Private Type Record
+    Count As Long
+    Items(1 To 3) As Long
+    Owner As Object
+End Type
+Private mRecord As Record
+
+
+Private Sub First(ByRef Given As SavedError, ByVal Book As Object)
+        Dim Number As Long, Text As String, Saved As SavedError, Many(1 To 2) As SavedError
+        Dim Index As Long
+        On Error GoTo Handler
+        Exit Sub
+Handler:
+        """ + statement + """
+        Number = Err.Number
+End Sub
+""")
+
+
+# Each reads or writes a value, not a member: no finding.
+QUALIFIED_VALUES = [
+    "Number = RunStatus.rsFailed", "Number = TEST_Codes.RunStatus.rsFailed",
+    "Number = TEST_Codes.rsFailed", "Number = Kind.kOne", "Number = TEST_Codes.LIMIT",
+    "Number = TEST_Fixture.OWN + TEST_Fixture.kOne", "Number = TEST_Codes.LastError.Number",
+    "Err.Raise RunStatus.rsFailed + 0, , Err.Description: Exit Sub",
+    "Saved.Number = Err.Number: Saved.Source = Err.Source", "Number = Saved.Number",
+    "Saved.Inner.Field = Err.Description", "Many(1).Number = Err.Number",
+    "Many(Index).Source = Err.Source", "Number = Given.Number",
+    "mRecord.Count = Err.Number: mRecord.Items(1) = 2", "LastError.Source = Err.Source",
+    "TEST_Codes.LastError.Number = Err.Number",
+    "With Saved: .Number = Err.Number: .Source = Err.Source: End With",
+]
+# Each is a member access or a call before the read: one finding.
+QUALIFIED_MEMBERS = [
+    "Number = Book.Count", "Text = Application.Name", "Number = mRecord.Owner.Count",
+    "Number = TEST_Codes.Describe", "Number = Kind.kTwo", "Number = Saved.Missing",
+    "Number = TEST_Codes.mHidden", "Number = Many(TEST_Codes.Describe()).Number",
+]
+
+
 def resume_next_operation(statement: str) -> str:
     """``statement`` after On Error Resume Next, then a read of Err.Number."""
     return ("Private Sub First()\n"
@@ -2018,9 +2148,10 @@ def resume_next_operation(statement: str) -> str:
 
 
 def sweep_statements() -> list[str]:
-    """Each statement of the sweep, and each library statement written
-    plain, with Call, and qualified by VBA. and by its module."""
-    statements = list(STATEMENT_SWEEP)
+    """Each statement of the sweep, one call of each VBA function, and each
+    library statement written plain, with Call, and qualified by VBA. and by
+    its module."""
+    statements = list(STATEMENT_SWEEP) + list(PURE_CALLS.values())
     for name, arguments, library in LIBRARY_STATEMENTS:
         for qualifier in ("", "VBA.", f"VBA.{library}."):
             statements.append(f"{qualifier}{name} {arguments}".rstrip())
@@ -2030,10 +2161,12 @@ def sweep_statements() -> list[str]:
 
 
 def sweep_handler(statement: str) -> str:
-    """A handler that runs ``statement`` at line 11, then reads Err.Number."""
+    """A handler that runs ``statement`` at line 10, then reads Err.Number
+    at line 11; the module header takes lines 1 to 3."""
     return ("Private Sub First()\n"
             "        Dim Number As Long, Text As String, Flag As Boolean, Item As Object\n"
-            "        Dim Values() As Long, Other() As String, FileNumber As Integer\n"
+            "        Dim Values() As Long, Other() As String, FileNumber As Integer, "
+            "Result As Variant, Amounts() As Double\n"
             "        On Error GoTo Handler\n        Exit Sub\nHandler:\n"
             f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
 
@@ -2054,6 +2187,20 @@ class ErrorTest(unittest.TestCase):
                                 findings)
                 self.assertIn(text, findings[0])
                 self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
+
+    def test_qualified_values_and_type_fields_are_data(self) -> None:
+        for statement in QUALIFIED_VALUES:
+            with self.subTest(statement=statement):
+                files = {**standalone(qualified(statement)), "tests/modules/TEST_Codes.bas": CODES}
+                self.assertEqual(run_check(check_vba_errors.check, files), [])
+        for statement in QUALIFIED_MEMBERS:
+            with self.subTest(statement=statement):
+                files = {**standalone(qualified(statement)), "tests/modules/TEST_Codes.bas": CODES}
+                findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(len(findings), 1, findings)
+                self.assertTrue(findings[0].startswith(
+                    "tests/modules/TEST_Fixture.bas:23: Err.Number read in First after line 22, "
+                    "which may have changed Err with a call or member access"), findings)
 
     def test_every_statement_can_fail_after_resume_next(self) -> None:
         for statement in RESUME_NEXT_OPERATIONS:
@@ -2080,7 +2227,20 @@ class ErrorTest(unittest.TestCase):
             index = int(finding.split(".bas")[0].removeprefix("tests/modules/TEST_Sweep"))
             with self.subTest(statement=statements[index]):
                 self.fail(finding)
-        self.assertGreater(len(statements), 100)
+        self.assertGreater(len(statements), 250)
+
+    def test_sweep_covers_what_the_check_knows(self) -> None:
+        # The sweep is checked against the check's own lists, so that a name
+        # removed from them, or added without a case, fails here.
+        self.assertEqual({name.casefold() for name in PURE_CALLS}, check_vba_errors.PURE_FUNCTIONS)
+        statements = sweep_statements()
+        for keyword in (*check_vba_errors.BUILTIN_STATEMENTS,
+                        *check_vba_errors.BUILTIN_TARGETS):
+            with self.subTest(keyword=keyword):
+                words = r"\s+".join(keyword.split())
+                pattern = re.compile(rf"^(?:Call\s+)?(?:VBA\.(?:\w+\.)?)?{words}\b",
+                                     re.IGNORECASE)
+                self.assertTrue(any(pattern.match(item) for item in statements), keyword)
 
     def test_project_declarations_shadow_vba_built_ins(self) -> None:
         # A procedure of the project named like a VBA function, statement,

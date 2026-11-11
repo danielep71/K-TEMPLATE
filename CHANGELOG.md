@@ -418,9 +418,12 @@ milestones and their pull requests.
   `Err.Description` that follows, on straight-line code, an `On Error`
   statement or `Err.Clear`, also written `Call Err.Clear`, or, in an error
   handler, a call or member access, so that a handler cannot report or raise
-  again an error that another statement has cleared or replaced. The
+  again an error that another statement has cleared or replaced. An Enum
+  member or constant, also qualified as in `RunStatus.rsFailed` or
+  `Module.LIMIT`, and a field of a variable of a user-defined `Type`, as in
+  `Saved.Number = Err.Number`, are values, not member accesses. The
   [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
-  see (#396, #419).
+  see (#396, #419, #422).
 
 ### Changed
 
