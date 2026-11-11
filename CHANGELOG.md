@@ -65,15 +65,23 @@ Use only the categories an entry needs.
 
 ### Added
 
+- An eighth static check of exported VBA source, `tools/check_vba_errors.py`,
+  which **Repository integrity** runs as `vba-errors`. In each compilation
+  environment, it reports a read of `Err.Number`, `Err.Source` or
+  `Err.Description` that follows, on straight-line code, an `On Error`
+  statement or, in an error handler, a call or member access, so that a
+  handler cannot report or raise again an error that another statement has
+  cleared or replaced. The [house style](docs/VBA_HOUSE_STYLE.md#static-checks)
+  lists what it cannot see (#396).
 - `tools/check_vba_jumps.py` reports an `Err.Raise` or `Error` statement
   reached after an unconditional `Resume <label>` while the procedure's own
-  `On Error GoTo <label>` handler is enabled, in each compilation
-  environment: the handler would trap the
-  raise again, and a cleanup that raises the saved error can loop and hang
-  Excel. The check also requires the line number in `If x Then 100`, an
-  implicit `GoTo`, to be a label of the procedure. The [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the
-  handler with `On Error GoTo 0` before raising the saved error again. The
-  check is static; nothing was run in Excel (#397).
+  `On Error GoTo <label>` handler is enabled, in each compilation environment:
+  the handler would trap the raise again, and a cleanup that raises the saved
+  error can loop and hang Excel. The check also requires the line number in
+  `If x Then 100`, an implicit `GoTo`, to be a label of the procedure. The
+  [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the handler with
+  `On Error GoTo 0` before raising the saved error again. The check is static;
+  nothing was run in Excel (#397).
 
 ### Fixed
 
