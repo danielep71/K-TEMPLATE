@@ -21,6 +21,10 @@ the version and changelog rules are in
 | `VERSION` | `1.0.0` |
 | Active release branch | The branch `.github/dependabot.yml` names in `target-branch`, if any |
 
+A version is released from the preparation pull request that dates its
+changelog section ([step 1](#1-finalize-the-changelog-and-version)). It is
+published once its tag and its GitHub Release exist (steps 6 and 7).
+
 <a id="versioning"></a>
 
 ## 🏷️ Versioning
@@ -31,7 +35,7 @@ the version and changelog rules are in
 | What the version covers | Calculation results, input and output layouts, and the supported VBA API in [docs/PUBLIC_API.txt](docs/PUBLIC_API.txt) |
 | Release branch | `release/X.Y.Z`, without `v`, opened only when I decide to |
 | Milestone | `vX.Y.Z - <title>`, on issues only |
-| `VERSION` | One `X.Y.Z` line at the root. Created in the release preparation pull request, never before; afterwards it always names the newest released version |
+| `VERSION` | One `X.Y.Z` line at the root. Created in the release preparation pull request, never before; afterwards it always names the newest released version, published or not ([current status](#current-status)) |
 | Changelog | Work stays under `## [Unreleased]`; preparation moves it to `## [X.Y.Z] - YYYY-MM-DD` |
 | Tag | Annotated `vX.Y.Z` on the candidate commit on the default branch. The **Protect release tags** ruleset blocks its deletion, updates and force pushes ([settings](docs/repo_governance/SETTINGS.md)) |
 | GitHub Release | Created from the tag, with the changelog section and the evidence summary as notes |
@@ -216,8 +220,17 @@ Distribution review: #<issue>.
 Deviations: none.
 ```
 
-`Deviations:` is mandatory: write `none`, or list each invariant that was not
-met. Copy results from the runs themselves.
+`Deviations:` is mandatory. Write `none` after it on the same line, as above,
+or list each invariant that was not met on the lines that follow it, one
+`- ` or `* ` item per line:
+
+```text
+Deviations:
+- Invariant 7: <what was not met, and why>.
+```
+
+`Deviations:` with nothing after it fails. Copy results from the runs
+themselves.
 
 Pushing the tag starts the **Release** workflow
 (`.github/workflows/release.yml`). It stops before building anything if any of
@@ -228,18 +241,20 @@ these fails:
   `VERSION`;
 - the tagged commit is on the default branch;
 - the message names that commit on the `Candidate` line and has a
-  `Deviations:` line;
+  `Deviations:` line in one of the two forms above;
 - **Repository integrity** succeeded on the commit.
 
 The workflow then builds `<repository>-X.Y.Z-source.tar.gz` and `SHA256SUMS`
 from the tag with `tools/release.py`; the same tag always gives the same bytes.
 It attests their build provenance with GitHub's OIDC-signed attestation, and
 creates a **draft** release with the tag message and the changelog section as
-notes. A private repository attests only with GitHub Enterprise Cloud and the
-repository variable `RELEASE_ATTESTATIONS` set to `enabled`; otherwise the
-draft is created without an attestation, and its notes say so. To rehearse before tagging, run the workflow by hand on the candidate's
-ref: it checks the changelog and builds the bundle as an artifact, with no
-attestation and no release.
+notes. A private repository attests only on GitHub Enterprise Cloud, with the
+repository variable `RELEASE_ATTESTATIONS` set to `enabled`. Without the
+variable, the draft is created without an attestation, and its notes say so.
+With the variable but without Enterprise Cloud, the attestation fails and no
+draft is created: leave the variable unset there. To rehearse before tagging,
+run the workflow by hand on the candidate's ref: it checks the changelog and
+builds the bundle as an artifact, with no attestation and no release.
 
 ### 7. Publish and verify
 

@@ -160,6 +160,16 @@ class RegistryTest(unittest.TestCase):
                            "min_holdout_cases is not a whole number of at least 1")
         self.assertFinding(findings({"schema_version": 2}), "envelope is not")
 
+    def test_ids_and_names_are_whole_values_with_ascii_digits(self) -> None:
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({"id": "ACC-02\n"}, "id is not ACC-<number>"),
+            ({"id": "ACC-0\u0662"}, "id is not ACC-<number>"),
+            ({"quantities": [f"{QUANTITY}\n"]}, "lower snake case names"),
+        ]
+        for change, text in cases:
+            with self.subTest(text=text):
+                self.assertFinding(findings(registry({**FROZEN, **change})), text)
+
     def test_cases_must_fit_the_contract(self) -> None:
         cases: dict[str, dict[str, Any]] = {
             "calculation CALC-09 is not declared": {"calculation": "CALC-09"},
@@ -256,7 +266,7 @@ class ResultsTest(unittest.TestCase):
         found = findings(registry(FROZEN), stale, commit="b" * 40)
         self.assertTrue(any("results are of commit aaaaaaaaaaaa, not of the candidate "
                             "bbbbbbbbbbbb" in item for item in found), found)
-        for commit in (None, "HEAD", "A" * 40):
+        for commit in (None, "HEAD", "A" * 40, "a" * 40 + "\n"):
             with self.subTest(commit=commit):
                 bad = {**stale, "commit": commit}
                 self.assertTrue(any("commit is not a full lower-case commit SHA" in item
