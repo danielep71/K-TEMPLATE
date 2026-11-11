@@ -964,14 +964,9 @@ def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -
     if not workbook.is_file():
         evidence.findings.append(f"workbook {workbook}: missing")
         return
-    stamp_cell = stamp_name(root, commit)
-    try:
-        stamp = read_stamp(workbook, stamp_cell) if stamp_cell else None
-    except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
-            ElementTree.ParseError):
-        stamp = None
-    if overridden(stamp):
-        evidence.findings.append(f"workbook {workbook.name}: {not_evidence(stamp, commit)}")
+    override = workbook_override(root, commit, workbook)
+    if override:
+        evidence.findings.append(override)
         return
     with tempfile.TemporaryDirectory(prefix="excel-run-rebuild-") as temporary:
         tree = Path(temporary) / "tree"
@@ -1025,6 +1020,19 @@ def overridden(stamp: object) -> bool:
 
 def not_evidence(stamp: object, commit: str) -> str:
     return f"built with overrides, so not evidence for {commit} (build stamp {stamp!r})"
+
+
+def workbook_override(root: Path, commit: str, workbook: Path) -> str:
+    """The finding for a workbook whose build stamp records --override; empty when
+    it records none or cannot be read, which the binding checks report."""
+    stamp_cell = stamp_name(root, commit)
+    try:
+        stamp = read_stamp(workbook, stamp_cell) if stamp_cell else None
+    except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
+            ElementTree.ParseError):
+        return ""
+    return f"workbook {workbook.name}: {not_evidence(stamp, commit)}" if overridden(stamp) \
+        else ""
 
 
 def package_parts(data: bytes) -> list[tuple[str, bytes]]:
@@ -1235,6 +1243,13 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     check_overridden_results(commit, folder, evidence, policy)
     if not rebuilt:
         check_binding(root, commit, folder, workbook, evidence, policy)
+        # Whatever the export and its manifest show, a workbook built with
+        # --override is never evidence for the commit.
+        override = workbook_override(root, commit, workbook) if workbook is not None else ""
+        if override:
+            evidence.binding = "FAIL"
+            if override not in evidence.findings:
+                evidence.findings.append(override)
     if require_binding and evidence.binding == "UNVERIFIED":
         evidence.findings.append("binding UNVERIFIED, but --require-binding needs VERIFIED: "
                                  + "; ".join(evidence.binding_notes))

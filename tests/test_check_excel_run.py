@@ -464,12 +464,20 @@ class BindingTest(unittest.TestCase):
         build = build_workbook.Build(COMMIT, "2026-11-02T10:00:00+01:00", True, "development",
                                      (), overrides=(override,), override_folder="mutants")
         data = build_workbook.package(build_workbook.load_layout(SOURCE), build, b"project")
-        result = self.bound(data=data, require=True)
-        self.assertEqual(result.binding, "FAIL")
-        self.assertTrue(any(f"built with overrides, so not evidence for {COMMIT}" in item and
-                            "TEST_Harness SHA-256 " + "0" * 64 in item
-                            for item in result.findings), result.findings)
-        self.assertIn("excel-run: FAIL", check_excel_run.report(COMMIT, result))
+        def bad_manifest(folder: Path, _: Path) -> None:
+            (folder / POLICY.manifest).write_text('{"format": "other"}', "utf-8")
+        # Every binding path with an export reads the stamp: with a manifest,
+        # without one, and with one that is not valid.
+        for name, options in (("manifest", {}), ("no manifest", {"manifest": False}),
+                              ("invalid manifest", {"change": bad_manifest})):
+            with self.subTest(path=name):
+                result = self.bound(data=data, **options)
+                self.assertEqual(result.binding, "FAIL")
+                found = [item for item in result.findings
+                         if f"built with overrides, so not evidence for {COMMIT}" in item
+                         and "TEST_Harness SHA-256 " + "0" * 64 in item]
+                self.assertEqual(len(found), 1, result.findings)
+                self.assertIn("excel-run: FAIL", check_excel_run.report(COMMIT, result))
 
     def test_the_stamp_is_read_from_shared_strings_after_excel_saves(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
