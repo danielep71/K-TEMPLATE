@@ -50,9 +50,13 @@ The workflow does nothing until the repository variable `TRAFFIC_HISTORY` is
    without affecting other repositories) and add the whole `.pem` content as
    the environment secret **TRAFFIC_APP_PRIVATE_KEY**, then delete the
    downloaded file. Never put the key in a file, issue, comment or chat.
-6. **Settings → Secrets and variables → Actions → Variables**: add the
+6. **Issues → Milestones**: keep an open milestone with a due date after
+   the collection day. The *Traffic alert* job files each alert issue under
+   one, and fails when an alert is due and none qualifies; a run with no alert
+   due needs no milestone.
+7. **Settings → Secrets and variables → Actions → Variables**: add the
    repository variable `TRAFFIC_HISTORY` with the value `enabled`.
-7. Run **Actions → Traffic history → Run workflow** on the default branch and
+8. Run **Actions → Traffic history → Run workflow** on the default branch and
    check that it passes and that `traffic-history` gains a commit.
 
 To pause collection, delete the variable or change its value; the history
@@ -214,7 +218,11 @@ labelled `P3` and `repository`, filed under the open milestone with the
 earliest due date after the collection day, and carries a dependency section
 and a target end date (seven days after the snapshot, or the day before the
 milestone's due date if that is earlier), so it passes **Issue triage**. The
-job needs at least one open milestone due after the collection day.
+job first decides from the history alone whether an alert is due
+(`traffic_history.py alert --snapshot-output`), and looks up the milestone
+only then. It compares the due dates with the snapshot's UTC collection date,
+not with the date the job runs. When an alert is due, the job needs at least
+one open milestone due after the collection day.
 
 The job uses the workflow token with `issues: write` and `contents: read`. It
 has no environment, so it never receives the App's key or token, and it runs
@@ -238,7 +246,7 @@ invalid, and leaves the history unchanged. Read the failing step:
 | *Merge*: `ERROR: ...; the history was not changed` | The API returned an unexpected shape, or a history file no longer has the expected layout. | Inspect the response or the named file; a file edited by hand must keep its header and columns. |
 | *Commit and push*: `Could not push the history` | `traffic-history` kept moving, or a rule rejected the push. | Check the branch's rules and recent commits, then run again. |
 | *Check out traffic-history* fails | The branch does not exist or was deleted. | Create it as in *Enabling*, or restore it from the last known commit; never recreate it empty over existing history. |
-| *Traffic alert*: `No open milestone due after today` | Every open milestone is overdue or has no due date, or none is open. | Open the next milestone with a later due date, or move the current one's due date, then run the workflow again. |
+| *Traffic alert*: `No open milestone due after the collection date` | An alert is due, and every open milestone is due on or before the collection day or has no due date, or none is open. | Open the next milestone with a later due date, or move the current one's due date, then run the workflow again. |
 | *Traffic alert*: `gh issue create` fails | A label, the assignee or the milestone no longer exists. | Restore it, then run the workflow again; the history is already saved. |
 
 A failed run can always be repeated: the merge is idempotent, and each

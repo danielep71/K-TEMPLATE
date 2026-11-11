@@ -254,14 +254,22 @@ jobs:
           set -euo pipefail
           # The issue-form assignee, which Issue triage requires on every issue.
           ASSIGNEE="$(python -c 'import sys; from pathlib import Path; sys.path.insert(0, "source/tools"); import check_issues; print(check_issues.configured_assignee(Path("source")))')"
+          # Decide first, from the history alone: a run with no alert due
+          # needs no milestone.
+          snapshot_file="$RUNNER_TEMP/alert-snapshot"
+          python source/tools/traffic_history.py alert \
+            --data history/data --snapshot-output "$snapshot_file"
+          [ -f "$snapshot_file" ] || exit 0
+          SNAPSHOT="$(cat "$snapshot_file")"
           # The active milestone: the open one with the earliest due date after
-          # today (UTC). `// empty` prints nothing when there is none.
-          milestone="$(TODAY="$(date -u +%F)" gh api \
+          # the snapshot's (UTC collection) date, not the job's own date.
+          # `// empty` prints nothing when there is none.
+          milestone="$(SNAPSHOT="$SNAPSHOT" gh api \
             "repos/$GH_REPO/milestones?state=open&sort=due_on&direction=asc" \
-            --jq 'first(.[] | select(.due_on != null and .due_on[0:10] > env.TODAY))
+            --jq 'first(.[] | select(.due_on != null and .due_on[0:10] > env.SNAPSHOT))
                   // empty | [.title, .due_on[0:10]] | @tsv')"
           if [ -z "$milestone" ]; then
-            echo "::error::No open milestone due after today to file the alert under"
+            echo "::error::No open milestone due after the collection date $SNAPSHOT to file the alert under"
             exit 1
           fi
           IFS=$'\t' read -r title due <<< "$milestone"

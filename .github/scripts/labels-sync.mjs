@@ -416,7 +416,7 @@ export async function deletionsInUse(changes, isInUse) {
 
 export function deletionRefusal(inUse) {
   return `Refusing to prune labels still used by an issue or pull request: ${inUse.map(name => JSON.stringify(name)).join(", ")}. `
-    + "No change was applied. Remove each label from its issues and pull requests, or add it to the manifest.";
+    + "No change was applied. Remove each label from its issues and pull requests, or add it to the catalogue or select its overlay.";
 }
 
 // Deleting a label removes it from every issue and pull request, closed ones
@@ -514,7 +514,7 @@ function renderSummary({
   if (error) {
     lines.push("", "## Failure", "", inlineCode(error));
     if (partial) {
-      lines.push("", "The failure happened during or after reconciliation: some changes may already be applied. Compare the live labels with the manifest.");
+      lines.push("", "The failure happened during or after reconciliation: some changes may already be applied. Compare the live labels with the catalogue.");
     }
   } else if (!planned) {
     lines.push("", "Live labels were not read; no changes were planned.");
@@ -526,7 +526,7 @@ function renderSummary({
     for (const change of changes) {
       const detail = change.action === "update" ? change.fields.join(", ")
         : change.action === "delete" ? (refused.has(change.currentName.toLowerCase())
-          ? "outside the manifest; still in use, a real run would refuse it" : "outside the manifest")
+          ? "outside the catalogue; still in use, a real run would refuse it" : "outside the catalogue")
           : "missing live label";
       lines.push(`| ${change.action} | ${inlineCode(change.name, { table: true })} | ${markdownEscape(detail)} |`);
     }
@@ -773,8 +773,8 @@ async function runSelfTest(manifestPath) {
     desiredLabels: desired,
     changes: planChanges(desired, [...structuredClone(desired), ...special])
   });
-  assert.ok(specialSummary.includes("| delete | `` wip `x` `` | outside the manifest |"), specialSummary);
-  assert.ok(specialSummary.includes("| delete | `needs\\|triage` | outside the manifest |"), specialSummary);
+  assert.ok(specialSummary.includes("| delete | `` wip `x` `` | outside the catalogue |"), specialSummary);
+  assert.ok(specialSummary.includes("| delete | `needs\\|triage` | outside the catalogue |"), specialSummary);
   const errorSummary = renderSummary({
     mode: "failed",
     manifest,
@@ -852,8 +852,8 @@ async function runSelfTest(manifestPath) {
     dryRun: true
   });
   assert.ok(previewed.includes("- Deletions still in use: **1**"), previewed);
-  assert.ok(previewed.includes("| delete | `in-use` | outside the manifest; still in use, a real run would refuse it |"), previewed);
-  assert.ok(previewed.includes("| delete | `unused` | outside the manifest |"), previewed);
+  assert.ok(previewed.includes("| delete | `in-use` | outside the catalogue; still in use, a real run would refuse it |"), previewed);
+  assert.ok(previewed.includes("| delete | `unused` | outside the catalogue |"), previewed);
   assert.ok(previewed.includes('A real run would refuse every change. Refusing to prune labels still used by an issue or pull request: "in-use". No change was applied.'), previewed);
   const unchecked = renderSummary({ mode: "plan", manifest, manifestPath: "fixture-labels.json", desiredLabels: desired, changes: pruned });
   assert.ok(unchecked.includes("- Deletions still in use: **not checked (no repository read)**"), unchecked);

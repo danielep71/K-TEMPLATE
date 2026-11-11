@@ -121,6 +121,17 @@ Use only the categories an entry needs.
   policy and the harness guide name every tool that reads the policy, and a
   changed reference also changes `REFERENCES` in
   `tools/devbuild/vba_project.py` (#383).
+- Label, settings and traffic messages and guides now match what the tools
+  do (#386). Label synchronization reports a label as outside the catalogue,
+  the core plus the selected overlays, and advises adding it to the catalogue
+  or selecting its overlay; **Issue triage** names the same catalogue. An
+  apply with no steps reads the repository back, so its journal records a
+  fresh observation. The *Traffic alert* job decides from the history before
+  it looks up a milestone, so a run with no alert due needs none, and it
+  compares due dates with the collection date instead of the job's date;
+  `docs/repo_governance/TRAFFIC.md` lists the milestone among the enabling
+  steps. `docs/setup/REPOSITORY_SETUP.md` says that only an existing managed
+  ruleset is unknown without write access.
 
 ## [1.0.0] - 2026-11-10
 

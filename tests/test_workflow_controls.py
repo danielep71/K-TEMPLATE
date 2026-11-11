@@ -9,8 +9,11 @@ are skipped locally and fail in GitHub Actions.
 # mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
 
 import io
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -719,6 +722,90 @@ class MilestoneScriptTests(unittest.TestCase):
         api = FakeGitHub([{'number': 6, 'milestone': {'title': 'v1'}}], read_only=True)
         with self.assertRaises(HTTPError):
             self.run_job(api, {'schedule': '17 3 * * *'})
+
+
+def traffic_alert_script():
+    steps = workflows()['traffic-history.yml']['jobs']['alert']['steps']
+    return next(step for step in steps if step['name'] == 'Open the alert issue, if one is due')['run']
+
+
+# A gh that answers the milestone lookup with real jq over a fixed list, as
+# gh --jq does, finds no existing issue, and records every call.
+FAKE_GH = """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "$GH_CALLS"
+if [ "$1" = api ]; then
+  while [ "$1" != --jq ]; do shift; done
+  jq -r "$2" "$MILESTONES"
+elif [ "$1 $2" = "issue list" ]; then
+  echo 0
+fi
+"""
+SNAPSHOT_HEADER = ('snapshot_date,collected_at,observed_at,first_date,last_date,views_14d,'
+                   'unique_views_14d,clones_14d,unique_clones_14d,stars,forks,watchers,open_issues\n')
+
+
+@unittest.skipIf(yaml is None and not os.environ.get('GITHUB_ACTIONS'),
+                 'PyYAML is not installed: python -m pip install -r .github/requirements.txt')
+@unittest.skipIf((shutil.which('bash') is None or shutil.which('jq') is None)
+                 and not os.environ.get('GITHUB_ACTIONS'), 'bash and jq are needed')
+class TrafficAlertScriptTests(unittest.TestCase):
+    """The alert step, run with bash against a fake gh and a collected history."""
+
+    def run_step(self, latest_views, milestones):
+        """Two snapshots, 2026-10-13 and 2026-10-14; return the result and the gh calls."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'source').symlink_to(ROOT, target_is_directory=True)
+            data = root / 'history/data'
+            data.mkdir(parents=True)
+            rows = ''.join(f'{day},{day}T06:00:00Z,{day}T06:00:00Z,{day},{day},{views},1,1,1,1,0,1,4\n'
+                           for day, views in (('2026-10-13', 50), ('2026-10-14', latest_views)))
+            (data / 'snapshots.csv').write_text(SNAPSHOT_HEADER + rows, encoding='utf-8')
+            bin_dir = root / 'bin'
+            bin_dir.mkdir()
+            (bin_dir / 'gh').write_text(FAKE_GH, encoding='utf-8')
+            (bin_dir / 'gh').chmod(0o755)
+            (bin_dir / 'python').symlink_to(sys.executable)
+            (root / 'milestones.json').write_text(json.dumps(milestones), encoding='utf-8')
+            (root / 'temp').mkdir()
+            (root / 'step.sh').write_text(traffic_alert_script(), encoding='utf-8')
+            env = dict(os.environ, PATH=f'{bin_dir}{os.pathsep}{os.environ["PATH"]}',
+                       RUNNER_TEMP=str(root / 'temp'), GH_TOKEN='test-token', GH_REPO='o/r',
+                       GH_CALLS=str(root / 'calls.txt'), MILESTONES=str(root / 'milestones.json'),
+                       PYTHONDONTWRITEBYTECODE='1')
+            result = subprocess.run(['bash', '--noprofile', '--norc', '-eo', 'pipefail', 'step.sh'],
+                                    cwd=root, env=env, capture_output=True, text=True,
+                                    encoding='utf-8', timeout=60, check=False)
+            calls_file = root / 'calls.txt'
+            calls = calls_file.read_text(encoding='utf-8').splitlines() if calls_file.exists() else []
+        return result, calls
+
+    def test_a_run_with_no_alert_due_needs_no_milestone(self):
+        result, calls = self.run_step(50, [])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('No alert', result.stdout)
+        self.assertEqual(calls, [], 'no milestone lookup and no issue without an alert')
+
+    def test_the_milestone_is_due_after_the_snapshot_date_not_the_job_date(self):
+        # Both milestones are overdue by the job's clock; only the snapshot date counts.
+        milestones = [{'title': 'Same day', 'due_on': '2026-10-14T07:00:00Z'},
+                      {'title': 'Next day', 'due_on': '2026-10-15T07:00:00Z'}]
+        result, calls = self.run_step(500, milestones)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(calls[0].startswith('api repos/o/r/milestones?state=open'), calls)
+        created = [call for call in calls if call.startswith('issue create')]
+        self.assertEqual(len(created), 1, calls)
+        self.assertIn('--title Traffic alert: 2026-10-14', created[0])
+        self.assertTrue(created[0].endswith('--milestone Next day'), created[0])
+
+    def test_an_alert_with_no_milestone_after_the_snapshot_date_fails(self):
+        result, calls = self.run_step(500, [{'title': 'Same day', 'due_on': '2026-10-14T07:00:00Z'},
+                                            {'title': 'Undated', 'due_on': None}])
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('::error::No open milestone due after the collection date 2026-10-14',
+                      result.stdout)
+        self.assertFalse([call for call in calls if call.startswith('issue')], calls)
 
 
 if __name__ == '__main__':

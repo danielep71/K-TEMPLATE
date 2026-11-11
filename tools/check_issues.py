@@ -200,7 +200,8 @@ def audit(issues: Sequence[Issue], states: Mapping[int, str], repository: str,
         findings += dependency_findings(issue, states, repository, pulls)
         if catalogue is not None:
             findings += [Finding(issue.number, "catalogue", f"has label {label!r}, "
-                                 "which is not in .github/labels.json")
+                                 "which is not in the catalogue that .github/labels.json "
+                                 "resolves (core and selected overlays)")
                          for label in issue.labels if label not in catalogue]
     return findings
 
