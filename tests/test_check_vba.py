@@ -637,6 +637,30 @@ End Sub
                                "        Application.Goto Reference:=\"R1C1\": GoTo Lost\nEnd Sub\n",
                                "GoTo target 'Lost'"),
 }
+# A handler that saves the error and resumes to the cleanup, which raises the
+# saved error again; RAISE marks the line before the raise.
+RERAISE = '''Private Sub First()
+        Dim SavedNumber As Long
+        On Error GoTo Handler
+        Debug.Print 1 / 0
+Cleanup:
+        Debug.Print "restore"
+        ' RAISE
+        If SavedNumber <> 0 Then Err.Raise SavedNumber, "TEST_Fixture.First"
+        Exit Sub
+Handler:
+        SavedNumber = Err.Number
+        Resume Cleanup
+End Sub
+'''
+RAISE = "        ' RAISE\n"
+TRAPPED = ("Err.Raise after Resume Cleanup is trapped again by handler 'Handler' of procedure "
+           "First; put On Error GoTo 0 before the raise")
+
+
+def reraise(before_raise: str = "", fixture: str = RERAISE) -> dict[str, str | bytes]:
+    """The re-raise fixture with ``before_raise`` lines inserted before the raise."""
+    return standalone(module(fixture.replace(RAISE, before_raise)))
 
 
 class JumpTest(unittest.TestCase):
@@ -656,6 +680,72 @@ class JumpTest(unittest.TestCase):
         with repository(VALID) as root:
             _, components, procedures = check_vba_jumps.check(root)
         self.assertEqual((components, procedures), (7, 6))
+
+    def test_reraise_trapped_by_the_local_handler_is_reported(self) -> None:
+        every = " [vba6-win32, vba7-win32, vba7-win64]"
+        self.assertEqual(run_check(check_vba_jumps.check, reraise()),
+                         [f"tests/modules/TEST_Fixture.bas:10: {TRAPPED}{every}"])
+        block = RERAISE.replace(
+            "        If SavedNumber <> 0 Then Err.Raise SavedNumber, \"TEST_Fixture.First\"\n",
+            "        If SavedNumber <> 0 Then\n"
+            "            Err.Raise SavedNumber, \"TEST_Fixture.First\"\n"
+            "        End If\n")
+        cases = {
+            # Enabling the handler again after disabling it restores the loop.
+            "handler-enabled-again": "        On Error GoTo 0\n        On Error GoTo Handler\n",
+            # GoTo -1 ends the error-handling state but keeps the handler enabled.
+            "goto-minus-one": "        On Error GoTo -1\n",
+            # The exit in one branch leaves the other branch on the path.
+            "exit-in-one-branch": "        If SavedNumber = 0 Then\n            Exit Sub\n"
+                                  "        End If\n",
+        }
+        for name, before in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual([item.split(": ", 1)[1] for item in
+                                  run_check(check_vba_jumps.check, reraise(before))],
+                                 [TRAPPED + every])
+        with self.subTest(name="raise-in-a-block-if"):
+            self.assertEqual([item.split(": ", 1)[1] for item in
+                              run_check(check_vba_jumps.check, reraise(fixture=block))],
+                             [TRAPPED + every])
+
+    def test_reraise_with_the_local_handler_disabled_passes(self) -> None:
+        handler_raises = RERAISE.replace("        Resume Cleanup\n",
+                                         "        Err.Raise Err.Number\n        Resume Cleanup\n")
+        cases = {
+            "goto-zero": reraise("        On Error GoTo 0\n"),
+            "goto-zero-in-the-raising-branch": reraise(fixture=RERAISE.replace(
+                "Then Err.Raise", "Then On Error GoTo 0: Err.Raise")),
+            "goto-zero-in-a-block-if": reraise(fixture=RERAISE.replace(
+                "        If SavedNumber <> 0 Then Err.Raise SavedNumber, \"TEST_Fixture.First\"\n",
+                "        If SavedNumber <> 0 Then\n            On Error GoTo 0\n"
+                "            Err.Raise SavedNumber, \"TEST_Fixture.First\"\n        End If\n")),
+            # While the handler runs, a raise goes to the caller, not back to the handler.
+            "raise-in-the-handler": reraise("        On Error GoTo 0\n", handler_raises),
+            "exit-before-the-raise": reraise("        Exit Sub\n"),
+            "no-local-handler": standalone(module('''Private Sub First()
+Cleanup:
+        Err.Raise 5, "TEST_Fixture.First"
+End Sub
+''')),
+        }
+        for name, files in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, files), [])
+
+    def test_reraise_is_checked_in_each_environment(self) -> None:
+        findings = run_check(check_vba_jumps.check,
+                             reraise("#If VBA7 Then\n        On Error GoTo 0\n#End If\n"))
+        self.assertEqual(findings,
+                         [f"tests/modules/TEST_Fixture.bas:13: {TRAPPED} [vba6-win32]"])
+
+    def test_resume_without_a_label_starts_no_path(self) -> None:
+        # Resume and Resume Next continue at the statement that failed, or
+        # after it, which the check cannot locate; only Resume <label> starts a path.
+        for resume in ("Resume", "Resume Next"):
+            with self.subTest(resume=resume):
+                files = reraise(fixture=RERAISE.replace("Resume Cleanup", resume))
+                self.assertEqual(run_check(check_vba_jumps.check, files), [])
 
 
 API_FACADE = '''Attribute VB_Name = "DEMO_Api"
