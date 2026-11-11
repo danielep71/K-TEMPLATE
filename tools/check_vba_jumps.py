@@ -25,6 +25,11 @@ after ``On Error GoTo 0``. The model of the handler state:
   ``If`` whose branches hold the statements in order, up to the end of the
   line. Where the branches disagree, the state is unknown and nothing is
   reported.
+- A target inside blocks stays inside them: at the next ``ElseIf``,
+  ``Else`` or ``Case`` of an enclosing block, the path skips to that block's
+  end. At the end of an enclosing loop, the path continues after the loop;
+  if the loop's body changes the handler, the state is unknown there, and a
+  raise before the target in a later pass is not checked.
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
   ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
   end of the procedure. Jumps are not followed, and a label on the path does
@@ -106,12 +111,16 @@ class Step:
 
 @dataclass
 class Block:
-    """An If, Select Case or loop block open on a re-raise path."""
+    """An If, Select Case or loop block open on a re-raise path. An outer
+    block was already open at the ``Resume`` target; ``start`` is the index
+    of its opening step."""
     loop: bool
     entry: str
     ends: list[str] = field(default_factory=list)
     has_else: bool = False
     started: bool = False
+    outer: bool = False
+    start: int = 0
 
 
 @dataclass
@@ -326,13 +335,69 @@ def block_statement(code: str, state: str, blocks: list[Block]) -> str | None:
     return None
 
 
-def trapped_raises(steps: list[Step], handler: str) -> list[tuple[int, str]]:
+def enclosing_blocks(steps: list[Step], target: int) -> list[Block]:
+    """The blocks open at ``steps[target]``, outermost first."""
+    blocks: list[Block] = []
+    for index, step in enumerate(steps[:target]):
+        if BLOCK_IF.match(step.code) or SELECT.match(step.code) or LOOP_OPEN.match(step.code):
+            blocks.append(Block(loop=bool(LOOP_OPEN.match(step.code)), entry=UNKNOWN,
+                                outer=True, start=index))
+        elif blocks and (LOOP_CLOSE.match(step.code) if blocks[-1].loop
+                         else BLOCK_END.match(step.code)):
+            blocks.pop()
+    return blocks
+
+
+def outer_statement(steps: list[Step], index: int, state: str, blocks: list[Block]
+                    ) -> tuple[str, bool] | None:
+    """``(state, skip)`` after a statement that divides or closes the
+    innermost block when that block encloses the ``Resume`` target, or None.
+    ``skip`` means the path leaves the block's other branches unrun."""
+    if not blocks or not blocks[-1].outer:
+        return None
+    block, code = blocks[-1], steps[index].code
+    if not block.loop and BRANCH.match(code):
+        return state, True
+    if not block.loop and BLOCK_END.match(code):
+        blocks.pop()
+        return state, False
+    if block.loop and LOOP_CLOSE.match(code):
+        blocks.pop()
+        # Another pass runs the body before the target too; if it changes the
+        # handler, the state after the loop is unknown.
+        again = state != DEAD and any(ON_ERROR_SET.search(step.code)
+                                      for step in steps[block.start:index])
+        return (UNKNOWN if again else merge([*block.ends, state])), False
+    return None
+
+
+def trapped_raises(steps: list[Step], start: int, handler: str) -> list[tuple[int, str]]:
     """``(line, handler)`` for each ``Err.Raise`` that a local handler traps
-    on the path through ``steps``, entered with ``handler`` enabled."""
+    on the path from ``steps[start]``, entered with ``handler`` enabled."""
     found: list[tuple[int, str]] = []
     state = handler
-    blocks: list[Block] = []
-    for step in steps:
+    blocks = enclosing_blocks(steps, start)
+    # While the path skips the other branches of an enclosing block: the
+    # depth of the blocks nested in them.
+    skipping: int | None = None
+    for index in range(start, len(steps)):
+        step = steps[index]
+        if skipping is not None:
+            if BLOCK_IF.match(step.code) or SELECT.match(step.code) \
+                    or LOOP_OPEN.match(step.code):
+                skipping += 1
+            elif BLOCK_END.match(step.code) or LOOP_CLOSE.match(step.code):
+                if skipping == 0:
+                    blocks.pop()
+                    skipping = None
+                else:
+                    skipping -= 1
+            continue
+        outer = outer_statement(steps, index, state, blocks)
+        if outer is not None:
+            state, skip = outer
+            skipping = 0 if skip else None
+            continue
         if step.label is not None:
             # Another jump may reach a label in a branch this path left.
             state = UNKNOWN if state == DEAD else state
@@ -346,7 +411,7 @@ def trapped_raises(steps: list[Step], handler: str) -> list[tuple[int, str]]:
         if ERR_RAISE.search(step.code) and enabled(state):
             found.append((step.line, state))
         if PATH_END.match(step.code):
-            if not blocks:
+            if not blocks or blocks[-1].outer:
                 break
             state = DEAD
         else:
@@ -371,7 +436,7 @@ def reraise_findings(path: str, procedure: Procedure) -> list[Finding]:
             if trapping is None or operation.casefold() != "resume" \
                     or target.casefold() not in targets:
                 continue
-            for line, handler in trapped_raises(procedure.steps[targets[target.casefold()]:],
+            for line, handler in trapped_raises(procedure.steps, targets[target.casefold()],
                                                 trapping):
                 messages.setdefault((line, handler.casefold()), (
                     f"Err.Raise after Resume {target} is trapped again by handler "

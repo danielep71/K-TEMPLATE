@@ -663,6 +663,19 @@ def reraise(before_raise: str = "", fixture: str = RERAISE) -> dict[str, str | b
     return standalone(module(fixture.replace(RAISE, before_raise)))
 
 
+def enclosed(blocks: str) -> dict[str, str | bytes]:
+    """A procedure whose handler resumes to ``Cleanup:``, a label inside ``blocks``."""
+    return standalone(module(f'''Private Sub First(ByVal Flag As Boolean)
+        Dim Index As Long
+        On Error GoTo Handler
+        Debug.Print 1 / 0
+{blocks}        Exit Sub
+Handler:
+        Resume Cleanup
+End Sub
+'''))
+
+
 class JumpTest(unittest.TestCase):
     def test_valid_fixtures_pass(self) -> None:
         self.assertEqual(run_check(check_vba_jumps.check, VALID), [])
@@ -743,6 +756,97 @@ End Sub
         for name, files in cases.items():
             with self.subTest(name=name):
                 self.assertEqual(run_check(check_vba_jumps.check, files), [])
+
+    def test_resume_target_inside_blocks_keeps_them(self) -> None:
+        reported = {
+            "raise-after-the-if": '''        If Flag Then
+Cleanup:
+            Debug.Print 0
+        Else
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
+            "raise-after-the-select": '''        Select Case Index
+        Case 1
+Cleanup:
+            Debug.Print 0
+        Case Else
+            On Error GoTo 0
+        End Select
+        Err.Raise 5
+''',
+            "raise-after-the-inner-if": '''        If Flag Then
+            If Index = 1 Then
+Cleanup:
+                Debug.Print 0
+            Else
+                On Error GoTo 0
+            End If
+            Err.Raise 5
+        Else
+            On Error GoTo 0
+        End If
+''',
+            "raise-after-the-loop": '''        For Index = 1 To 2
+Cleanup:
+            If Flag Then Exit For
+        Next Index
+        Err.Raise 5
+''',
+        }
+        passing = {
+            "raise-in-the-else-branch": '''        If Flag Then
+Cleanup:
+            On Error GoTo 0
+        Else
+            On Error GoTo Handler: Err.Raise 5
+        End If
+''',
+            "raise-in-the-next-case": '''        Select Case Index
+        Case 1
+Cleanup:
+            On Error GoTo 0
+        Case 2
+            Err.Raise 5
+        End Select
+''',
+            "raise-in-the-outer-else-branch": '''        If Flag Then
+            If Index = 1 Then
+Cleanup:
+                On Error GoTo 0
+            Else
+                Err.Raise 5
+            End If
+        Else
+            Err.Raise 6
+        End If
+''',
+            # The next pass disables the handler before the target.
+            "loop-disables-the-handler": '''        For Index = 1 To 2
+            On Error GoTo 0
+Cleanup:
+            Debug.Print Index
+        Next Index
+        Err.Raise 5
+''',
+            "exit-the-loop-disabled": '''        Do While Index < 2
+Cleanup:
+            On Error GoTo 0
+            If Flag Then Exit Do
+        Loop
+        Err.Raise 5
+''',
+        }
+        every = " [vba6-win32, vba7-win32, vba7-win64]"
+        for name, blocks in reported.items():
+            with self.subTest(name=name):
+                self.assertEqual([item.split(": ", 1)[1] for item in
+                                  run_check(check_vba_jumps.check, enclosed(blocks))],
+                                 [TRAPPED + every])
+        for name, blocks in passing.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
 
     def test_reraise_is_checked_in_each_environment(self) -> None:
         findings = run_check(check_vba_jumps.check,
