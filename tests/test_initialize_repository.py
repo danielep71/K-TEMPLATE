@@ -240,7 +240,6 @@ def adapted_checks(context: Context) -> list[Check]:
 
 
 @unittest.skipIf(shutil.which("git") is None, "git is not installed")
-@unittest.skipUnless(IS_TEMPLATE, "this repository is already initialized")
 class ReleaseBranchWarningTests(unittest.TestCase):
     """--release-branch is checked against origin as dependabot-target-branches checks it."""
 
@@ -291,6 +290,8 @@ class ReleaseBranchWarningTests(unittest.TestCase):
         self.assertEqual(initialize.warnings(self.base, Options(REPOSITORY, "LCR")), [])
 
 
+@unittest.skipIf(shutil.which("git") is None, "git is not installed")
+@unittest.skipUnless(IS_TEMPLATE, "this repository is already initialized")
 class GeneratedRepositoryTest(unittest.TestCase):
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory(prefix="initialize-repository-")
