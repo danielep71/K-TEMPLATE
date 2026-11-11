@@ -42,8 +42,10 @@ without ``Call`` and named arguments, or the ``Error`` statement; a
   if the loop's body changes the handler, the state is unknown there, and a
   raise before the target in a later pass is not checked.
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
-  ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
-  end of the procedure. Jumps are not followed: the path goes on after an
+  ``End``, ``GoTo``, ``Resume``, ``Return`` or raise outside any block, and
+  at the end of the procedure; inside a block, that branch ends there and
+  takes no part in the merge. ``Stop`` only pauses, so the path goes on.
+  Jumps are not followed: the path goes on after an
   ``On ... GoTo`` list, which falls through when no target is chosen, and a
   label on the path does not merge the states of other jumps to it.
 - ``Resume`` and ``Resume Next`` continue at a statement that cannot be known
@@ -464,7 +466,9 @@ def trapped_raises(steps: list[Step], start: int, handler: str
             found.append((step.line, state, raised))
         if subroutine_changes_handler(steps, step.code):
             state = UNKNOWN
-        elif PATH_END.match(step.code):
+        elif raised or PATH_END.match(step.code):
+            # A raise never falls through: it goes to the caller or, as
+            # reported above, to the local handler.
             if not blocks or blocks[-1].outer:
                 break
             state = DEAD

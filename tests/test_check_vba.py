@@ -887,6 +887,20 @@ Report:
             "qualified-raise": ("Cleanup:\n        VBA.Err.Raise Number:=5\n", "Err.Raise"),
             "called-raise": ("Cleanup:\n        Call Err.Raise(5, \"TEST_Fixture.First\")\n",
                              "Err.Raise"),
+            # A branch that propagates an error ends there and takes no part
+            # in the merge after End If.
+            "raise-after-a-branch-that-raises": ('''Cleanup:
+        If Flag Then
+            On Error GoTo 0: Err.Raise 5
+        End If
+        Err.Raise 6
+''', "Err.Raise"),
+            "raise-after-a-branch-with-an-error-statement": ('''Cleanup:
+        If Flag Then
+            On Error GoTo 0: Error 5
+        End If
+        Err.Raise 6
+''', "Err.Raise"),
         }
         passing = {
             "one-line-if-with-a-colon-disabled":
