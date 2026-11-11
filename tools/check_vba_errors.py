@@ -36,6 +36,16 @@ BUILTIN_STATEMENT (``ReDim``, ``Erase``, ``Open``, ``Print #``, ...), whose
 operands alone are read as expressions; a statement that starts with any
 other name is a call.
 
+Within a statement, the check follows VBA's evaluation order: a read inside
+the arguments of a call, as in ``CLng(Err.Number)``, runs before that call,
+and only what runs before a read can refresh ``Err`` for it. An operator
+written before a read may run after it, as ``&`` in ``a & b / Err.Number``;
+it counts as running before, so that no read is claimed stale on a guess.
+Assigning a property of ``Err`` (``Err.Description = x``) writes it and
+reads nothing, and ``.Number`` inside ``With Err`` reads ``Err.Number``.
+``Err`` read through its default member (``n = Err``), ``Err`` passed to a
+procedure and ``Erl`` are not followed.
+
 A segment starts at each label and after each branch or loop statement:
 ``If``, ``Select Case``, ``Do``, ``For``, ``While``, ``Exit``, ``Resume``,
 ``GoTo``, ``Return`` and the statements that close them end the segment
@@ -74,7 +84,19 @@ ON_ERROR = re.compile(r"^On\s+Error\b", re.IGNORECASE)
 RESUME_NEXT = re.compile(r"^On\s+Error\s+Resume\s+Next\b", re.IGNORECASE)
 HANDLER = re.compile(r"\bOn\s+Error\s+GoTo\s+([A-Za-z_]\w*|\d+)", re.IGNORECASE)
 IF_START = re.compile(r"^If\b", re.IGNORECASE)
-IF_CONDITION = re.compile(r"^If\b(?P<condition>.*?)\bThen\b", re.IGNORECASE)
+# The branches of an If, as in If x Then a Else b: separators, not values.
+IF_KEYWORDS = re.compile(r"^If\b|\b(?:Then|Else)\b", re.IGNORECASE)
+# Any property of Err as an assignment target, as in Err.Description = x.
+ERR_TARGET = re.compile(r"(?:VBA\s*\.\s*)?Err\s*\.\s*[A-Za-z_]\w*", re.IGNORECASE)
+WITH_ERR = re.compile(r"^With\s+(?:VBA\s*\.\s*)?Err\s*$", re.IGNORECASE)
+# A member of the object of a With block, as in .Number; not x.y, f(1).y or 1.5.
+WITH_MEMBER = re.compile(r"(?<![\w)\].!])\.(?=\s*[A-Za-z_])")
+# What an operand is an argument or operand of, before it: the name of an
+# enclosing call (the last name only, as in .Method of obj.Method(), since
+# obj is read first) and an operator, which both run after the operand.
+ENCLOSING_CALL = re.compile(r"\.?\s*[A-Za-z_]\w*[%&!#@$]?\s*$")
+TRAILING_OPERATOR = re.compile(r"(?:[-&+*/\\^<>=]|\b(?:Mod|Not|And|Or|Xor|Eqv|Imp|Like|Is)\b)\s*$",
+                               re.IGNORECASE)
 LABEL_PREFIX = re.compile(r"^\s*(?:[A-Za-z_]\w*:(?!=)|\d+:?)")
 # Statements that end the tracked segment once their own expression is read:
 # that expression runs straight after the statement before.
@@ -245,27 +267,56 @@ def assignment(statement: str) -> tuple[str, str] | None:
     return None
 
 
-def statement_effect(statement: str, names: Names) -> tuple[Effect, Effect]:
-    """What the expressions a statement evaluates first, and the statement
-    itself, can do to Err. A procedure runs after its arguments are read, and
-    a property is set after its value is."""
+def statement_effect(statement: str, names: Names) -> tuple[str, Effect]:
+    """The expressions a statement evaluates before its own operation, in
+    evaluation order, and what the whole statement can do to Err. A procedure
+    runs after its arguments are read, and a property is set after its value
+    is read. Assigning a property of Err, as in Err.Description = x, reads
+    and clears nothing of it."""
     if DECLARATION.match(statement) or END_WITH.match(statement):
-        return Effect(), Effect()
+        return "", Effect()
     if WITH.match(statement):
-        found = effect(statement[4:], names)
-        return found, found
+        return statement[4:], effect(statement[4:], names)
     pair = assignment(statement)
     if pair is not None:
-        found = effect(pair[1], names)
-        return found, found | target_effect(pair[0], names)
+        target, value = pair
+        if ERR_TARGET.fullmatch(target):
+            return value, effect(value, names)
+        index = target.find("(")
+        reads = value + (" , " + target[index:] if index > 0 else "")
+        return reads, effect(value, names) | target_effect(target, names)
     builtin = BUILTIN_STATEMENT.match(statement)
     # A procedure of the project named like a VBA statement, such as Beep, shadows it.
     if builtin and statement.split(None, 1)[0].casefold() not in names.callables:
-        found = effect(STATEMENT_SYNTAX.sub(" ", statement[builtin.end():]), names)
-        return found, found | Effect(fails=True)
+        operands = STATEMENT_SYNTAX.sub(" ", statement[builtin.end():])
+        return operands, effect(operands, names) | Effect(fails=True)
     head_match = HEAD.match(statement)
-    found = effect(statement[head_match.end():] if head_match else statement, names)
-    return found, found | Effect(True, True)
+    arguments = statement[head_match.end():] if head_match else statement
+    return arguments, effect(arguments, names) | Effect(True, True)
+
+
+def evaluated_before(text: str, position: int) -> str:
+    """The part of the expression ``text`` that VBA evaluates before the
+    operand at ``position``: the text before it, without the calls that it is
+    an argument of and the operators that it is an operand of, which run
+    after it. An operator earlier in the text may also run after it, as & in
+    a & b / Err.Number; it is kept, so that a read is never claimed stale on
+    the strength of a guess."""
+    before = list(text[:position])
+    opened: list[int] = []
+    for index, char in enumerate(text[:position]):
+        if char == "(":
+            opened.append(index)
+        elif char == ")" and opened:
+            opened.pop()
+    for index in opened:
+        call = ENCLOSING_CALL.search(text[:index])
+        start = call.start() if call else index
+        before[start:index + 1] = " " * (index + 1 - start)
+    result = "".join(before).rstrip()
+    while (operator := TRAILING_OPERATOR.search(result)) is not None:
+        result = result[:operator.start()].rstrip()
+    return result
 
 
 def target_effect(target: str, names: Names) -> Effect:
@@ -295,9 +346,8 @@ def handler_labels(procedure: Procedure) -> set[str]:
             if match.group(1) not in {"0"}}
 
 
-def stale_message(procedure: str, statement: str, stale: tuple[int, str]) -> str:
-    fields = list(dict.fromkeys(f"Err.{match.group(1).capitalize()}"
-                                for match in ERR_READ.finditer(statement)))
+def stale_message(procedure: str, reads: list[re.Match[str]], stale: tuple[int, str]) -> str:
+    fields = list(dict.fromkeys(f"Err.{match.group(1).capitalize()}" for match in reads))
     return (f"{', '.join(fields)} read in {procedure} after line {stale[0]}, {stale[1]}; "
             "save Err.Number, Err.Source and Err.Description into variables first")
 
@@ -315,16 +365,18 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
         return findings
     branch = BRANCH.match(statement)
     if branch:
-        condition = IF_CONDITION.match(statement)
-        before = effect(condition.group("condition") if condition else statement, names)
-        total = before
+        reads = IF_KEYWORDS.sub(" , ", statement) if IF_START.match(statement) else statement
+        total = Effect()
     else:
-        before, total = statement_effect(statement, names)
-    # Err read after code that can fail, in the same statement, may be that
-    # code's error: no claim then, unless no failure can refresh Err.
-    refreshed = before.fails and segment.follows_last_failure
-    if segment.stale and ERR_READ.search(statement) and not refreshed:
-        findings.append(Finding(path, line, stale_message(procedure.name, statement,
+        reads, total = statement_effect(statement, names)
+    # A read after code of the same statement that can fail, evaluated before
+    # it, may be that code's error: no claim then, unless no failure can
+    # refresh Err. A call that a read is an argument of runs after it.
+    stale = [match for match in ERR_READ.finditer(reads)
+             if not (segment.follows_last_failure
+                     and effect(evaluated_before(reads, match.start()), names).fails)]
+    if segment.stale and stale:
+        findings.append(Finding(path, line, stale_message(procedure.name, stale,
                                                           segment.stale)))
     if branch:
         segment.restart()
@@ -340,11 +392,19 @@ def check_procedure(path: str, procedure: Procedure, names: Names) -> list[Findi
     handlers = handler_labels(procedure)
     segment = Segment()
     findings: list[Finding] = []
+    # Whether each open With block is on Err, whose .Number reads Err.Number.
+    with_err: list[bool] = []
     for line, label, statements in procedure.units:
         if label is not None:
             segment.restart(in_handler=label.casefold() in handlers)
         for statement in statements:
+            if with_err and with_err[-1]:
+                statement = WITH_MEMBER.sub("Err.", statement)
             findings += check_statement(path, procedure, line, statement, segment, names)
+            if WITH.match(statement):
+                with_err.append(bool(WITH_ERR.match(statement)))
+            elif END_WITH.match(statement) and with_err:
+                with_err.pop()
             if IF_START.match(statement):
                 # The rest of the line belongs to a single-line If's branches.
                 segment.restart()

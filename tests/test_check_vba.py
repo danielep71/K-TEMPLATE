@@ -1765,6 +1765,20 @@ ERRORS_VALID = {
         '        Mid$(Text, 1, 1) = "x"\n        LSet Text = Source\n        Let Number = 1\n'
         "        Open Text For Input Access Read Shared As #1\n        Line Input #1, Text\n"
         "        Print #1, Spc(2); Text\n        Close #1\n        Number = Err.Number\n"),
+    "resume-next-operation-evaluated-before-the-read": guarded(
+        "        Text = CStr(Number / 2) & Err.Description\n"),
+    "err-writes-are-not-reads": handler(
+        '        Err.Clear\n        Err.Description = "custom"\n        Err.Number = 5\n'
+        '        Let Err.Source = "First"\n        VBA.Err.HelpContext = 0\n'),
+    "context-added-then-raised-again": handler(
+        '        Err.Description = "context: " & Err.Description\n'
+        "        Err.Raise Err.Number, Err.Source, Err.Description\n"),
+    "with-err-context-added-then-raised-again": handler(
+        '        With Err\n            .Description = "context: " & .Description\n'
+        "            .Raise .Number, .Source, .Description\n        End With\n"),
+    "with-err-copied-first": handler(
+        "        With Err\n            Number = .Number\n            Text = .Description\n"
+        "        End With\n        Helper\n"),
 }
 # Procedures that the fixtures call without parentheses or assign to.
 DESCRIBE = "\n\nPrivate Function Describe() As Long\nEnd Function\n"
@@ -1841,6 +1855,28 @@ ERRORS_INVALID = {
         handler("        Dim Book As Object\n        With Book\n            .Saved = True\n"
                 "        End With\n        Number = Err.Number\n"), 13,
         "Err.Number read in First after line 11"),
+    "resume-next-read-inside-a-conversion": (
+        guarded("        Number = CLng(Err.Number)\n"), 7,
+        "Err.Number read in First after line 6, which cleared Err"),
+    "resume-next-read-inside-len-in-a-condition": (
+        guarded("        If Len(Err.Description) > 0 Then Exit Sub\n"), 7,
+        "Err.Description read in First after line 6"),
+    "resume-next-read-inside-iif": (
+        guarded('        Text = IIf(Len(Err.Description) > 0, Err.Description, "none")\n'), 7,
+        "Err.Description read in First after line 6"),
+    "resume-next-read-inside-a-call-argument": (
+        guarded("        Call Report(CStr(Err.Number))\n"), 7,
+        "Err.Number read in First after line 6"),
+    "resume-next-argument-read-before-a-later-one-calls": (
+        guarded("        Report Err.Number, Describe()\n") + DESCRIBE, 7,
+        "Err.Number read in First after line 6"),
+    "with-err-member-read-after-a-call": (
+        handler("        Helper\n        With Err\n            Number = .Number\n"
+                "        End With\n"), 11,
+        "Err.Number read in First after line 9"),
+    "err-write-reads-its-value-after-a-call": (
+        handler('        Helper\n        Err.Description = "context: " & Err.Description\n'), 10,
+        "Err.Description read in First after line 9"),
 }
 ALL_ENVIRONMENTS = "[vba6-win32, vba7-win32, vba7-win64]"
 
