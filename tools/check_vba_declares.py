@@ -13,15 +13,19 @@ cannot drift while another stays correct:
   one, else its own name, compared ignoring case, from the library the
   register gives for it;
 - ``GetLastError`` is never declared: it does not see the error that VBA has
-  already copied into ``Err.LastDllError``;
+  already copied into ``Err.LastDllError``; and a ``Declare Sub``, which
+  returns nothing, is never registered as ambiguous on zero;
 - ``Err.LastDllError`` is read only as ``<local> = Err.LastDllError``, into a
   ``Dim`` or ``Static`` variable of the procedure, in the statement directly
   after one that is exactly a call to a ``Declare`` (``Name args``,
   ``Call Name(args)`` or ``<variable> = Name(args)``, the name alone or
-  qualified by the module's name), not a call inside a condition, a
-  single-line If or an expression; a ``.LastDllError`` read inside a
-  ``With Err`` block, or through another qualifier, is rejected, since the
-  ``With`` statement already stands between the call and the read;
+  qualified by the module's name, the parentheses optional without
+  arguments), not a call inside a condition, a single-line If, an expression
+  or an argument, nor one assigned to an array element or a member; a named
+  label in between counts as a statement, a line number does not; a
+  ``.LastDllError`` read inside a ``With Err`` block, or through another
+  qualifier, is rejected, since the ``With`` statement already stands
+  between the call and the read;
 - a call to an export the register marks ``zero_is_ambiguous``, whose zero
   result may mean success or failure, assigns its result, and nothing else,
   to a local variable in the call statement, is directly preceded by
@@ -77,8 +81,10 @@ RESERVED_KEYS = frozenset({"arguments", "returns"})
 # An exported name, or an ordinal such as #12.
 EXPORT = re.compile(r"[A-Za-z_][A-Za-z0-9_@$?]*|#[0-9]+")
 DECLARE = re.compile(rf"^\s*(?:(?:Public|Private|Global)\s+)?Declare\s+(?:PtrSafe\s+)?"
-                     rf"(?:Sub|Function)\s+(?P<name>{NAME}){SUFFIX}", re.I)
-LIBRARY = re.compile(r'\s+Lib\s+"(?P<library>[^"]*)"(?:\s+Alias\s+"(?P<alias>[^"]*)")?', re.I)
+                     rf"(?P<kind>Sub|Function)\s+(?P<name>{NAME}){SUFFIX}", re.I)
+# CDecl, which only Office for Mac reads, may stand before Lib.
+LIBRARY = re.compile(r'(?:\s+CDecl)?\s+Lib\s+"(?P<library>[^"]*)"'
+                     r'(?:\s+Alias\s+"(?P<alias>[^"]*)")?', re.I)
 LOCAL = re.compile(r"^\s*(?:Dim|Static)\s+(?P<list>.*)$", re.I)
 CONST = re.compile(r"^\s*Const\s", re.I)
 LABEL = re.compile(rf"^\s*(?:(?P<name>{NAME})|\d+):(?!=)")
@@ -174,6 +180,7 @@ class Declared:
     name: str
     export: str
     library: str
+    sub: bool
 
 
 @dataclass
@@ -209,9 +216,10 @@ def declaration(path: str, lines: list[str], start: int, end: int,
                 module.findings.append(Finding(path, start, "cannot read the Lib clause of "
                                                             f"Declare {head.group('name')}"))
                 continue
+            alias = names.group("alias")
             module.declared[head.group("name").casefold()] = Declared(
-                start, head.group("name"), names.group("alias") or head.group("name"),
-                names.group("library"))
+                start, head.group("name"), head.group("name") if alias is None else alias,
+                names.group("library"), head.group("kind").casefold() == "sub")
 
 
 def scan(path: str, source: str) -> Module:
@@ -222,10 +230,16 @@ def scan(path: str, source: str) -> Module:
     for start, end, kind, code in logical_units(lines, blank_strings=True):
         if kind == "directive":
             continue
-        label = LABEL.match(code) or LINE_NUMBER.match(code)
-        if label and (label.groupdict().get("name") or "").casefold() not in STATEMENT_WORDS:
-            if current is not None:
-                current.body.append((start, label.group().strip().rstrip(":") + ":"))
+        # A named label is a jump target that may sit between a call and its
+        # capture. A line number is not kept: code numbered for Erl numbers
+        # every line, and a GoTo to a number is rare.
+        number = LINE_NUMBER.match(code)
+        code = code[number.end():] if number else code
+        label = LABEL.match(code)
+        name = label.group("name") if label else None
+        if label and (name is None or name.casefold() not in STATEMENT_WORDS):
+            if current is not None and name is not None:
+                current.body.append((start, name + ":"))
             code = code[label.end():]
         for statement in split_statements(code):
             if not statement:
@@ -274,7 +288,8 @@ def declare_at(text: str, module: Module) -> tuple[Declared, str] | None:
     rest = text[match.end():]
     suffix = re.match(SUFFIX, rest)
     rest = rest[suffix.end():] if suffix else rest
-    if item is None or rest[:1].isalnum() or rest[:1] in "_.!":
+    # A longer name, a member or a ! access follows a name that is not the call.
+    if item is None or re.match(r"[\w.!]", rest):
         return None
     return item, rest
 
@@ -367,8 +382,10 @@ def capture_problem(procedure: Procedure, index: int, module: Module) -> str | N
              if item.export.casefold() != "setlasterror"]
     if inner:
         return (f"{procedure.name} reads Err.LastDllError after the statement of line "
-                f"{line}, which calls {inner[0]} inside a condition, a single-line If or a "
-                "larger expression; call it in a statement of its own, then capture")
+                f"{line}, which calls {inner[0]} but is not a call statement of its own, "
+                "such as a call inside a condition, a single-line If, an expression or an "
+                "argument, or one assigned to an array element or a member; write Name args, "
+                "Call Name(args) or <variable> = Name(args), then capture")
     return (f"{procedure.name} reads Err.LastDllError after the statement of line "
             f"{line}, not directly after a native call")
 
@@ -420,7 +437,12 @@ def analyze_source(path: str, source: str, register: dict[tuple[str, str], Entry
             findings.append(Finding(path, item.line, f"Declare {item.name} imports "
                                                      "GetLastError; copy Err.LastDllError "
                                                      "directly after the native call instead"))
-        if export_key(item.export, item.library) not in register:
+        entry = register.get(export_key(item.export, item.library))
+        if entry is not None and entry.zero_is_ambiguous and item.sub:
+            findings.append(Finding(path, item.line, f"Declare {item.name} is a Sub, which "
+                                                     f"returns nothing, but {REGISTER} marks "
+                                                     f"{item.export} as ambiguous on zero"))
+        if entry is None:
             findings.append(Finding(path, item.line, f"Declare {item.name} imports "
                                                      f"{item.export} from {item.library}, "
                                                      f"which {REGISTER} does not list"))

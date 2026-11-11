@@ -158,7 +158,7 @@ QUALIFIED = BASE.replace("NativeSetLastError 0", "TEST_Native.NativeSetLastError
     .replace("= NativeTlsGetValue(", "= TEST_Native.NativeTlsGetValue(") \
     .replace("= SetEnvironmentVariableW(", "= TEST_Native . SetEnvironmentVariableW(")
 CLEAR_CALL = "    ApiOK = SetEnvironmentVariableW(StrPtr(VariableName), 0)\n"
-CONDITION = "inside a condition, a single-line If or a larger expression"
+CONDITION = "is not a call statement of its own"
 
 # A correct capture, written another way: each must pass in every environment.
 CAPTURE_VALID: dict[str, str] = {
@@ -176,6 +176,9 @@ CAPTURE_VALID: dict[str, str] = {
         CLEAR_CALL + CLEAR_CAPTURE,
         "    With ThisWorkbook\n        ApiOK = SetEnvironmentVariableW(StrPtr(.Name), 0)\n"
         "        DllError = Err.LastDllError\n    End With\n    If ApiOK = 0 Then\n"),
+    "blank-and-comment-lines-between-call-and-capture": changed(
+        CLEAR_CALL, CLEAR_CALL + "\n    ' The capture follows.\n"),
+    "cdecl-before-lib": BASE.replace("NativeSetLastError Lib", "NativeSetLastError CDecl Lib"),
     "nested-parentheses-and-a-comment": changed(
         VBA7_CALL, VBA7_CALL.replace("(SlotIndex)\n", "((SlotIndex) + CLng(0)) ' (x)\n")),
 }
@@ -255,6 +258,16 @@ CAPTURE_INVALID: dict[str, tuple[str, str | None, str | tuple[str, ...], tuple[s
         None, "not directly after a native call", ALL),
     "call-compared-in-an-assignment": (
         changed(CLEAR_CALL, "    ApiOK = SetEnvironmentVariableW(StrPtr(VariableName), 0) = 0\n"),
+        None, CONDITION, ALL),
+    "call-as-an-argument": (
+        changed(CLEAR_CALL, "    Debug.Print SetEnvironmentVariableW(StrPtr(VariableName), 0)\n"),
+        None, CONDITION, ALL),
+    "result-assigned-to-a-member": (
+        changed(CLEAR_CALL, "    ThisWorkbook.Saved = SetEnvironmentVariableW("
+                            "StrPtr(VariableName), 0)\n"),
+        None, CONDITION, ALL),
+    "result-assigned-to-an-array-element": (
+        changed(CLEAR_CALL, "    Results(1) = SetEnvironmentVariableW(StrPtr(VariableName), 0)\n"),
         None, CONDITION, ALL),
     "with-err-clears-before-the-capture": (
         changed(CLEAR_CAPTURE, "    With Err\n        .Clear\n        DllError = .LastDllError\n"
@@ -364,6 +377,46 @@ class DeclareTest(unittest.TestCase):
         for name, source in CAPTURE_VALID.items():
             with self.subTest(name=name):
                 self.assertEqual(findings(source), [])
+
+    def test_parameterless_calls_and_line_numbers_pass(self) -> None:
+        # A call without arguments needs no parentheses, in every call form;
+        # a line number, as code numbered for Erl has, is not a label.
+        declare = ('Private Declare PtrSafe Function NativeCloseClipboard Lib "user32" '
+                   'Alias "CloseClipboard" () As Long\n')
+        source = changed("#Else\nPrivate Declare Function NativeTlsGetValue",
+                         declare + "#Else\n" + declare.replace("PtrSafe ", "") +
+                         "Private Declare Function NativeTlsGetValue")
+        body = {
+            "assignment": "    ApiOK = NativeCloseClipboard\n",
+            "let": "    Let ApiOK = NativeCloseClipboard\n",
+            "qualified": "    ApiOK = TEST_Native.NativeCloseClipboard\n",
+            "statement": "    NativeCloseClipboard\n",
+            "call": "    Call NativeCloseClipboard\n",
+            "call-with-parentheses": "    Call NativeCloseClipboard()\n",
+            "same-line": "    ApiOK = NativeCloseClipboard: DllError = Err.LastDllError\n",
+            "line-numbers": "10  ApiOK = NativeCloseClipboard\n20  DllError = Err.LastDllError\n",
+        }
+        entries = register([*ENTRIES, {"export": "CloseClipboard", "library": "user32",
+                                        "zero_is_ambiguous": False}])
+        for name, call in body.items():
+            capture = "" if "Err." in call else "    DllError = Err.LastDllError\n"
+            procedure = ("\n\nPrivate Sub CloseBoard()\n    Dim ApiOK As Long\n"
+                         f"    Dim DllError As Long\n{call}{capture}End Sub\n")
+            with self.subTest(name=name):
+                self.assertEqual(findings(source + procedure, entries), [])
+
+    def test_sub_registered_as_ambiguous_on_zero_is_reported(self) -> None:
+        entries = register([*ENTRIES[:2], {**ENTRIES[2], "zero_is_ambiguous": True}])
+        found = findings(BASE, entries)
+        self.assertEqual(sum("Declare NativeSetLastError is a Sub, which returns nothing, but "
+                             "docs/native-declarations.json marks SetLastError as ambiguous "
+                             "on zero" in item for item in found), 2, found)
+
+    def test_empty_alias_is_its_own_export(self) -> None:
+        source = BASE.replace('Alias "SetLastError"', 'Alias ""')
+        self.assertTrue(any("Declare NativeSetLastError imports  from kernel32, which "
+                            "docs/native-declarations.json does not list" in item
+                            for item in findings(source)))
 
     def test_strings_and_comments_are_not_reads(self) -> None:
         # BASE quotes Err.LastDllError in a string and in a comment of ReadSlot.

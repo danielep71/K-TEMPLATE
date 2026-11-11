@@ -150,7 +150,10 @@ the error-capture rules of the
   as failure, so that only the error tells them apart. Each call then
   clears the error with `SetLastError 0` and captures it.
 - Each export and library has one entry. `GetLastError` has none, because it
-  is never declared.
+  is never declared, and a `Declare Sub`, which returns nothing, is never
+  ambiguous on zero.
+- An entry that no `Declare` uses is not reported: remove it with the last
+  `Declare` of its export.
 - `arguments` and `returns` are reserved for the export's signature. The
   check does not read them yet, so an entry that holds either fails, as does
   any other key.
