@@ -16,10 +16,11 @@ tools/devbuild/workbook.json gives it:
 The check compares the matrix with the template's sheet parts and styles.xml.
 A cell takes the style of its own cell element, or else of its row when the
 row has a custom format, or else of its column, or else the default style. A
-style is locked unless its protection element says locked="0"; with
-applyProtection="0" the cell style it is based on decides. The password of a
-sheet is not compared, and the matrix never holds one. Protection that VBA
-sets at run time with Worksheet.Protect is not compared either.
+style is locked unless its protection element says locked="0"; without a
+protection element of its own, or with applyProtection="0", the cell style it
+is based on decides. The password of a sheet is not compared, and the matrix
+never holds one. Protection that VBA sets at run time with Worksheet.Protect
+is not compared either.
 
 Every sheet of the template needs an entry, and every entry a sheet of the
 template. Without a template the check reads the matrix alone, and without

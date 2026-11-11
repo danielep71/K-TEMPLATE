@@ -1,4 +1,5 @@
-"""Cross-file contracts: label catalogue, Dependabot, Markdown, API versions and template-only names."""
+"""Cross-file contracts: label catalogue, editor and Git byte rules, Dependabot, Markdown, API
+versions and template-only names."""
 
 # mypy checks the bodies of these tests but does not require them to be annotated.
 # mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
@@ -91,6 +92,57 @@ class IgnoreRuleTests(unittest.TestCase):
                                            '--no-index', path], check=False).returncode == 0
                 self.assertTrue(ignored(f'build/source{suffix}'))
                 self.assertFalse(ignored(f'docs/methodology/sources/eba/source{suffix}'))
+
+
+def editorconfig_sections():
+    """The settings of each .editorconfig section, by section glob."""
+    sections: dict[str, list[str]] = {}
+    current = None
+    for line in (ROOT / '.editorconfig').read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if line.startswith('[') and line.endswith(']'):
+            current = sections.setdefault(line[1:-1], [])
+        elif current is not None and line and not line.startswith('#'):
+            current.append(line)
+    return sections
+
+
+def git_attributes(path, *names):
+    """The values .gitattributes gives ``path`` for ``names``."""
+    printed = subprocess.run(['git', '-C', str(ROOT), 'check-attr', *names, '--', path],
+                             capture_output=True, text=True, check=True).stdout
+    return dict(line.split(': ')[1:] for line in printed.splitlines())
+
+
+class EditorAndGitByteRuleTests(unittest.TestCase):
+    # git diff --check, run by Repository integrity, reports what editors keep.
+    def test_editors_trim_the_trailing_white_space_git_reports_in_markdown(self):
+        sections = editorconfig_sections()
+        for section, path in (('*.md', 'docs/notes.md'),
+                              ('docs/methodology/sources/README.md',
+                               'docs/methodology/sources/README.md')):
+            with self.subTest(section=section):
+                self.assertIn('trim_trailing_whitespace = true', sections[section])
+                self.assertEqual(git_attributes(path, 'whitespace'),
+                                 {'whitespace': 'unspecified'})
+
+    def test_byte_preserved_files_are_left_alone_by_editors_and_git(self):
+        sections = editorconfig_sections()
+        unset = ['charset = unset', 'end_of_line = unset', 'insert_final_newline = unset',
+                 'trim_trailing_whitespace = false']
+        self.assertEqual(sections['*.reg'],
+                         [*unset, 'indent_style = unset', 'indent_size = unset',
+                          'tab_width = unset'])
+        for section, path in (('docs/methodology/sources/**',
+                               'docs/methodology/sources/SRC-01_rules.csv'),
+                              ('tests/fixtures/*/*/**', 'tests/fixtures/a-case/a-variant/a.csv'),
+                              ('*.reg', 'tools/settings.reg')):
+            with self.subTest(section=section):
+                self.assertEqual(sections[section][:4], unset)
+                attributes = git_attributes(path, 'text', 'whitespace', 'diff')
+                self.assertEqual(attributes['text'], 'unset')
+                # A binary file has no text diff, so git diff --check skips it.
+                self.assertIn('unset', (attributes['whitespace'], attributes['diff']))
 
 
 class DependabotTests(unittest.TestCase):
