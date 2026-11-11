@@ -22,6 +22,10 @@ cleared or may have replaced the error it means to read:
   procedure's parameters, variables and own name; then any declaration of
   its module; then a public one of another component; then a component. A
   procedure there wins over a variable of a farther level, and the reverse.
+  When that is not certain, a dotted name is a member access: when two
+  components declare its first name publicly, or a Type or Enum it goes
+  through, or when its type is qualified by anything but the component
+  that declares it (``As VBA.Collection``).
   A dotted name is a member access unless it reads a value (Scope.value): a
   field of a variable declared ``As`` a user-defined Type of the project
   (``Saved.Number``, ``Saved(i).Inner.Field``, ``.Number`` inside
@@ -243,8 +247,8 @@ CHAIN = re.compile(r"(?<![\w.!#])[A-Za-z_]\w*[%&!#@$]?(?:\s*\([^()]*\))?"
                    r"(?:\s*\.\s*[A-Za-z_]\w*[%&!#@$]?(?:\s*\([^()]*\))?)+")
 CHAIN_PART = re.compile(r"([A-Za-z_]\w*)[%&!#@$]?|\(([^()]*)\)")
 # What a variable, parameter or field is declared as: its type, in lower
-# case and "" when undeclared, and whether it is an array, as Name() or
-# Name(1 To 3) declares it.
+# case with its qualifier (codes.payload) and "" when undeclared, and whether
+# it is an array, as Name() or Name(1 To 3) declares it.
 Declared = tuple[str, bool]
 # A part of a dotted name, and whether an index follows it, as in Many(i).
 Link = tuple[str, bool]
@@ -393,7 +397,7 @@ def declared(items: str) -> dict[str, Declared]:
         match = DECLARED.match(item)
         if match:
             found[match.group("name").casefold()] = \
-                ((match.group("type") or "").rsplit(".", 1)[-1].casefold(),
+                ((match.group("type") or "").casefold(),
                  match.group("array") is not None)
     return found
 
@@ -460,10 +464,18 @@ class Scope:
         home = self.project.get(self.home)
         if home is not None and (kind := home.declares(name, False)):
             return kind, home
-        for found in self.project.values():
-            if found is not home and (kind := found.declares(name, True)):
-                return kind, found
+        public = [(kind, found) for found in self.project.values()
+                  if found is not home and (kind := found.declares(name, True))]
+        if len(public) > 1:
+            return "ambiguous", None  # declared public in two components
+        if public:
+            return public[0]
         return ("component", self.project[name]) if name in self.project else ("", None)
+
+    def unique(self, table: str, name: str) -> bool:
+        """Whether one component only declares the Type (``table`` "types")
+        or Enum ("enums") ``name``, so that no other one can shadow it."""
+        return sum(name in getattr(found, table) for found in self.project.values()) == 1
 
     def variable(self, name: str, owner: str | None = None) -> Declared | None:
         """What variable ``name`` is declared as, or None when it is no
@@ -488,7 +500,14 @@ class Scope:
 
     def members(self, name: str, owner: str | None = None) -> frozenset[str] | None:
         """The members of the Enum ``name``, if this procedure sees one that
-        nothing else of that name hides."""
+        nothing else of that name hides and no other component declares; a
+        qualified name, as codes.kind, is looked up in that component only."""
+        qualifier, _, name = name.rpartition(".")
+        if not self.unique("enums", name):
+            return None
+        if qualifier:
+            found = self.project.get(qualifier)
+            return found.enums.get(name) if found is not None else None
         if owner is None:
             kind, found = self.resolve(name)
             return found.enums[name] if kind == "enum" and found is not None else None
@@ -496,7 +515,16 @@ class Scope:
                      if name in found.enums), None)
 
     def fields(self, name: str) -> dict[str, Declared] | None:
-        """The fields of the user-defined Type ``name``, if this procedure sees one."""
+        """The fields of the user-defined Type ``name``, if this procedure sees
+        one and no other component declares one of that name; a qualified
+        name, as codes.payload, is looked up in that component only, and
+        VBA.Collection or Excel.Range, which name no component, are no Type."""
+        qualifier, _, name = name.rpartition(".")
+        if not self.unique("types", name):
+            return None
+        if qualifier:
+            found = self.project.get(qualifier)
+            return found.types.get(name) if found is not None else None
         return next((found.types[name] for found in self.owners(name) if name in found.types),
                     None)
 

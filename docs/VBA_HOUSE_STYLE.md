@@ -275,7 +275,11 @@ What they cannot prove:
     means what the nearest scope level declares: the procedure's parameters
     and variables, then its module's declarations, then the public ones of
     the other components, then a component, so a module's property `Saved`
-    hides another module's public variable `Saved`;
+    hides another module's public variable `Saved`. A name declared more
+    than once in the project counts as a member access in a dotted name: a
+    public variable of two components, or a `Type` or an `Enum` that two
+    components declare, as does a type qualified by anything but the
+    component that declares it, such as `As VBA.Collection`;
   - within a statement, it follows VBA's evaluation order: a read inside the
     arguments of a call runs before the call, and only what runs before a
     read counts for it, as between statements. In a handler,

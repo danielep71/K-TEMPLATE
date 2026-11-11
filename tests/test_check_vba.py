@@ -2201,6 +2201,68 @@ def precedence_files(module_level: str, parameters: str, local: str, other: str,
     return files
 
 
+# A Type, Enum or public variable that two components declare may mean
+# either: a dotted name through it is a member access, as is a type
+# qualified by anything but the component that declares it. Each case is
+# (module-level declarations, local declaration, statement in the handler,
+# whether TEST_Second is present, whether the read of Err.Number after the
+# statement is stale).
+LIBRARY = """Attribute VB_Name = "TEST_Library"
+Option Explicit
+Public Type Payload
+    Item As Object
+End Type
+Public Type Unique
+    Item As Long
+End Type
+Public Saved As Payload
+Public Kept As Unique
+Public Enum Kind
+    kOne = 1
+End Enum
+"""
+SECOND = """Attribute VB_Name = "TEST_Second"
+Option Explicit
+Public Type Payload
+    Item As Long
+End Type
+Public Enum Kind
+    kOne = 1
+End Enum
+Public Kept As Long
+"""
+LOCAL_PAYLOAD = "Private Type Payload\n    Item As Long\nEnd Type"
+SHADOWING = {
+    "qualified-type-shadowed-in-the-module": (LOCAL_PAYLOAD, "Dim Rec As TEST_Library.Payload",
+                                              "Number = Rec.Item", False, True),
+    "variable-of-a-type-declared-twice": (LOCAL_PAYLOAD, "", "Number = TEST_Library.Saved.Item",
+                                          False, True),
+    "type-declared-in-two-components": ("", "Dim Rec As Payload", "Number = Rec.Item", True,
+                                        True),
+    "enum-declared-in-two-components": ("", "", "Number = Kind.kOne", True, True),
+    "qualified-enum-declared-twice": ("", "", "Number = TEST_Library.Kind.kOne", True, True),
+    "public-variable-in-two-components": ("", "", "Number = Kept.Item", True, True),
+    "library-qualified-type": ("", "Dim Rec As VBA.Collection", "Number = Rec.Count", False,
+                               True),
+    "qualified-unique-type": ("", "Dim Rec As TEST_Library.Unique", "Number = Rec.Item", False,
+                              False),
+    "unqualified-unique-type": ("", "Dim Rec As Unique", "Number = Rec.Item", False, False),
+    "enum-declared-once": ("", "", "Number = Kind.kOne", False, False),
+}
+
+
+def shadowing_files(module_level: str, local: str, statement: str, second: bool
+                    ) -> dict[str, str | bytes]:
+    """The fixture of one SHADOWING case."""
+    body = (f"{module_level}\n\n\nPrivate Sub First()\n        Dim Number As Long\n"
+            f"        {local}\n        On Error GoTo Handler\n        Exit Sub\nHandler:\n"
+            f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
+    files = {**standalone(module(body)), "tests/modules/TEST_Library.bas": LIBRARY}
+    if second:
+        files["tests/modules/TEST_Second.bas"] = SECOND
+    return files
+
+
 def resume_next_operation(statement: str) -> str:
     """``statement`` after On Error Resume Next, then a read of Err.Number."""
     return ("Private Sub First()\n"
@@ -2276,6 +2338,13 @@ class ErrorTest(unittest.TestCase):
                     self.assertEqual(len(findings), 1, findings)
                     self.assertIn("TEST_Fixture.bas:", findings[0])
                     self.assertIn("Err.Number read in First after line ", findings[0])
+
+    def test_names_declared_twice_are_member_accesses(self) -> None:
+        for name, (module_level, local, statement, second, stale) in SHADOWING.items():
+            with self.subTest(name=name):
+                files = shadowing_files(module_level, local, statement, second)
+                findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(bool(findings), stale, findings)
 
     def test_every_statement_can_fail_after_resume_next(self) -> None:
         for statement in RESUME_NEXT_OPERATIONS:
