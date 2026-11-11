@@ -70,7 +70,8 @@ Use only the categories an entry needs.
   `On Error GoTo <label>` handler is enabled, in each compilation
   environment: the handler would trap the
   raise again, and a cleanup that raises the saved error can loop and hang
-  Excel. The [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the
+  Excel. The check also requires the line number in `If x Then 100`, an
+  implicit `GoTo`, to be a label of the procedure. The [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the
   handler with `On Error GoTo 0` before raising the saved error again. The
   check is static; nothing was run in Excel (#397).
 

@@ -633,6 +633,10 @@ End Sub
                                         "GoTo target 'Lost'"),
     "one-line-procedure-missing-label": ("Private Sub First(): GoTo Lost: End Sub\n",
                                          "GoTo target 'Lost'"),
+    "implicit-line-number-jump-missing-target": ("Private Sub First(ByVal Flag As Boolean)\n"
+                                                 "        If Flag Then 100 Else 200\n"
+                                                 "100     Exit Sub\nEnd Sub\n",
+                                                 "GoTo target '200'"),
     "jump-after-member-call": ("Private Sub First()\n"
                                "        Application.Goto Reference:=\"R1C1\": GoTo Lost\nEnd Sub\n",
                                "GoTo target 'Lost'"),
@@ -1095,6 +1099,16 @@ Cleanup:
         End If
         Err.Raise 5
 ''',
+            # "If Flag Then 100" jumps, so the raise after it on that line never runs.
+            "implicit-line-number-jump-ends-the-branch":
+                "Cleanup:\n        If Flag Then 100: Err.Raise 6\n        Exit Sub\n"
+                "100     Exit Sub\n",
+            "implicit-line-number-jumps-in-both-branches":
+                "Cleanup:\n        If Flag Then 100 Else 200\n        Err.Raise 6\n"
+                "100     Exit Sub\n200     Exit Sub\n",
+            "raise-after-an-implicit-jump-disabled":
+                "Cleanup:\n        If Flag Then 100\n        On Error GoTo 0\n        Err.Raise 6\n"
+                "100     Exit Sub\n",
             # The subroutine branches before its Return, so the state is unknown.
             "branching-subroutine-disables-the-handler": '''Cleanup:
         GoSub Disarm

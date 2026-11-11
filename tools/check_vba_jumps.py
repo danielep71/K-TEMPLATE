@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Check that every VBA jump target is a label of the procedure that jumps.
 
-``GoTo``, ``GoSub``, ``Resume <label>`` and ``On Error GoTo <label>`` must
+``GoTo``, ``GoSub``, ``Resume <label>`` and ``On Error GoTo <label>``, and
+the line number in ``If x Then 100``, which VBA reads as ``GoTo 100``, must
 name a label defined in the same procedure, labels must be unique within a
 procedure, and every procedure must be closed. Each compilation environment
 of check_vba_conditionals.py is checked separately, so that mutually
@@ -117,8 +118,9 @@ ERR_RAISE = re.compile(r"(?<![\w.])(?:VBA\s*\.\s*)?Err\s*\.\s*Raise\b", re.IGNOR
 # The Error statement, as in "Error 5"; Error$ and Error(...) in an
 # expression are functions, and never start a statement.
 ERROR_STATEMENT = re.compile(r"^Error\b(?!\s*\$)\s*\S", re.IGNORECASE)
-# A statement that is only a line number: in "If x Then 100", VBA jumps there.
-IMPLICIT_GOTO = re.compile(r"^\d+$")
+# A line number alone after Then or Else, as in "If x Then 100", is a GoTo.
+LINE_NUMBER = re.compile(r"^\d+$")
+IMPLICIT = "<implicit>"
 COMBINED_NEXT =re.compile(r"^Next\s+(\w+(?:\s*,\s*\w+)+)$", re.IGNORECASE)
 # A jump or exit that keeps a subroutine from running straight to its Return.
 BRANCH_JUMP = re.compile(r"(?<![\w.])(?:GoTo|GoSub|Resume|Return)\b|^(?:Exit|End)\b",
@@ -273,10 +275,15 @@ def scan_statement(path: str, line: int, statement: str, current: Procedure | No
 
 def record_steps(procedure: Procedure | None, line: int, statements: list[str]) -> None:
     """Append the statements of one line to ``procedure``, in block form; a
-    combined ``Next j, i`` closes one loop per name."""
+    combined ``Next j, i`` closes one loop per name. An implicit line-number
+    jump is also a jump of the procedure, whose target must be a label."""
     if procedure is None:
         return
-    for code in block_form([statement for statement in statements if statement]):
+    codes = block_form([statement for statement in statements if statement])
+    procedure.jumps.extend((line, "GoTo", code.split()[1]) for code in codes
+                           if code.startswith(IMPLICIT))
+    for code in codes:
+        code = code.removeprefix(IMPLICIT)
         combined = COMBINED_NEXT.match(code)
         names = combined.group(1).split(",") if combined else []
         procedure.steps.extend(Step(line, code=f"Next {name.strip()}") for name in names)
@@ -306,7 +313,9 @@ def block_form(statements: list[str]) -> list[str]:
     """The statements of one line, with each one-line ``If ... Then a: b
     Else c`` written as a block ``If`` that ends with the line. An Else
     belongs to the nearest open one-line If, as in VBA. In ``If x Then: y``,
-    the statements after the colon belong to that one-line If."""
+    the statements after the colon belong to that one-line If. A line number
+    alone after ``Then`` or ``Else`` is a jump there: it is returned as
+    ``GoTo <n>`` behind the IMPLICIT prefix, which record_steps removes."""
     parts = [part for index, statement in enumerate(statements)
              for part in ([("if", statement)]
                           if BLOCK_IF.match(statement) and index < len(statements) - 1
@@ -327,7 +336,8 @@ def block_form(statements: list[str]) -> list[str]:
                 codes.append("End If")
                 continue
             # A block If's Else, as in "Else: x = 1", stays a statement.
-            codes.append(code)
+            codes.append(f"{IMPLICIT}GoTo {code}" if nested and LINE_NUMBER.match(code)
+                         else code)
             index += 1
         return codes, index
 
@@ -507,10 +517,9 @@ def subroutine_changes_handler(steps: list[Step], code: str) -> bool:
 def jump_targets(steps: list[Step]) -> set[str]:
     """The labels that some statement may jump to: ``GoTo``, ``GoSub``,
     ``On ... GoTo`` and ``GoSub``, ``Resume <label>``, ``On Error GoTo
-    <label>``, and the line number alone after a one-line ``If ... Then`` or
-    ``Else``, which VBA reads as ``GoTo``."""
-    return {target.casefold() for step in steps for _, target in statement_jumps(step.code)} \
-        | {step.code for step in steps if IMPLICIT_GOTO.match(step.code)}
+    <label>``, and a line number alone after ``Then`` or ``Else``, which
+    the scan records as ``GoTo``."""
+    return {target.casefold() for step in steps for _, target in statement_jumps(step.code)}
 
 
 def trapped_raises(steps: list[Step], start: int, handler: str
