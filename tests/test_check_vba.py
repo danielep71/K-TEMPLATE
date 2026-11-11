@@ -895,6 +895,20 @@ Report:
         End If
         Err.Raise 6
 ''', "Err.Raise"),
+            # Do ... Loop While runs its body at least once.
+            "raise-after-a-post-tested-loop": ('''Cleanup:
+        On Error GoTo 0
+        Do
+            On Error GoTo Handler
+        Loop While Index < 0
+        Err.Raise 5
+''', "Err.Raise"),
+            "raise-after-a-bare-loop-left-by-exit-do": ('''Cleanup:
+        Do
+            If Flag Then Exit Do
+        Loop
+        Err.Raise 5
+''', "Err.Raise"),
             # Under On Error Resume Next a raise falls through.
             "raise-after-a-raise-under-resume-next": (
                 "Cleanup:\n        On Error Resume Next: Err.Raise 5: "
@@ -939,6 +953,42 @@ Disarm:
         Err.Raise 5
 ''',
             "error-function": "Cleanup:\n        Debug.Print Error$(5), Error(5)\n",
+            # A bare Do ... Loop without Exit Do never reaches the raise after it.
+            "raise-after-a-bare-loop-without-exit-do": '''Cleanup:
+        Do
+            If Flag Then Exit Sub
+            On Error GoTo 0: Err.Raise 6
+        Loop
+        Err.Raise 5
+''',
+            "raise-after-an-enclosing-bare-loop-without-exit-do": '''        Do
+Cleanup:
+            Do
+                Exit Do
+            Loop
+            If Flag Then Exit Sub
+        Loop
+        Err.Raise 5
+''',
+            # A Do While may run no pass, so the state before it also continues.
+            "raise-after-a-pre-tested-loop": '''Cleanup:
+        On Error GoTo 0
+        Do While Flag
+            On Error GoTo Handler
+        Loop
+        Err.Raise 5
+''',
+            "nested-subroutine-disables-the-handler": '''Cleanup:
+        GoSub Outer
+        Err.Raise 5
+        Exit Sub
+Outer:
+        GoSub Disable
+        Return
+Disable:
+        On Error GoTo 0
+        Return
+''',
             "raise-after-a-raise-under-resume-next-disabled":
                 "Cleanup:\n        On Error Resume Next: Err.Raise 5: On Error GoTo 0: Err.Raise 6\n",
         }

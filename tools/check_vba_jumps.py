@@ -33,14 +33,22 @@ without ``Call`` and named arguments, or the ``Error`` statement; a
   loop per name, and ``Exit Do`` or ``Exit For`` leaves the innermost loop
   of its kind. Where the branches disagree, the state is unknown and
   nothing is reported.
+- After a loop, the path continues from its ``Exit Do`` or ``Exit For``
+  statements; from the end of its body if the loop tests a condition
+  (``For``, ``While``, ``Do While`` or ``Until``, ``Loop While`` or
+  ``Until``); and from before the loop if it tests first and may run no
+  pass. A bare ``Do ... Loop`` with no ``Exit Do`` never continues. If the
+  body may change the handler and an ``Exit`` leaves the loop, a later pass
+  may leave in another state, so the state is unknown. Raises in the body
+  are checked in the first pass only.
 - A ``GoSub`` or ``On ... GoSub`` whose subroutine runs an ``On Error``
-  statement before its ``Return`` makes the state unknown; a raise inside
-  the subroutine is not checked.
+  statement or another ``GoSub`` before its ``Return`` makes the state
+  unknown; a raise inside the subroutine is not checked.
 - A target inside blocks stays inside them: at the next ``ElseIf``,
   ``Else`` or ``Case`` of an enclosing block, the path skips to that block's
-  end. At the end of an enclosing loop, the path continues after the loop;
-  if the loop's body changes the handler, the state is unknown there, and a
-  raise before the target in a later pass is not checked.
+  end. At the end of an enclosing loop, the path continues after the loop
+  as above; if the loop's body changes the handler, the state is unknown
+  there, and a raise before the target in a later pass is not checked.
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
   ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
   end of the procedure; inside a block, that branch ends there and takes no
@@ -117,6 +125,10 @@ BLOCK_END = re.compile(r"^End\s+(?:If|Select)$", re.IGNORECASE)
 LOOP_OPEN = re.compile(r"^(Do|For|While)\b", re.IGNORECASE)
 LOOP_CLOSE = re.compile(r"^(?:Loop|Next|Wend)\b", re.IGNORECASE)
 LOOP_EXIT = re.compile(r"^Exit\s+(Do|For)$", re.IGNORECASE)
+# A loop that tests before its body may run it no time; Do ... Loop While or
+# Until runs it at least once; a bare Do ... Loop is left only by Exit Do.
+PRETESTED_LOOP = re.compile(r"^(?:For|While|Do\s+(?:While|Until))\b", re.IGNORECASE)
+POSTTESTED_CLOSE = re.compile(r"^Loop\s+(?:While|Until)\b", re.IGNORECASE)
 PATH_END = re.compile(r"^(?:Exit\s+(?:Sub|Function|Property)|End|GoTo\b.*|Resume\b.*|Return)$",
                       re.IGNORECASE)
 # Handler states other than an enabled local handler, which is its label.
@@ -339,15 +351,64 @@ def merge(states: list[str]) -> str:
     return live[0] if len({state.casefold() for state in live}) == 1 else UNKNOWN
 
 
-def block_statement(code: str, state: str, blocks: list[Block]) -> str | None:
-    """The state after a statement that opens, divides, closes or leaves a
-    block, or None for any other statement."""
+def changes_handler(steps: list[Step]) -> bool:
+    """Whether ``steps`` run an ``On Error`` statement, directly or in a subroutine."""
+    return any(ON_ERROR_SET.search(step.code) or subroutine_changes_handler(steps, step.code)
+               for step in steps)
+
+
+def loop_has_exit(steps: list[Step], start: int, close: int) -> bool:
+    """Whether the loop opened at ``steps[start]`` and closed at
+    ``steps[close]`` holds an ``Exit Do`` or ``Exit For`` that leaves it."""
+    opener = LOOP_OPEN.match(steps[start].code)
+    kind = opener.group(1).casefold() if opener else ""
+    inner: list[str] = []
+    for step in steps[start + 1:close]:
+        nested = LOOP_OPEN.match(step.code)
+        leaving = LOOP_EXIT.match(step.code)
+        if nested:
+            inner.append(nested.group(1).casefold())
+        elif LOOP_CLOSE.match(step.code) and inner:
+            inner.pop()
+        elif leaving and leaving.group(1).casefold() == kind and kind not in inner:
+            return True
+    return False
+
+
+def after_loop(steps: list[Step], block: Block, close: int, state: str) -> str:
+    """The state after the loop ``block`` closes at ``steps[close]``, with
+    ``state`` at the end of the body. Leaving through an ``Exit`` gives
+    ``block.ends``; a loop that tests its condition also ends after the
+    body, and one that tests it first may run no pass. A later pass that
+    may change the handler before an ``Exit`` makes the state unknown."""
+    may_skip = bool(PRETESTED_LOOP.match(steps[block.start].code))
+    tested = may_skip or bool(POSTTESTED_CLOSE.match(steps[close].code))
+    if not tested and not loop_has_exit(steps, block.start, close):
+        return DEAD
+    body = steps[block.start + 1:close]
+    if block.outer:
+        # Another pass runs the body before the target too.
+        if state != DEAD and changes_handler(body):
+            return UNKNOWN
+        return merge([*block.ends, state])
+    if merge(block.ends) != DEAD and changes_handler(body):
+        return UNKNOWN
+    return merge([*block.ends, *([state] if tested else []),
+                  *([block.entry] if may_skip else [])])
+
+
+def block_statement(steps: list[Step], index: int, state: str, blocks: list[Block]
+                    ) -> str | None:
+    """The state after ``steps[index]`` if it opens, divides, closes or
+    leaves a block, or None for any other statement."""
+    code = steps[index].code
     if BLOCK_IF.match(code) or SELECT.match(code):
         blocks.append(Block(loop=False, entry=state, started=bool(BLOCK_IF.match(code))))
         return state
     opener = LOOP_OPEN.match(code)
     if opener:
-        blocks.append(Block(loop=True, entry=state, kind=opener.group(1).casefold()))
+        blocks.append(Block(loop=True, entry=state, kind=opener.group(1).casefold(),
+                            start=index))
         return state
     leaving = LOOP_EXIT.match(code)
     left = [block for block in blocks if leaving and block.kind == leaving.group(1).casefold()]
@@ -368,7 +429,7 @@ def block_statement(code: str, state: str, blocks: list[Block]) -> str | None:
         return merge([*block.ends, state, *([] if block.has_else else [block.entry])])
     if LOOP_CLOSE.match(code) and block.loop:
         blocks.pop()
-        return merge([*block.ends, state, block.entry])
+        return after_loop(steps, block, index, state)
     return None
 
 
@@ -401,17 +462,14 @@ def outer_statement(steps: list[Step], index: int, state: str, blocks: list[Bloc
         return state, False
     if block.loop and LOOP_CLOSE.match(code):
         blocks.pop()
-        # Another pass runs the body before the target too; if it changes the
-        # handler, the state after the loop is unknown.
-        again = state != DEAD and any(ON_ERROR_SET.search(step.code)
-                                      for step in steps[block.start:index])
-        return (UNKNOWN if again else merge([*block.ends, state])), False
+        return after_loop(steps, block, index, state), False
     return None
 
 
 def subroutine_changes_handler(steps: list[Step], code: str) -> bool:
-    """Whether a ``GoSub`` in ``code`` runs an ``On Error`` statement between
-    its target label and the subroutine's ``Return`` or exit."""
+    """Whether a ``GoSub`` in ``code`` may change the handler: its
+    subroutine runs an ``On Error`` statement, or calls another subroutine,
+    between its target label and its ``Return`` or exit."""
     labels = {step.label.casefold(): index for index, step in enumerate(steps)
               if step.label is not None}
     for operation, target in statement_jumps(code):
@@ -420,7 +478,8 @@ def subroutine_changes_handler(steps: list[Step], code: str) -> bool:
         for step in steps[labels[target.casefold()]:]:
             if SUBROUTINE_END.match(step.code):
                 break
-            if ON_ERROR_SET.search(step.code):
+            if ON_ERROR_SET.search(step.code) or any(
+                    nested.casefold() == "gosub" for nested, _ in statement_jumps(step.code)):
                 return True
     return False
 
@@ -458,7 +517,7 @@ def trapped_raises(steps: list[Step], start: int, handler: str
             # Another jump may reach a label in a branch this path left.
             state = UNKNOWN if state == DEAD else state
             continue
-        after = block_statement(step.code, state, blocks)
+        after = block_statement(steps, index, state, blocks)
         if after is not None:
             state = after
             continue

@@ -232,7 +232,10 @@ What they cannot prove:
   `Select Case` and loop blocks. It follows no jump, and `Resume` and
   `Resume Next` start no path, because the statement they continue at is
   known only at run time. A `Resume <label>` that runs only under a
-  condition, as in a retry, starts no path either;
+  condition, as in a retry, starts no path either. Where branches, later
+  passes of a loop or a `GoSub` may leave the handler in different states,
+  it reports nothing, and it checks a raise in a loop body in the first
+  pass only;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 
