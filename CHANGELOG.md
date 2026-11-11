@@ -61,6 +61,21 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Fixed
+
+- The test-case checks now enforce what `TEST_CASES.md` and the validation
+  plan state. An invalid file-based case scopes a result only to a dataset of
+  its manifest. An invalid JSON fixture may break or omit its calculation
+  inputs, but a key outside the fixture keys fails. A code, ID, quantity or
+  rule must be the whole value with ASCII digits, so `"EUR\n"` and a rule
+  step in another script's digits fail, in `check_test_cases.py`,
+  `check_accuracy.py` and `check_independent.py`. A *Traceability* row may
+  name a procedure of a form under `src/`. `check_independent.py` fails on
+  any expected value citing an adapter's source that the adapter does not
+  print, not only an `independent` one. The setup guide's `DS-01` row now
+  says to remove both illustrative cases and their *Traceability* row, and
+  to replace `ACC-01`, in the same change (#384).
+
 ## [1.0.0] - 2026-11-10
 
 Changes made before this changelog existed are described by the closed
