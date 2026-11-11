@@ -822,6 +822,10 @@ class EquivalenceTest(unittest.TestCase):
              [f"run input {check_excel_run.BUILD_TOOLS[1]}: only at"]),
             ("file of a configuration directory", {"src/core/notes.txt": b"notes\n"},
              ["run input src/core/notes.txt: only at"]),
+            # An attribute file in any directory can change the bytes a checkout writes.
+            ("nested attributes", {"tests/.gitattributes":
+                                   b"*.bas working-tree-encoding=UTF-16LE\n"},
+             ["run input tests/.gitattributes: only at"]),
             ("directory only the other configuration names",
              {check_excel_run.BUILD_CONFIG: json.dumps(layout).encode(),
               "lib/data.txt": b"data\n"},

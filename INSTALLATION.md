@@ -474,8 +474,10 @@ removed. The run inputs are:
   `tools/devbuild/workbook.json`, at either commit, and in `src/workbook/`;
 - every file in `docs/methodology/`, `tests/fixtures/`, `tests/expected/` and
   `tests/accuracy/`, which the suites or the accuracy check read;
+- every `.gitattributes` file, at the root or in any directory, because each
+  one can change the bytes Git checks these files out with;
 - `tools/devbuild/workbook.json`, `src/workbook/Template.xlsx`,
-  `.github/excel-evidence-policy.json`, `.gitattributes`, and the build tools
+  `.github/excel-evidence-policy.json`, and the build tools
   `tools/devbuild/build_workbook.py` and `tools/devbuild/vba_project.py`.
 
 The report then names `CANDIDATE_SHA` as the candidate and `RUN_SHA` as the

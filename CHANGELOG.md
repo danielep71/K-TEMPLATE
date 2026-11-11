@@ -72,8 +72,8 @@ Use only the categories an entry needs.
   must have the same Git blob at both commits: the VBA components and form
   resources, the files of the build configuration's directories, the
   methodology guides, fixtures, expected results and accuracy contracts, the
-  build configuration, the layout template, the evidence policy,
-  `.gitattributes` and the build tools. A difference fails and names each
+  build configuration, the layout template, the evidence policy, every
+  `.gitattributes` file at any depth and the build tools. A difference fails and names each
   path; a match prints
   `Equivalent: <SHA> (N run inputs identical to <commit>)`, and the report
   names both commits. `INSTALLATION.md`,

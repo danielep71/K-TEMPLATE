@@ -90,9 +90,10 @@ decide what a build writes, what Excel runs and what this check reads:
 - every file the accuracy check reads (CASE_PATHS): the methodology guides,
   the fixtures, which the suites also read, the expected results and the
   accuracy contracts;
+- every .gitattributes file of the tree, at the root or in any directory,
+  since each one can change the bytes Git checks these files out with;
 - tools/devbuild/workbook.json itself, the layout template, the evidence
-  policy, .gitattributes, which sets the bytes Git checks these files out
-  with, and the build tools (BUILD_TOOLS). A rebuild uses the build tools of
+  policy and the build tools (BUILD_TOOLS). A rebuild uses the build tools of
   the checkout that runs this check, so they must be those of the build.
 
 A run input that differs, or exists at only one commit, is a finding that
@@ -192,8 +193,10 @@ CASE_PATHS = ("docs/methodology", "tests/fixtures", "tests/expected",
 # (tests/test_check_excel_run.py keeps the two equal).
 BUILD_TOOLS = ("tools/devbuild/build_workbook.py", "tools/devbuild/vba_project.py")
 # The single files among the run inputs of --equivalent-to; the directories
-# come from CASE_PATHS and the build configuration (run_input_paths).
-RUN_INPUT_FILES = (".gitattributes", BUILD_CONFIG, build_workbook.TEMPLATE, POLICY, *BUILD_TOOLS)
+# come from CASE_PATHS and the build configuration, and every Git attribute
+# file of the tree, at any depth, is one too (run_input_paths).
+RUN_INPUT_FILES = (BUILD_CONFIG, build_workbook.TEMPLATE, POLICY, *BUILD_TOOLS)
+ATTRIBUTES = ".gitattributes"
 
 VB_OBJECT_ERROR = -2147221504
 # ERR_TEST_FAILED as vbObjectError + n, or as the literal &H8004xxxx equal to it.
@@ -1216,7 +1219,8 @@ def run_input_paths(directories: set[str], paths: set[str]) -> set[str]:
     """Those of ``paths`` that are run inputs, given the configuration directories."""
     homes = {*directories, *CASE_PATHS, build_workbook.DOCUMENT_HOME}
     return {path for path in paths
-            if path in RUN_INPUT_FILES or path.lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)
+            if path in RUN_INPUT_FILES or PurePosixPath(path).name == ATTRIBUTES
+            or path.lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)
             or any(path.startswith(f"{home}/") for home in homes)}
 
 
