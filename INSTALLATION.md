@@ -256,7 +256,10 @@ evidence-grade. Then it:
    the workbook ([HB-04](docs/methodology/VALIDATION_PLAN.md#host-behaviour));
 3. runs the certification of step 5 below, with that folder and
    `tests\fixtures`;
-4. closes the workbook without saving, and quits Excel;
+4. closes the workbook without saving, and quits Excel. If the Excel
+   instance it started is still running 30 seconds later, it ends that
+   process, and only that one: it checks the process name and the start
+   time it recorded when it started Excel, so it never ends another Excel;
 5. writes `host.txt`, the
    [host record](docs/methodology/TEST_HARNESS.md#host-record): you as the
    operator (your Windows user name, or `--operator "<name>"`), the start and
@@ -268,7 +271,11 @@ evidence-grade. Then it:
 
 It prints the report and saves it as `test-results\excel-run-report.txt`.
 It must end with `Binding: VERIFIED` and `excel-run: PASS`; record it as
-step 10 says.
+step 10 says. The command also prints an `excel-quit:` line, which the
+saved report holds after its outcome, to say how Excel ended: `EXITED`;
+`STOPPED` when the command ended its process; `SURVIVED` when it could
+not, so close that Excel yourself; or `UNKNOWN` when it could not tell,
+so close any Excel window the run left open.
 
 There is no export: the check proves identity by rebuilding the commit in a
 temporary worktree. The workbook Excel ran must hold the same parts as that

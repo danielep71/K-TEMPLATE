@@ -134,6 +134,15 @@ Use only the categories an entry needs.
   `docs/repo_governance/TRAFFIC.md` lists the milestone among the enabling
   steps. `docs/setup/REPOSITORY_SETUP.md` says that only an existing managed
   ruleset is unknown without write access.
+- The Excel instance that `tools/devbuild/excel_run.py` starts no longer
+  outlives the run. The command records the process id of that instance,
+  from its window, and the process start time. After it quits Excel, it waits
+  up to 30 seconds for that process to exit and then ends it, but only while
+  the process with that id is named `EXCEL` and has the recorded start time,
+  so it never ends another Excel. It prints how Excel ended in an
+  `excel-quit:` line (`EXITED`, `STOPPED`, `SURVIVED` or `UNKNOWN`), which
+  the saved report also holds; `SECURITY.md` and the installation guide say
+  so (#401).
 
 ## [1.0.0] - 2026-11-10
 
