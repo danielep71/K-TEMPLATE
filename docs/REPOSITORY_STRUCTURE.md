@@ -34,7 +34,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `tests/independent/` | The adapters that run an [independent implementation](methodology/TEST_CASES.md#independent-implementations) on the test cases, and their registry `adapters.json` | Reserved |
 | `tools/` | Repository checks, setup and build tooling, in Python; `tools/devbuild/` builds a workbook from source ([building a workbook from source](../INSTALLATION.md#building-a-workbook-from-source)) | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
-| `test-results/` | Disposable output of local and CI runs | Ignored by Git |
+| `test-results/` | Disposable output of local and CI runs, and the mutants that `tools/make_mutant.py` writes under `test-results/mutants/` | Ignored by Git |
 
 - **Source first.** The exported source is authoritative. A change made in a
   workbook is exported and reviewed like any other change.

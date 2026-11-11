@@ -25,7 +25,8 @@ closed, with a *Resolution* section.
 - Fill in the pull request template. Its *Calculation impact* section names
   the source and the class of the expected values behind a changed
   calculation, or says there is none. Its *Validated* section lists the checks
-  you ran; write NOT RUN or NOT APPLICABLE with a reason instead of claiming
+  you ran, and for a defect fix its [negative control](#-negative-controls);
+  write NOT RUN or NOT APPLICABLE with a reason instead of claiming
   evidence that was not produced.
 - Add the `CHANGELOG.md` entry under `[Unreleased]` in the same pull request,
   as its [maintenance policy](CHANGELOG.md#-maintenance-policy) describes; a
@@ -59,6 +60,47 @@ rule.
   ([completeness policy](docs/methodology/TEST_CASES.md#completeness-policy)).
 - A static check is not an Excel run. Record only evidence that was produced,
   on the commit it was produced for.
+- A test that passes before and after a fix proves nothing about the defect.
+  A fix shows its test failing on the defective code first
+  ([negative controls](#-negative-controls)).
+
+## 🔬 Negative controls
+
+A pull request that fixes a defect shows each new or changed test that proves
+the fix failing on the defective code, then passing on the fix. Make the
+defective code in one of two ways:
+
+- **The base.** Check the base out in a detached worktree, for example with
+  `git worktree add --detach ../base-check origin/main`, copy only the new or
+  changed test files into it, and run them there. Remove it afterwards with
+  `git worktree remove ../base-check`.
+- **A mutant.** When the base cannot run the test, for example because the
+  test needs code that the fix adds, put the defect back into a copy of the
+  fixed file:
+
+  ```sh
+  python tools/make_mutant.py src/core/CORE_Example.bas --find "a - b" --replace "a + b"
+  ```
+
+  The tool writes the copy under `test-results/mutants/`, which Git ignores,
+  at the source's relative path, and never over the source. It refuses
+  unless the text occurs exactly once, and it keeps every other byte, CRLF
+  line endings and `Attribute VB_Name` included. It prints the changed lines
+  and the SHA-256 of the source and of the mutant. The text is literal; for a
+  text that spans lines, pass `--find-file` and `--replace-file` with files
+  that hold it. It exits with 0 when it writes the mutant, 1 when it refuses
+  and 2 on a usage error; its docstring lists every refusal.
+
+  To run a mutated VBA component, import the mutant into a development
+  workbook in place of its source component, as
+  [importing VBA into Excel](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
+  describes, and run the suite. Build or import the workbook from source again
+  for the run on the fix. For another file, copy the mutant over its source in
+  a detached worktree of your branch and run the test there.
+
+Record in *Validated* which way you used, the command, and the failing result
+on the defective code; for a mutant, also its SHA-256. When no test can fail on
+the defect, write NOT APPLICABLE with the reason.
 
 ## 📐 Contract changes
 
