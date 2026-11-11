@@ -895,6 +895,10 @@ Report:
         End If
         Err.Raise 6
 ''', "Err.Raise"),
+            # Under On Error Resume Next a raise falls through.
+            "raise-after-a-raise-under-resume-next": (
+                "Cleanup:\n        On Error Resume Next: Err.Raise 5: "
+                "On Error GoTo Handler: Err.Raise 6\n", "Err.Raise"),
             "raise-after-a-branch-with-an-error-statement": ('''Cleanup:
         If Flag Then
             On Error GoTo 0: Error 5
@@ -935,6 +939,8 @@ Disarm:
         Err.Raise 5
 ''',
             "error-function": "Cleanup:\n        Debug.Print Error$(5), Error(5)\n",
+            "raise-after-a-raise-under-resume-next-disabled":
+                "Cleanup:\n        On Error Resume Next: Err.Raise 5: On Error GoTo 0: Err.Raise 6\n",
         }
         every = " [vba6-win32, vba7-win32, vba7-win64]"
         for name, (blocks, raised) in reported.items():
