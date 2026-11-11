@@ -7,7 +7,8 @@ does. That run leaves out three checks: the test suite, which would run this
 test again inside itself, and Ruff and mypy. They read only the Python code
 of tools/ and tests/, which the initializer never changes, so the template's
 own run of them already covers the copy. In place of the suite it runs the
-test modules that read the files the initializer changes. The same run is
+test modules that compare the adapted files with each other; the integrity
+checks of the copy cover the rest. The same run is
 repeated after deleting the initializer and this test, which a generated
 repository may do once it is initialized; there, this copy test is skipped.
 """
