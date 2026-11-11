@@ -436,14 +436,19 @@ paths the policy names, as the policy's Office bitness compiles them, and
 fails when the commit has no file there, or when a suite's counts or entry
 point differ from the policy. Every log of every suite must come from one
 host. A policy of version 1, which older commits hold, has no `suites`. The same policy is read
-by `tools/devbuild/export_manifest.py`, for the names of the export folder and
+by `tools/devbuild/excel_run.py`, for the harness, the certification entry
+point of each suite and the name of the host record, by
+`tools/devbuild/export_manifest.py`, for the names of the export folder and
 the manifest, by `tools/devbuild/lo_smoke.py`, for the example suite's
 certification entry point and the names of its logs and results file, and by
 `tools/render_docs.py`, for the expected results in the installation guide. `tests/test_check_excel_run.py` keeps the policy equal to
 the suite, to the host policy of the installation guide and to the evidence
 files the guide names. To change a mode, a file name, a reference or the
 bitness, change the policy together with the suite, the installation guide
-and this guide.
+and this guide. A reference also changes `REFERENCES` in
+`tools/devbuild/vba_project.py`, which the build writes into the project:
+`tests/test_excel_run.py` fails while the references the build gives the
+project differ from the policy.
 
 ## What it proves
 

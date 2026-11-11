@@ -12,7 +12,8 @@ names that .github/excel-evidence-policy.json gives. Then it prints a JSON
 summary: the modules LibreOffice loaded, the error the certification raised,
 each run log's RESULT and failures, the certification log, the results file,
 and the failures that LibreOffice is not known to cause. It exits 0 when there is none, 1 when
-there is one, the certification wrote no log, or LibreOffice could not open
+there is one, the certification wrote no log, the build of the development
+workbook fails (lo-smoke: FAIL (build: ...)), or LibreOffice could not open
 the workbook or run it, and 2 when an option is unknown, WORKBOOK does not
 exist, the evidence policy is missing or malformed, or LibreOffice or its
 Python UNO bridge (python3-uno) is missing. Run it with the Python that
@@ -208,7 +209,12 @@ def main(argv: list[str] | None = None) -> int:
         else:
             import build_workbook
             workbook = base / "Workbook-development.xlsm"
-            build_workbook.build(ROOT, "development", workbook)
+            try:
+                build_workbook.build(ROOT, "development", workbook)
+            except (build_workbook.BuildError, ValueError, OSError) as error:
+                # A form, a module too dense to compress or an unreadable source.
+                print(f"lo-smoke: FAIL (build: {error})")
+                return 1
         folder = base / "evidence"
         folder.mkdir()
         port = free_port()
