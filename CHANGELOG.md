@@ -424,7 +424,7 @@ milestones and their pull requests.
   `Module.LIMIT`, and a field of a variable of a user-defined `Type`, as in
   `Saved.Number = Err.Number`, are values, not member accesses. The
   [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
-  see (#396, #419, #422).
+  see (#396, #419, #422, #427).
 
 ### Changed
 

@@ -2063,8 +2063,8 @@ RESUME_NEXT_OPERATIONS = [
 
 
 # A standard module of public error codes and records, as the house style
-# prescribes, and a procedure whose handler runs a statement at line 23 and
-# then reads Err.Number at line 24.
+# prescribes, and a procedure whose handler runs a statement at line 24 and
+# then reads Err.Number at line 25.
 CODES = """Attribute VB_Name = "TEST_Codes"
 Option Explicit
 Option Private Module
@@ -2092,7 +2092,7 @@ End Function
 
 
 def qualified(statement: str) -> str:
-    """``statement`` in a handler at line 23, then a read of Err.Number."""
+    """``statement`` in a handler at line 24, then a read of Err.Number."""
     return module("""Private Const OWN As Long = 1
 Private Enum Kind
     kOne = 1
@@ -2101,6 +2101,7 @@ Private Type Record
     Count As Long
     Items(1 To 3) As Long
     Owner As Object
+    Things(1 To 2) As Object
     Data As Variant
 End Type
 Private mRecord As Record
@@ -2131,8 +2132,6 @@ QUALIFIED_VALUES = [
     "TEST_Codes.LastError.Number = Err.Number",
     "With Saved: .Number = Err.Number: .Source = Err.Source: End With",
     "Number = mRecord.Items(2)", "ReDim Grown(1 To 2): Grown(1).Number = Err.Number",
-    # Set copies a reference, which calls no default property.
-    "Set Book = mRecord.Owner", "Set mRecord.Owner = Nothing",
     "Text = Saved.Source: Saved.Source = Err.Source",
 ]
 # Each is a member access or a call before the read: one finding.
@@ -2144,8 +2143,11 @@ QUALIFIED_MEMBERS = [
     # Owner(1) does on a Collection; a Variant that holds an array too.
     "Number = mRecord.Owner(1)", "mRecord.Owner(1) = 3", "Number = mRecord.Data(1)",
     "Number = Loose(1).Number", "Number = Saved(1).Number",
-    # Reading or assigning an object or a Variant calls its default property.
+    # Reading or assigning an object or a Variant calls its default property,
+    # and even Set may create an object declared As New.
     "Number = mRecord.Owner", "mRecord.Owner = 3", "Number = mRecord.Data",
+    "Set Book = mRecord.Owner", "Set mRecord.Owner = Nothing",
+    "Set Book = mRecord.Things(1)",
 ]
 
 
@@ -2324,8 +2326,25 @@ class ErrorTest(unittest.TestCase):
                 findings = run_check(check_vba_errors.check, files)
                 self.assertEqual(len(findings), 1, findings)
                 self.assertTrue(findings[0].startswith(
-                    "tests/modules/TEST_Fixture.bas:24: Err.Number read in First after line 23, "
+                    "tests/modules/TEST_Fixture.bas:25: Err.Number read in First after line 24, "
                     "which may have changed Err with a call or member access"), findings)
+
+    def test_set_of_an_object_declared_as_new_is_a_member_access(self) -> None:
+        # Reading a variable declared As New creates it on first use, which
+        # runs Class_Initialize, here a call of Err.Clear: even Set reads it.
+        owner = ('VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  \'True\nEND\n'
+                 'Attribute VB_Name = "COwner"\nOption Explicit\n\n'
+                 "Private Sub Class_Initialize()\n        Err.Clear\nEnd Sub\n")
+        body = ("Private mOwner As New COwner\n\n\nPrivate Sub First()\n"
+                "        Dim Number As Long, Book As Object\n        On Error GoTo Handler\n"
+                "        Exit Sub\nHandler:\n        Set Book = TEST_Fixture.mOwner\n"
+                "        Number = Err.Number\nEnd Sub\n")
+        files = {**standalone(module(body)), "src/classes/COwner.cls": owner}
+        findings = run_check(check_vba_errors.check, files)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].startswith(
+            "tests/modules/TEST_Fixture.bas:13: Err.Number read in First after line 12, "
+            "which may have changed Err with a call or member access"), findings)
 
     def test_names_resolve_by_scope_level(self) -> None:
         for name, (module_level, parameters, local, other, statement, stale) in \
