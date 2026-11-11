@@ -25,10 +25,10 @@ documented assumption, and its contract says so.
 
 A copy of a source, such as a regulation, a reporting template or the
 issuer's own validation rules, is stored byte for byte under
-`docs/methodology/sources/`. Git does not normalize those files, and editors
-leave them unchanged. A `README.md` in that directory, by convention, is
-ordinary documentation that Git and editors treat as text; the register
-stays here.
+`docs/methodology/sources/`. Git neither normalizes those files nor reports
+a white-space error in them, and editors leave them unchanged. A `README.md`
+in that directory, by convention, is ordinary documentation that Git and
+editors treat as text; the register stays here.
 
 - Name each copy `<ID>_<short-title>.<extension>`, for example
   `SRC-01_example-regulation.pdf`.

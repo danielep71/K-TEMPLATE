@@ -61,6 +61,18 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Repository integrity** accepts the bytes that `.gitattributes`,
+  `.editorconfig` and the formatter keep. `git diff --check` reports no
+  white-space error in the regulatory source copies under
+  `docs/methodology/sources/`, nor trailing blanks in a `.frm` file, and
+  `tools/check_vba_source.py` skips a form's VBE header, which keeps the
+  blank the VBE writes at the end of its `Begin` line; the code after it is
+  still checked. Editors trim trailing white space in Markdown, which
+  `git diff --check` reports, and leave registry exports (`*.reg`) byte for
+  byte (#380).
+
 ## [1.0.0] - 2026-11-10
 
 Changes made before this changelog existed are described by the closed

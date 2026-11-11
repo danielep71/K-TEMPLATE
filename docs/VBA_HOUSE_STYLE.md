@@ -147,6 +147,9 @@ each failed restoration, and a primary and cleanup failure together.
 - Indent with four spaces; no tabs and no trailing white space. Keep
   procedure declarations, `End` statements and labels at their outer level.
   Separate procedures with two blank lines.
+- A form's header, which the VBE writes, is exempt: it keeps its bytes, such
+  as the blank at the end of its `Begin` line, because the next export writes
+  them again. **Repository integrity** checks the code after it.
 - Use `MODULE SETTINGS`, `DECLARE`, `INITIALIZE` and `FAIL` sections where they
   make a routine easier to follow, not as empty ceremony.
 - A generated component names its generator and is regenerated, never edited
@@ -178,7 +181,7 @@ integrity** reports its findings as a warning, not a failure.
 
 | Check | Enforces |
 | --- | --- |
-| `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`, tab or trailing white space; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
+| `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`; no tab or trailing white space, except in a form's VBE header; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
 | `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe` |
 | `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target is a label of the same procedure, in each environment; no label is defined twice in a procedure |
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
