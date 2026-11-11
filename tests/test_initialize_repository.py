@@ -240,6 +240,57 @@ def adapted_checks(context: Context) -> list[Check]:
 
 
 @unittest.skipIf(shutil.which("git") is None, "git is not installed")
+class ReleaseBranchWarningTests(unittest.TestCase):
+    """--release-branch is checked against origin as dependabot-target-branches checks it."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory(prefix="initialize-warning-")
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.origin = self.base / "origin.git"
+        work = self.base / "work"
+        work.mkdir()
+        self.git(self.base, "init", "-q", "--bare", str(self.origin))
+        for command in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
+                        ["config", "user.email", "fixture@example.invalid"],
+                        ["config", "commit.gpgsign", "false"],
+                        ["commit", "-q", "--allow-empty", "-m", "Created"],
+                        ["push", "-q", str(self.origin), "HEAD:refs/heads/main",
+                         "HEAD:refs/heads/release/0.1.0"]):
+            self.git(work, *command)
+
+    @staticmethod
+    def git(root: Path, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+
+    def clone(self, *options: str) -> Path:
+        target = self.base / "clone"
+        self.git(self.base, "clone", "-q", *options, str(self.origin), str(target))
+        return target
+
+    def test_a_branch_only_on_origin_gives_no_warning(self) -> None:
+        clone = self.clone("--single-branch", "--branch", "main")
+        self.assertEqual(initialize.warnings(clone, OPTIONS), [])
+
+    def test_a_branch_origin_lacks_is_a_warning(self) -> None:
+        clone = self.clone()
+        found = initialize.warnings(clone, Options(REPOSITORY, "LCR", "release/0.2.0"))
+        self.assertEqual(len(found), 1)
+        self.assertIn("origin has no branch release/0.2.0", found[0])
+        self.assertIn("dependabot-target-branches check fails", found[0])
+
+    def test_no_answer_from_origin_is_a_warning_that_says_so(self) -> None:
+        clone = self.clone()
+        self.git(clone, "remote", "remove", "origin")
+        found = initialize.warnings(clone, OPTIONS)
+        self.assertEqual(len(found), 1)
+        self.assertIn("origin cannot be asked whether branch release/0.1.0 exists", found[0])
+
+    def test_no_release_branch_needs_no_check(self) -> None:
+        self.assertEqual(initialize.warnings(self.base, Options(REPOSITORY, "LCR")), [])
+
+
+@unittest.skipIf(shutil.which("git") is None, "git is not installed")
 @unittest.skipUnless(IS_TEMPLATE, "this repository is already initialized")
 class GeneratedRepositoryTest(unittest.TestCase):
     def setUp(self) -> None:
