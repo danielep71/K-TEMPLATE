@@ -6,7 +6,8 @@ compilation environment and rejects what it cannot evaluate: an unknown
 symbol, a project ``#Const``, an unbalanced block. A ``Declare`` reachable
 under VBA7 must be ``PtrSafe`` (docs/VBA_HOUSE_STYLE.md, Naming and
 visibility). The reachable-source model is shared with check_vba_jumps.py,
-check_vba_public_api.py and check_vba_dependencies.py.
+check_vba_public_api.py, check_vba_dependencies.py, check_vba_identifiers.py,
+check_vba_calls.py and check_excel_run.py.
 """
 
 from __future__ import annotations
