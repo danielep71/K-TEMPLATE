@@ -17,7 +17,11 @@ cleared or may have replaced the error it means to read:
   Declare of the module, or a public one of a standard module, shadows a VBA
   function, statement, statement target or constant of its name, as in VBA,
   while ``VBA.Format`` still names the VBA function. ``Err`` and ``Erl``
-  always mean VBA's.
+  always mean VBA's. Within the project, a name, bare or first in a dotted
+  name, means what the nearest scope level declares (Scope.resolve): the
+  procedure's parameters, variables and own name; then any declaration of
+  its module; then a public one of another component; then a component. A
+  procedure there wins over a variable of a farther level, and the reverse.
   A dotted name is a member access unless it reads a value (Scope.value): a
   field of a variable declared ``As`` a user-defined Type of the project
   (``Saved.Number``, ``Saved(i).Inner.Field``, ``.Number`` inside
@@ -360,6 +364,26 @@ class Declarations:
     public: set[str] = field(default_factory=set)
     values: frozenset[str] = frozenset()
     public_values: frozenset[str] = frozenset()
+    callables: frozenset[str] = frozenset()
+    public_callables: frozenset[str] = frozenset()
+
+    def declares(self, name: str, public: bool) -> str | None:
+        """What ``name`` is here: "variable", "enum", "callable" or "value"
+        (a constant, an Enum member, a Type, a control); with ``public``, only
+        as another component sees it: a variable, value or procedure of a
+        standard module, or a public Enum of any module."""
+        if public and name not in self.public and name not in self.public_values \
+                and name not in self.public_callables:
+            return None
+        if name in self.enums:
+            return "enum"
+        if public and not self.standard:
+            return None
+        if name in self.variables:
+            return "variable"
+        if name in (self.public_callables if public else self.callables):
+            return "callable"
+        return "value" if name in (self.public_values if public else self.values) else None
 
 
 def declared(items: str) -> dict[str, Declared]:
@@ -377,7 +401,9 @@ def declared(items: str) -> dict[str, Declared]:
 def declarations(source: str, module: Module) -> Declarations:
     """The module-level declarations of one component's source."""
     result = Declarations(module.standard, values=frozenset(module.names - module.callables),
-                          public_values=frozenset(module.public - module.public_callables))
+                          public_values=frozenset(module.public - module.public_callables),
+                          callables=frozenset(module.callables),
+                          public_callables=frozenset(module.public_callables))
     block: tuple[str, str] | None = None
     members: dict[str, Declared] = {}
     inside = False
@@ -422,15 +448,35 @@ class Scope:
     local: dict[str, Declared]
     project: dict[str, Declarations]
 
+    def resolve(self, name: str) -> tuple[str, Declarations | None]:
+        """What the unqualified ``name`` means here, as VBA resolves it, by
+        scope level: a parameter, variable or the procedure's own name; then
+        a declaration of the module, whatever its kind; then a public one of
+        another component; then a component. The kind is "local",
+        "variable", "enum", "callable", "value" or "component", with the
+        component that declares it; "" when nothing does."""
+        if name in self.local:
+            return "local", None
+        home = self.project.get(self.home)
+        if home is not None and (kind := home.declares(name, False)):
+            return kind, home
+        for found in self.project.values():
+            if found is not home and (kind := found.declares(name, True)):
+                return kind, found
+        return ("component", self.project[name]) if name in self.project else ("", None)
+
     def variable(self, name: str, owner: str | None = None) -> Declared | None:
         """What variable ``name`` is declared as, or None when it is no
-        variable; with ``owner``, only a variable of that component."""
-        if owner is None and name in self.local:
+        variable or another declaration hides it; with ``owner``, only a
+        variable of that component."""
+        if owner is not None:
+            found = self.project.get(owner)
+            visible = found is not None and (owner == self.home or name in found.public)
+            return found.variables.get(name) if found is not None and visible else None
+        kind, found = self.resolve(name)
+        if kind == "local":
             return self.local[name]
-        # Another component's public variable is seen only in a standard module.
-        home = self.project.get(self.home)
-        return next((found.variables[name] for found in self.owners(name, owner)
-                     if name in found.variables and (found.standard or found is home)), None)
+        return found.variables[name] if kind == "variable" and found is not None else None
 
     def owners(self, name: str, owner: str | None = None) -> list[Declarations]:
         """The components whose declaration ``name`` this procedure sees: its
@@ -441,7 +487,11 @@ class Scope:
                 and (home == self.home or name in found.public)]
 
     def members(self, name: str, owner: str | None = None) -> frozenset[str] | None:
-        """The members of the Enum ``name``, if this procedure sees one."""
+        """The members of the Enum ``name``, if this procedure sees one that
+        nothing else of that name hides."""
+        if owner is None:
+            kind, found = self.resolve(name)
+            return found.enums[name] if kind == "enum" and found is not None else None
         return next((found.enums[name] for found in self.owners(name, owner)
                      if name in found.enums), None)
 
@@ -495,13 +545,13 @@ class Scope:
         with ``reference``, as in Set x = rec.Owner, any reference. Anything
         else is a member access."""
         (root, indexed), rest = links[0], links[1:]
+        kind, home = self.resolve(root)
         declaration = self.variable(root)
         if declaration is not None:
             return self.data(self.walk(declaration, links), reference)
-        if root in names.callables or indexed:
+        if kind in {"callable", "value", "local", "variable"} or indexed:
             return False
-        home = self.project.get(root)
-        if home is not None and home.standard and rest:
+        if kind == "component" and home is not None and home.standard and rest:
             declaration = self.variable(rest[0][0], root)
             if declaration is not None:
                 return self.data(self.walk(declaration, rest), reference)
@@ -943,17 +993,24 @@ def procedures(source: str) -> list[Procedure]:
     return found
 
 
-def procedure_names(module: Module, project: Names, line: int) -> Names:
-    """The names the procedure at ``line`` resolves. Its values are its
-    parameters and variables, its own name (its result), the module's
-    variables, constants and Enum members, and those of ``project``: the
-    names of the components and the public values of the standard modules.
-    It can call the procedures, properties and Declares of its module and
-    the public ones of the standard modules, in ``project``."""
+def procedure_names(module: Module, project: Names, components: frozenset[str],
+                    line: int) -> Names:
+    """The names the procedure at ``line`` resolves, by scope level as VBA
+    does, each to what the first level that declares it makes it: its
+    parameters, variables and own name (its result) are values; then the
+    module's variables, constants and Enum members are values and its
+    procedures, properties and Declares are callables; then the public ones
+    of the standard modules, in ``project``; then ``components``, values."""
     procedure = next((item for item in module.procedures if item.line == line), None)
-    local = procedure.names | {procedure.name.casefold()} if procedure else set()
-    return Names(frozenset(local | (module.names - module.callables) | project.values),
-                 frozenset(module.callables | project.callables))
+    seen = set(procedure.names | {procedure.name.casefold()} if procedure else set())
+    values: set[str] = set(seen)
+    callables: set[str] = set()
+    for level_values, level_callables in ((module.names - module.callables, module.callables),
+                                          (project.values, project.callables)):
+        values |= level_values - seen
+        callables |= level_callables - seen
+        seen |= level_values | level_callables
+    return Names(frozenset(values | (components - seen)), frozenset(callables))
 
 
 def analyze(modules: dict[str, str]) -> tuple[list[Finding], int]:
@@ -963,15 +1020,15 @@ def analyze(modules: dict[str, str]) -> tuple[list[Finding], int]:
     components = {Path(path).stem.casefold(): declarations(source, scanned[path])
                   for path, source in modules.items()}
     project = Names(
-        frozenset({Path(path).stem.casefold() for path in modules} | {
-            name for module in standard for name in module.public - module.public_callables}),
+        frozenset(name for module in standard for name in module.public - module.public_callables),
         frozenset(name for module in standard for name in module.public_callables))
+    stems = frozenset(Path(path).stem.casefold() for path in modules)
     findings: list[Finding] = []
     count = 0
     for path, source in modules.items():
         for procedure in procedures(source):
             count += 1
-            names = procedure_names(scanned[path], project, procedure.line)
+            names = procedure_names(scanned[path], project, stems, procedure.line)
             names = replace(names, scope=Scope(Path(path).stem.casefold(),
                                                procedure.variables(), components))
             if procedure.calls_itself_with_arguments:

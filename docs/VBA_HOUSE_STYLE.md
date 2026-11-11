@@ -271,7 +271,11 @@ What they cannot prove:
   - as in VBA, a procedure, property or `Declare` of the project shadows a
     VBA function, statement or constant of its name, such as a project
     `Format`, while `VBA.Format` or `VBA.Strings.Format` still names the VBA
-    function; `Err` and `Erl` always mean VBA's;
+    function; `Err` and `Erl` always mean VBA's. Within the project, a name
+    means what the nearest scope level declares: the procedure's parameters
+    and variables, then its module's declarations, then the public ones of
+    the other components, then a component, so a module's property `Saved`
+    hides another module's public variable `Saved`;
   - within a statement, it follows VBA's evaluation order: a read inside the
     arguments of a call runs before the call, and only what runs before a
     read counts for it, as between statements. In a handler,

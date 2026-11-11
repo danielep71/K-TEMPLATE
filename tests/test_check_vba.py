@@ -2149,6 +2149,58 @@ QUALIFIED_MEMBERS = [
 ]
 
 
+# The same name declared at two scope levels, as a value at one and a
+# procedure at the other: the nearer level decides, as in VBA. Each case is
+# (module-level declarations, parameters, local declaration, declaration of
+# another standard module, statement in the handler, whether the read of
+# Err.Number after it is stale).
+SAVED_PROPERTY = "Private Property Get Saved() As Object\nEnd Property"
+SAVED_FUNCTION = "Private Function Saved() As Long\nEnd Function"
+PRECEDENCE = {
+    "local-variable-over-own-property": (SAVED_PROPERTY, "", "Dim Saved As SavedError", "",
+                                         "Number = Saved.Number", False),
+    "own-property-over-other-variable": (SAVED_PROPERTY, "", "", "Public Saved As SavedError",
+                                         "Number = Saved.Number", True),
+    "own-property-over-other-variable-bare": (SAVED_PROPERTY, "", "",
+                                              "Public Saved As SavedError", "Number = Saved",
+                                              True),
+    "own-variable-over-other-function": ("Private Saved As SavedError", "", "",
+                                         "Public Function Saved() As Object\nEnd Function",
+                                         "Number = Saved.Number", False),
+    "own-variable-over-other-function-bare": ("Private Saved As Long", "", "",
+                                              "Public Function Saved() As Long\nEnd Function",
+                                              "Number = Saved", False),
+    "parameter-over-own-function": (SAVED_FUNCTION, "ByRef Saved As SavedError", "", "",
+                                    "Number = Saved.Number", False),
+    "parameter-over-own-function-bare": (SAVED_FUNCTION, "ByVal Saved As Long", "", "",
+                                         "Number = Saved", False),
+    "own-function-over-other-variable": (SAVED_FUNCTION, "", "", "Public Saved As SavedError",
+                                         "Number = Saved.Number", True),
+    "own-enum-over-other-variable": ("Private Enum Kind\n    kOne = 1\nEnd Enum", "", "",
+                                     "Public Kind As Object", "Number = Kind.kOne", False),
+    "own-variable-over-other-enum": ("Private Kind As Object", "", "",
+                                     "Public Enum Kind\n    kOne = 1\nEnd Enum",
+                                     "Number = Kind.kOne", True),
+    "local-variable-over-other-enum": ("", "", "Dim Kind As Object",
+                                       "Public Enum Kind\n    kOne = 1\nEnd Enum",
+                                       "Number = Kind.kOne", True),
+}
+
+
+def precedence_files(module_level: str, parameters: str, local: str, other: str,
+                     statement: str) -> dict[str, str | bytes]:
+    """The fixture of one PRECEDENCE case, with TEST_Codes for its Type."""
+    body = (f"{module_level}\n\n\nPrivate Sub First({parameters})\n"
+            f"        Dim Number As Long\n        {local}\n        On Error GoTo Handler\n"
+            f"        Exit Sub\nHandler:\n        {statement}\n        Number = Err.Number\n"
+            "End Sub\n")
+    files = {**standalone(module(body)), "tests/modules/TEST_Codes.bas": CODES}
+    if other:
+        files["tests/modules/TEST_Other.bas"] = ('Attribute VB_Name = "TEST_Other"\n'
+                                                 "Option Explicit\n" + other + "\n")
+    return files
+
+
 def resume_next_operation(statement: str) -> str:
     """``statement`` after On Error Resume Next, then a read of Err.Number."""
     return ("Private Sub First()\n"
@@ -2212,6 +2264,18 @@ class ErrorTest(unittest.TestCase):
                 self.assertTrue(findings[0].startswith(
                     "tests/modules/TEST_Fixture.bas:24: Err.Number read in First after line 23, "
                     "which may have changed Err with a call or member access"), findings)
+
+    def test_names_resolve_by_scope_level(self) -> None:
+        for name, (module_level, parameters, local, other, statement, stale) in \
+                PRECEDENCE.items():
+            with self.subTest(name=name):
+                files = precedence_files(module_level, parameters, local, other, statement)
+                findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(bool(findings), stale, findings)
+                if stale:
+                    self.assertEqual(len(findings), 1, findings)
+                    self.assertIn("TEST_Fixture.bas:", findings[0])
+                    self.assertIn("Err.Number read in First after line ", findings[0])
 
     def test_every_statement_can_fail_after_resume_next(self) -> None:
         for statement in RESUME_NEXT_OPERATIONS:
