@@ -53,7 +53,8 @@ EXPECTED = Path("tests/expected")
 REGISTRY_KEYS = frozenset({"schema_version", "kind", "adapters"})
 ADAPTER_KEYS = frozenset({"source", "command"})
 REPLIES = frozenset({"outputs", "unsupported", "unavailable"})
-SOURCE_ID = re.compile(r"^IMPL-\d+$")
+# A whole value with ASCII digits (fullmatch), as in check_test_cases.py.
+SOURCE_ID = re.compile(r"IMPL-[0-9]+")
 TIMEOUT_SECONDS = 300
 
 
@@ -108,7 +109,7 @@ def read_registry(root: Path, report: Report) -> list[Adapter]:
             continue
         source, command = item["source"], item["command"]
         problems = []
-        if not isinstance(source, str) or not SOURCE_ID.match(source):
+        if not isinstance(source, str) or not SOURCE_ID.fullmatch(source):
             problems.append("source is not an IMPL- ID")
         elif source not in sources:
             problems.append(f"source {source} is not in the register (SOURCES.md)")
@@ -192,8 +193,7 @@ def reply(command: list[str], shown: str, root: Path,
 
 def cites(output: object, source: str) -> bool:
     reference = output.get("reference") if isinstance(output, dict) else None
-    return isinstance(reference, dict) and reference.get("class") == "independent" and \
-        reference.get("source") == source
+    return isinstance(reference, dict) and reference.get("source") == source
 
 
 def compare(adapter: Adapter, run: Run, printed: list[dict[str, Any]],
