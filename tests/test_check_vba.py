@@ -1747,7 +1747,19 @@ ERRORS_VALID = {
     "array-element-in-a-handler": handler(
         "        Dim Values(1 To 2) As Long\n        Number = Values(1)\n"
         "        Text = Err.Description\n"),
+    "values-without-parentheses": (
+        "Private Const LIMIT As Long = 3\nPrivate Enum Mode\n    mdFirst = 1\nEnd Enum\n"
+        "Private mCount As Long\n\n\n" + handler(
+            "        Number = LIMIT\n        Number = mCount\n        Number = mdFirst\n"
+            "        Text = vbNullString\n        Text = Source\n        Number = First\n"
+            "        Number = Err.Number\n")),
+    "vba-qualified-pure-functions": handler(
+        "        Number = VBA.CLng(Err.Number)\n        Number = VBA.Len(Err.Source)\n"
+        "        Text = vba.cstr(Err.Description)\n        Source = Err.Source\n"),
 }
+# Procedures that the fixtures call without parentheses.
+DESCRIBE = "\n\nPrivate Function Describe() As Long\nEnd Function\n"
+LABEL = "\n\nPrivate Property Get Label() As String\nEnd Property\n"
 ERRORS_INVALID = {
     "after-a-call": (handler("        Helper\n        Report Err.Description\n"), 10,
                      "Err.Description read in First after line 9, which may have changed Err "
@@ -1788,6 +1800,19 @@ ERRORS_INVALID = {
                                            "        Select Case Err.Number\n"
                                            "        End Select\n"), 9,
                                    "Err.Number read in First after line 8"),
+    "after-a-function-without-parentheses": (
+        handler("        Number = Describe\n        Text = Err.Description\n") + DESCRIBE, 10,
+        "Err.Description read in First after line 9, which may have changed Err"),
+    "after-a-property-without-parentheses": (
+        handler("        Text = Label\n        Number = Err.Number\n") + LABEL, 10,
+        "Err.Number read in First after line 9"),
+    "after-a-declare-without-parentheses": (
+        'Private Declare PtrSafe Function GetTickCount Lib "kernel32" () As Long\n'
+        + handler("        Number = GetTickCount\n        Source = Err.Source\n"), 11,
+        "Err.Source read in First after line 10"),
+    "after-a-host-global-without-parentheses": (
+        handler("        Text = ActiveCell\n        Number = Err.Number\n"), 10,
+        "Err.Number read in First after line 9"),
 }
 ALL_ENVIRONMENTS = "[vba6-win32, vba7-win32, vba7-win64]"
 

@@ -7,17 +7,21 @@ cleared or may have replaced the error it means to read:
 
 - an ``On Error`` statement, which clears ``Err``;
 - in an error handler, a call or a member access (``Helper``, ``x = Helper(1)``,
-  ``obj.Method``, ``Debug.Print``, ``Application.StatusBar = ...``,
-  ``Err.Clear``, ``New``), which can run code that clears or replaces it.
+  ``x = Helper`` without parentheses, ``obj.Method``, ``Debug.Print``,
+  ``Application.StatusBar = ...``, ``Err.Clear``, ``New``), which can run code
+  that clears or replaces it. A name without parentheses is a call unless it
+  is a variable, a constant, an Enum member or a component: a function,
+  property or Declare of the project, or a host global such as ActiveCell.
+  Names that start with ``vb`` or ``xl`` are the constants of VBA and Excel.
 
 After ``On Error Resume Next``, and outside a handler, ``Err`` belongs to the
 most recent statement that can fail, so a read after such a statement checks
 that statement and is not reported. A plain copy into a variable
 (``n = Err.Number``) and a literal change nothing. The VBA functions of
-PURE_FUNCTIONS (``CLng``, ``CStr``, ``Len``, ...), arithmetic, concatenation
-and an array element can fail but run no code that clears ``Err``: in a
-handler they change nothing, and after ``On Error Resume Next`` they are a
-statement that can fail.
+PURE_FUNCTIONS (``CLng``, ``CStr``, ``Len``, ..., also written ``VBA.CLng``),
+arithmetic, concatenation and an array element can fail but run no code that
+clears ``Err``: in a handler they change nothing, and after ``On Error Resume
+Next`` they are a statement that can fail.
 
 A segment starts at each label and after each branch or loop statement:
 ``If``, ``Select Case``, ``Do``, ``For``, ``While``, ``Exit``, ``Resume``,
@@ -79,7 +83,8 @@ PLAIN_TARGET = re.compile(r"[A-Za-z_]\w*[%&!#@$]?")
 HEAD = re.compile(r"^(?:Call\s+)?\.?[A-Za-z_]\w*[%&!#@$]?(?:\s*[.!]\s*[A-Za-z_]\w*[%&!#@$]?)*",
                   re.IGNORECASE)
 CALL = re.compile(r"(?<![\w.!#])([A-Za-z_]\w*)[%&!#@$]?\s*\(")
-NAME = re.compile(r"(?<![\w.!#])([A-Za-z_]\w*)\b(?![%&!#@$]?\s*\()")
+# A name not followed by an argument list or by := (a named argument).
+NAME = re.compile(r"(?<![\w.!#])([A-Za-z_]\w*)\b(?![%&!#@$]?\s*\()(?!\s*:=)")
 # A ! before a name is a member access, as in Me!txtAmount; x! is a Single.
 MEMBER = re.compile(r"\.\s*[A-Za-z_]|![A-Za-z_]")
 NEW = re.compile(r"\bNew\s+[A-Za-z_]", re.IGNORECASE)
@@ -91,9 +96,15 @@ PURE_FUNCTIONS = frozenset("""
     abs array asc ascw cbool cbyte ccur cdate cdbl cdec chr chrw cint clng clnglng clngptr csng
     cstr cvar cverr dateserial day fix format hex iif instr instrrev int isarray isdate isempty
     iserror ismissing isnull isnumeric isobject join lbound lcase left len lenb ltrim mid month
-    oct replace right round rtrim sgn space split str strcomp string trim typename ubound ucase
-    val vartype year
+    now oct replace right round rtrim sgn space split str strcomp string time timer trim typename
+    ubound ucase val vartype year
 """.split())
+# The same functions qualified by their library, as in VBA.CLng(x): not a
+# member access of an object.
+VBA_PURE = re.compile(rf"(?<![\w.!])VBA\s*\.\s*(?=(?:{'|'.join(sorted(PURE_FUNCTIONS))})\b)",
+                      re.IGNORECASE)
+# Prefixes of the constants of VBA (vbCrLf) and Excel (xlUp), which are values.
+CONSTANT_PREFIXES = ("vb", "xl")
 # Words that may stand in an expression without being a value that can fail.
 WORDS = frozenset("""
     and as byref byval call case do each else elseif empty end eqv erl err error exit false for
@@ -156,8 +167,15 @@ def arithmetic(text: str) -> bool:
 
 
 def effect(text: str, variables: frozenset[str]) -> Effect:
-    """What evaluating the expression ``text`` can do to Err; strings are blanked."""
+    """What evaluating the expression ``text`` can do to Err; strings are blanked.
+
+    ``variables`` are the names that hold a value: a name followed by
+    parentheses is an array element when it is one of them, and a call
+    otherwise. A bare name that is none of them is a call too: a function or
+    property of the project, a Declare, or a member of the host's global
+    object, such as ActiveSheet, called without parentheses."""
     text = ERR_READ.sub(lambda match: "0" * len(match.group()), text)
+    text = VBA_PURE.sub("", text)
     text = NUMBER_LITERAL.sub(lambda match: "0" * len(match.group()), dates_as_values(text))
     result = Effect(fails=arithmetic(text))
     if MEMBER.search(text) or NEW.search(text):
@@ -170,9 +188,9 @@ def effect(text: str, variables: frozenset[str]) -> Effect:
         result = result | Effect(True, not pure)
     for match in NAME.finditer(text):
         name = match.group(1).casefold()
-        # A name that is no variable may be a function called without parentheses.
-        if name not in WORDS and name not in variables and not name.startswith("vb"):
-            result = result | Effect(fails=True)
+        if name in WORDS or name in variables or name.startswith(CONSTANT_PREFIXES):
+            continue
+        result = result | Effect(True, name not in PURE_FUNCTIONS)
     return result
 
 
@@ -314,24 +332,29 @@ def procedures(source: str) -> list[Procedure]:
     return found
 
 
-def variable_names(module: Module, public: frozenset[str], line: int) -> frozenset[str]:
-    """The names the procedure at ``line`` can read without calling anything."""
-    local = next((procedure.names for procedure in module.procedures if procedure.line == line),
-                 set())
-    return frozenset(local | module.names | public)
+def variable_names(module: Module, values: frozenset[str], line: int) -> frozenset[str]:
+    """The names the procedure at ``line`` reads without calling anything: its
+    parameters and variables, its own name (its result), the module's
+    variables, constants and Enum members, and ``values``, the names of the
+    components and the public values of the standard modules. A procedure,
+    property or Declare of the module is not one of them."""
+    procedure = next((item for item in module.procedures if item.line == line), None)
+    local = procedure.names | {procedure.name.casefold()} if procedure else set()
+    return frozenset(local | (module.names - module.callables) | values)
 
 
 def analyze(modules: dict[str, str]) -> tuple[list[Finding], int]:
     """The findings of one environment's sources, and how many procedures it has."""
     scanned = {path: scan(path, source) for path, source in modules.items()}
-    public = frozenset(name for module in scanned.values() if module.standard
-                       for name in module.public)
+    values = frozenset({Path(path).stem.casefold() for path in modules} | {
+        name for module in scanned.values() if module.standard
+        for name in module.public - module.public_callables})
     findings: list[Finding] = []
     count = 0
     for path, source in modules.items():
         for procedure in procedures(source):
             count += 1
-            variables = variable_names(scanned[path], public, procedure.line)
+            variables = variable_names(scanned[path], values, procedure.line)
             findings += check_procedure(path, procedure, variables)
     return findings, count
 
