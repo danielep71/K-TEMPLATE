@@ -41,9 +41,11 @@ without ``Call`` and named arguments, or the ``Error`` statement; a
   body may change the handler and an ``Exit`` leaves the loop, a later pass
   may leave in another state, so the state is unknown. Raises in the body
   are checked in the first pass only.
-- A ``GoSub`` or ``On ... GoSub`` whose subroutine runs an ``On Error``
-  statement or another ``GoSub`` before its ``Return`` makes the state
-  unknown; a raise inside the subroutine is not checked.
+- A ``GoSub`` or ``On ... GoSub`` keeps the state only if its subroutine
+  runs straight to an unconditional ``Return``: no label, block, one-line
+  ``If``, jump, ``Exit``, ``End``, raise or ``On Error`` statement before
+  it. Any other subroutine, or a missing one, makes the state unknown. A
+  raise inside a subroutine is not checked.
 - A target inside blocks stays inside them: at the next ``ElseIf``,
   ``Else`` or ``Case`` of an enclosing block, the path skips to that block's
   end. At the end of an enclosing loop, the path continues after the loop
@@ -113,7 +115,9 @@ ERR_RAISE = re.compile(r"(?<![\w.])(?:VBA\s*\.\s*)?Err\s*\.\s*Raise\b", re.IGNOR
 # expression are functions, and never start a statement.
 ERROR_STATEMENT = re.compile(r"^Error\b(?!\s*\$)\s*\S", re.IGNORECASE)
 COMBINED_NEXT = re.compile(r"^Next\s+(\w+(?:\s*,\s*\w+)+)$", re.IGNORECASE)
-SUBROUTINE_END = re.compile(r"^(?:Return|Exit\s+(?:Sub|Function|Property)|End)$", re.IGNORECASE)
+# A jump or exit that keeps a subroutine from running straight to its Return.
+BRANCH_JUMP = re.compile(r"(?<![\w.])(?:GoTo|GoSub|Resume|Return)\b|^(?:Exit|End)\b",
+                         re.IGNORECASE)
 ONE_LINE_IF = re.compile(r"^(If\b.*?\bThen)\s+(\S.*)$", re.IGNORECASE)
 ONE_LINE_ELSE = re.compile(r"(?<![\w.])Else\b", re.IGNORECASE)
 CASE_ELSE = re.compile(r"^Case\s+Else$", re.IGNORECASE)
@@ -466,22 +470,33 @@ def outer_statement(steps: list[Step], index: int, state: str, blocks: list[Bloc
     return None
 
 
+def straight_subroutine(steps: list[Step], label: int) -> bool:
+    """Whether the subroutine at ``steps[label]`` runs straight to a
+    ``Return``: no label, block, one-line If, jump, exit, raise or
+    ``On Error`` statement before it."""
+    for step in steps[label + 1:]:
+        code = step.code
+        if code.casefold() == "return":
+            return True
+        if step.label is not None or BLOCK_IF.match(code) or SELECT.match(code) \
+                or BRANCH.match(code) or BLOCK_END.match(code) or LOOP_OPEN.match(code) \
+                or LOOP_CLOSE.match(code) or BRANCH_JUMP.search(code) \
+                or ON_ERROR_SET.search(code) or ERR_RAISE.search(code) \
+                or ERROR_STATEMENT.match(code):
+            return False
+    return False
+
+
 def subroutine_changes_handler(steps: list[Step], code: str) -> bool:
-    """Whether a ``GoSub`` in ``code`` may change the handler: its
-    subroutine runs an ``On Error`` statement, or calls another subroutine,
-    between its target label and its ``Return`` or exit."""
+    """Whether a ``GoSub`` in ``code`` may leave the handler in another
+    state: only a subroutine that runs straight to its ``Return`` keeps it,
+    and one whose label is missing does not."""
     labels = {step.label.casefold(): index for index, step in enumerate(steps)
               if step.label is not None}
-    for operation, target in statement_jumps(code):
-        if operation.casefold() != "gosub" or target.casefold() not in labels:
-            continue
-        for step in steps[labels[target.casefold()]:]:
-            if SUBROUTINE_END.match(step.code):
-                break
-            if ON_ERROR_SET.search(step.code) or any(
-                    nested.casefold() == "gosub" for nested, _ in statement_jumps(step.code)):
-                return True
-    return False
+    return any(target.casefold() not in labels
+               or not straight_subroutine(steps, labels[target.casefold()])
+               for operation, target in statement_jumps(code)
+               if operation.casefold() == "gosub")
 
 
 def trapped_raises(steps: list[Step], start: int, handler: str

@@ -676,7 +676,88 @@ End Sub
 '''))
 
 
+SAFE = "On Error GoTo 0: Err.Raise 5"
+# Valid cleanups after "Resume Cleanup": every raise runs with the handler
+# disabled, or is not trapped by a local handler. None may be reported.
+SAFE_CLEANUPS = {
+    "plain": f"Cleanup:\n        {SAFE}\n",
+    "separate-lines": "Cleanup:\n        On Error GoTo 0\n        Err.Raise 5\n",
+    "goto-minus-one-then-zero": "Cleanup:\n        On Error GoTo -1\n        On Error GoTo 0\n"
+                                "        Err.Raise 5\n",
+    "block-if": f"Cleanup:\n        If Flag Then\n            {SAFE}\n        End If\n",
+    "if-else": f"Cleanup:\n        If Flag Then\n            {SAFE}\n        Else\n"
+               "            Debug.Print 0\n        End If\n",
+    "if-elseif": f"Cleanup:\n        If Flag Then\n            Debug.Print 0\n"
+                 f"        ElseIf Index = 1 Then\n            {SAFE}\n        End If\n",
+    "else-colon": f"Cleanup:\n        If Flag Then\n            Debug.Print 0\n"
+                  f"        Else: {SAFE}\n        End If\n",
+    "one-line-if": f"Cleanup:\n        If Flag Then {SAFE}\n",
+    "one-line-if-else": f"Cleanup:\n        If Flag Then Debug.Print 0 Else {SAFE}\n",
+    "nested-one-line-if": f"Cleanup:\n        If Flag Then If Index = 1 Then {SAFE}\n",
+    "one-line-if-with-a-colon": f"Cleanup:\n        If Flag Then: {SAFE}\n",
+    "select-case": f"Cleanup:\n        Select Case Index\n        Case 1\n            {SAFE}\n"
+                   "        Case Else\n            Debug.Print 0\n        End Select\n",
+    "case-colon": f"Cleanup:\n        Select Case Index\n        Case 1: {SAFE}\n"
+                  "        End Select\n",
+    "for": f"Cleanup:\n        For Index = 1 To 2\n            {SAFE}\n        Next Index\n",
+    "for-each-combined-next": "Cleanup:\n        For Each Item In Items\n"
+                              f"            For Each Other In Item\n                {SAFE}\n"
+                              "        Next Other, Item\n",
+    "do-while": f"Cleanup:\n        Do While Flag\n            {SAFE}\n        Loop\n",
+    "do-until": f"Cleanup:\n        Do Until Flag\n            {SAFE}\n        Loop\n",
+    "loop-until": f"Cleanup:\n        Do\n            {SAFE}\n        Loop Until Flag\n",
+    "bare-loop": f"Cleanup:\n        Do\n            If Flag Then Exit Do\n        Loop\n"
+                 f"        {SAFE}\n",
+    "while-wend": f"Cleanup:\n        While Flag\n            {SAFE}\n        Wend\n",
+    "exit-for": f"Cleanup:\n        For Index = 1 To 2\n            If Flag Then Exit For\n"
+                f"        Next Index\n        {SAFE}\n",
+    "with": f"Cleanup:\n        With Application\n            {SAFE}\n        End With\n",
+    "straight-subroutine": f"Cleanup:\n        GoSub Restore\n        {SAFE}\n        Exit Sub\n"
+                           "Restore:\n        Debug.Print 0\n        Return\n",
+    "branching-subroutine": "Cleanup:\n        GoSub Disarm\n        Err.Raise 5\n        Exit Sub\n"
+                            "Disarm:\n        If Flag Then Exit Sub\n        On Error GoTo 0\n"
+                            "        Return\n",
+    "computed-gosub": "Cleanup:\n        On Index GoSub Disarm\n        Err.Raise 5\n"
+                      "        Exit Sub\nDisarm:\n        On Error GoTo 0\n        Return\n",
+    "computed-goto": f"Cleanup:\n        On Index GoTo Finish\n        {SAFE}\nFinish:\n",
+    "second-label": f"Cleanup:\n        Debug.Print 0\nRestore:\n        {SAFE}\n",
+    "label-with-code": f"Cleanup: {SAFE}\n",
+    "exit-before": "Cleanup:\n        If Flag Then Exit Sub\n        Stop\n"
+                   f"        {SAFE}\n",
+    "goto-skips": "Cleanup:\n        GoTo Finish\n        Err.Raise 5\nFinish:\n",
+    "conditional-compilation": f"Cleanup:\n#If VBA7 Then\n        {SAFE}\n#Else\n"
+                               f"        {SAFE}\n#End If\n",
+    "continued-line": "Cleanup:\n        On Error GoTo 0: Err.Raise 5, _\n"
+                      "            \"TEST_Fixture.First\"\n",
+    "named-arguments": "Cleanup:\n        On Error GoTo 0\n        VBA.Err.Raise Number:=5, "
+                       "Description:=\"Err.Raise\"\n",
+    "call-raise": "Cleanup:\n        On Error GoTo 0\n        Call Err.Raise(5)\n",
+    "error-statement": "Cleanup:\n        On Error GoTo 0\n        Error 5\n",
+    "resume-next": "Cleanup:\n        On Error Resume Next\n        Err.Raise 5\n",
+    "raise-in-text": "Cleanup:\n        Debug.Print \"Err.Raise 5\" ' Err.Raise 6\n",
+    "nested-blocks": "Cleanup:\n        Select Case Index\n        Case 1\n"
+                     "            For Index = 1 To 2\n                If Flag Then\n"
+                     f"                    {SAFE}\n                End If\n"
+                     "            Next Index\n        End Select\n",
+}
+
+
 class JumpTest(unittest.TestCase):
+    def test_safe_cleanups_are_not_reported(self) -> None:
+        for name, blocks in SAFE_CLEANUPS.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
+        with self.subTest(name="line-numbers"):
+            numbered = '''Private Sub First()
+        On Error GoTo 900
+        Debug.Print 1 / 0
+100     On Error GoTo 0: Err.Raise 5
+        Exit Sub
+900     Resume 100
+End Sub
+'''
+            self.assertEqual(run_check(check_vba_jumps.check, standalone(module(numbered))), [])
+
     def test_valid_fixtures_pass(self) -> None:
         self.assertEqual(run_check(check_vba_jumps.check, VALID), [])
         for name, body in JUMPS_VALID.items():
@@ -977,6 +1058,16 @@ Cleanup:
             On Error GoTo Handler
         Loop
         Err.Raise 5
+''',
+            # The subroutine branches before its Return, so the state is unknown.
+            "branching-subroutine-disables-the-handler": '''Cleanup:
+        GoSub Disarm
+        Err.Raise 5
+        Exit Sub
+Disarm:
+        If Flag Then Exit Sub
+        On Error GoTo 0
+        Return
 ''',
             "nested-subroutine-disables-the-handler": '''Cleanup:
         GoSub Outer

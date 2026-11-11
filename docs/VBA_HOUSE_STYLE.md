@@ -234,8 +234,10 @@ What they cannot prove:
   known only at run time. A `Resume <label>` that runs only under a
   condition, as in a retry, starts no path either. Where branches, later
   passes of a loop or a `GoSub` may leave the handler in different states,
-  it reports nothing, and it checks a raise in a loop body in the first
-  pass only;
+  it reports nothing; after a `GoSub`, that is the case unless the
+  subroutine runs straight to its `Return` with no branch, jump, raise or
+  `On Error` statement. It checks a raise in a loop body in the first pass
+  only, and never inside a subroutine;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 
