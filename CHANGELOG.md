@@ -416,10 +416,11 @@ milestones and their pull requests.
   which **Repository integrity** runs as `vba-errors`. In each compilation
   environment, it reports a read of `Err.Number`, `Err.Source` or
   `Err.Description` that follows, on straight-line code, an `On Error`
-  statement or, in an error handler, a call or member access, so that a
-  handler cannot report or raise again an error that another statement has
-  cleared or replaced. The [house style](docs/VBA_HOUSE_STYLE.md#static-checks)
-  lists what it cannot see (#396).
+  statement or `Err.Clear`, also written `Call Err.Clear`, or, in an error
+  handler, a call or member access, so that a handler cannot report or raise
+  again an error that another statement has cleared or replaced. The
+  [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
+  see (#396, #419).
 
 ### Changed
 

@@ -1873,6 +1873,12 @@ ERRORS_INVALID = {
     "resume-next-err-clear": (
         guarded("        Helper\n        Err.Clear\n        Text = Err.Description\n"), 9,
         "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
+    "resume-next-call-err-clear": (
+        guarded("        Helper\n        Call Err.Clear\n        Text = Err.Description\n"), 9,
+        "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
+    "resume-next-call-err-clear-with-parentheses": (
+        guarded("        Helper\n        Call VBA.Err.Clear()\n        Number = Err.Number\n"), 9,
+        "Err.Number read in First after line 8, which cleared Err with Err.Clear"),
     "select-case-after-on-error": (guarded("        Helper\n        On Error GoTo 0\n"
                                            "        Select Case Err.Number\n"
                                            "        End Select\n"), 9,
