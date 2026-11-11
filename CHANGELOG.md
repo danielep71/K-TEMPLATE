@@ -63,6 +63,17 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- An eighth static check of exported VBA source, `tools/check_vba_errors.py`,
+  which **Repository integrity** runs as `vba-errors`. In each compilation
+  environment, it reports a read of `Err.Number`, `Err.Source` or
+  `Err.Description` that follows, on straight-line code, an `On Error`
+  statement or, in an error handler, a call or member access, so that a
+  handler cannot report or raise again an error that another statement has
+  cleared or replaced. The [house style](docs/VBA_HOUSE_STYLE.md#static-checks)
+  lists what it cannot see (#396).
+
 ### Fixed
 
 - The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims
