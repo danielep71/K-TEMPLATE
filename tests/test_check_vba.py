@@ -1709,6 +1709,14 @@ def guarded(statements: str) -> str:
             "Private Sub Report(ByVal Value As Variant)\nEnd Sub\n")
 
 
+def fetch(result: str, statements: str) -> str:
+    """A function declared with ``result``, whose handler, from line 9, runs
+    ``statements``."""
+    return (f"Private Function Fetch(ByVal Retry As Boolean){result}\n"
+            "        Dim Number As Long\n        On Error GoTo Handler\n"
+            "        Exit Function\nHandler:\n" + statements + "End Function\n")
+
+
 ERRORS_VALID = {
     "copied-before-any-call": handler(
         "        Number = Err.Number\n        Source = Err.Source\n"
@@ -1785,6 +1793,17 @@ ERRORS_VALID = {
     "read-as-an-argument-before-a-call": handler(
         "        Report Err.Number, Describe()\n")
     + "\n\nPrivate Function Describe() As Long\nEnd Function\n",
+    "single-line-if-branch-reads-first": handler("        If Retry Then Report Err.Number\n"),
+    "single-line-if-branches-exclude-each-other": handler(
+        "        If Retry Then Helper Else Report Err.Number\n"),
+    "nested-single-line-if-else-belongs-to-the-inner-if": handler(
+        "        If Retry Then If Number = 0 Then Helper Else Report Err.Number\n"),
+    "own-name-is-the-result-variable": fetch(
+        " As Long", "        Fetch = 1\n        Number = Fetch\n        Number = Err.Number\n"),
+    "own-name-indexes-an-array-result": fetch(
+        " As Long()", "        Number = Fetch(1)\n        Number = Err.Number\n"),
+    "own-name-indexes-a-variant-result": fetch(
+        "", "        Number = Fetch(1)\n        Number = Err.Number\n"),
     "resume-next-qualified-conversion-can-fail": guarded(
         '        Number = VBA.CLng("bad")\n        Number = Err.Number\n'),
     "resume-next-qualified-len-can-fail": guarded(
@@ -1888,6 +1907,18 @@ ERRORS_INVALID = {
         handler("        Helper\n        With Err\n            Number = .Number\n"
                 "        End With\n"), 11,
         "Err.Number read in First after line 9"),
+    "single-line-if-call-then-read-in-the-same-branch": (
+        handler("        If Retry Then Helper: Report Err.Number\n"), 9,
+        "Err.Number read in First after line 9, which may have changed Err"),
+    "single-line-if-call-then-read-in-the-else-branch": (
+        handler("        If Retry Then Report 1 Else Helper: Report Err.Source\n"), 9,
+        "Err.Source read in First after line 9"),
+    "single-line-if-condition-call-then-read": (
+        handler("        If Describe() Then Report Err.Number\n") + DESCRIBE, 9,
+        "Err.Number read in First after line 9"),
+    "recursive-call": (
+        fetch(" As Long", "        Number = Fetch(True)\n        Number = Err.Number\n"), 10,
+        "Err.Number read in Fetch after line 9, which may have changed Err"),
     "call-before-a-read-in-the-same-statement": (
         handler("        Number = Describe() + Err.Number\n") + DESCRIBE, 9,
         "Err.Number read in First after a call or member access that the same statement "

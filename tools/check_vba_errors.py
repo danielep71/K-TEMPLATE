@@ -54,9 +54,16 @@ procedure and ``Erl`` are not followed.
 A segment starts at each label and after each branch or loop statement:
 ``If``, ``Select Case``, ``Do``, ``For``, ``While``, ``Exit``, ``Resume``,
 ``GoTo``, ``Return`` and the statements that close them end the segment
-being tracked, and a single-line ``If`` ends it with its whole line. What
-follows a branch is never claimed, so a finding is a read that is stale on
-every path to it. Each compilation environment of check_vba_conditionals.py
+being tracked. A single-line ``If`` is read as its condition, then each
+branch on its own, as the statements it runs from the state after the
+condition (an ``Else`` belongs to the nearest ``If``); the segment ends
+after the line. What follows a branch is never claimed, so a finding is a
+read that is stale on every path to it.
+
+Inside a Function or Property Get, its own name is the result variable,
+and with an argument list, as in ``Fetch(True)``, a call of itself, unless
+the declared result is an array or a Variant, which an index may read: then
+it counts as an element of the result. Each compilation environment of check_vba_conditionals.py
 is analyzed separately, and a finding names the environments it occurs in.
 """
 
@@ -66,7 +73,7 @@ import argparse
 import re
 import sys
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from check_vba_calls import dates_as_values
@@ -88,9 +95,13 @@ ERR_READ = re.compile(r"(?<![\w.!])(?:VBA\s*\.\s*)?Err\s*\.\s*(Number|Source|Des
 ON_ERROR = re.compile(r"^On\s+Error\b", re.IGNORECASE)
 RESUME_NEXT = re.compile(r"^On\s+Error\s+Resume\s+Next\b", re.IGNORECASE)
 HANDLER = re.compile(r"\bOn\s+Error\s+GoTo\s+([A-Za-z_]\w*|\d+)", re.IGNORECASE)
-IF_START = re.compile(r"^If\b", re.IGNORECASE)
-# The branches of an If, as in If x Then a Else b: separators, not values.
-IF_KEYWORDS = re.compile(r"^If\b|\b(?:Then|Else)\b", re.IGNORECASE)
+# A single-line If: its condition and the statements after Then, which
+# may hold an Else and the statements after it.
+SINGLE_LINE_IF = re.compile(r"^If\b(?P<condition>.*?)\bThen\b(?P<tail>.*)$", re.IGNORECASE)
+IF_OR_ELSE = re.compile(r"\b(?:If|Else)\b", re.IGNORECASE)
+# The declared result of a function or Property Get, after its parameters.
+RESULT_TYPE = re.compile(r"^\s*As\s+(?P<type>[A-Za-z_][\w.]*)\s*(?P<array>\(\s*\))?",
+                         re.IGNORECASE)
 # Any property of Err as an assignment target, as in Err.Description = x.
 ERR_TARGET = re.compile(r"(?:VBA\s*\.\s*)?Err\s*\.\s*[A-Za-z_]\w*", re.IGNORECASE)
 WITH_ERR = re.compile(r"^With\s+(?:VBA\s*\.\s*)?Err\s*$", re.IGNORECASE)
@@ -194,7 +205,30 @@ class Segment:
 class Procedure:
     name: str
     line: int
+    header: str = ""
     units: list[tuple[int, str | None, list[str]]] = field(default_factory=list)
+
+    @property
+    def calls_itself_with_arguments(self) -> bool:
+        """Whether its own name with an argument list, as in Fetch(True), is a
+        call of itself rather than an element of its result: a Function or
+        Property Get whose declared result is neither an array nor a Variant,
+        which may hold one. Without a declared type, the result is a Variant,
+        unless a type suffix, as in Fetch$, gives one."""
+        opener = is_procedure(self.header)
+        if opener is None or opener.group(1).split()[0].casefold() not in {"function", "property"}:
+            return False
+        if opener.group(1).casefold().replace(" ", "") in {"propertylet", "propertyset"}:
+            return False
+        rest = self.header[opener.end():]
+        suffix = rest[:1] in tuple("%&!#@$")
+        rest = rest[1:] if suffix else rest
+        start = rest.find("(")
+        end = closing_parenthesis(rest, start) if start >= 0 and not rest[:start].strip() else None
+        result = RESULT_TYPE.match(rest[end + 1:] if end is not None else rest)
+        if result is None:
+            return suffix
+        return result.group("array") is None and result.group("type").casefold() != "variant"
 
 
 @dataclass(frozen=True)
@@ -206,6 +240,9 @@ class Names:
 
     values: frozenset[str] = frozenset()
     callables: frozenset[str] = frozenset()
+    # Values whose name with an argument list calls a procedure: the
+    # procedure's own name when it calls itself, as in Fetch(True).
+    calls: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -251,7 +288,9 @@ def effect(text: str, names: Names) -> Effect:
         result = Effect(True, True)
     for match in CALL.finditer(text):
         name = match.group(1).casefold()
-        if name in names.values:
+        if name in names.calls:
+            result = Effect(True, True)
+        elif name in names.values:
             result = result | Effect(fails=True)
         elif name in names.callables:
             result = Effect(True, True)
@@ -399,31 +438,16 @@ def stale_reads(reads: str, segment: Segment, names: Names) -> list[re.Match[str
     return stale
 
 
-def check_statement(path: str, procedure: Procedure, line: int, statement: str,
-                    segment: Segment, names: Names) -> list[Finding]:
-    """Read one statement against ``segment``, then apply its effect on Err."""
+def judge(path: str, procedure: Procedure, line: int, reads: str, total: Effect,
+          segment: Segment, names: Names) -> list[Finding]:
+    """Report the stale reads of ``reads``, then apply ``total`` to ``segment``."""
     findings: list[Finding] = []
-    if JOIN.match(statement):
-        segment.restart()
-        return findings
-    if ON_ERROR.match(statement):
-        segment.stale = (line, "which cleared Err with an On Error statement")
-        segment.resume_next = bool(RESUME_NEXT.match(statement))
-        return findings
-    branch = BRANCH.match(statement)
-    if branch:
-        reads = IF_KEYWORDS.sub(" , ", statement) if IF_START.match(statement) else statement
-        total = Effect()
-    else:
-        reads, total = statement_effect(statement, names)
     stale = stale_reads(reads, segment, names)
     if stale:
         cause = (f"line {segment.stale[0]}, {segment.stale[1]}" if segment.stale else
                  "a call or member access that the same statement evaluates first")
         findings.append(Finding(path, line, stale_message(procedure.name, stale, cause)))
-    if branch:
-        segment.restart()
-    elif segment.follows_last_failure:
+    if segment.follows_last_failure:
         if total.fails:
             segment.stale = None
     elif total.changes and segment.stale is None:
@@ -431,27 +455,93 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
     return findings
 
 
+def check_statement(path: str, procedure: Procedure, line: int, statement: str,
+                    segment: Segment, names: Names) -> list[Finding]:
+    """Read one statement against ``segment``, then apply its effect on Err."""
+    if JOIN.match(statement):
+        segment.restart()
+        return []
+    if ON_ERROR.match(statement):
+        segment.stale = (line, "which cleared Err with an On Error statement")
+        segment.resume_next = bool(RESUME_NEXT.match(statement))
+        return []
+    if BRANCH.match(statement):
+        # Its expression runs first; what follows is reached from elsewhere too.
+        condition = SINGLE_LINE_IF.match(statement)
+        reads = condition.group("condition") if condition else statement
+        findings = judge(path, procedure, line, reads, Effect(), segment, names)
+        segment.restart()
+        return findings
+    reads, total = statement_effect(statement, names)
+    return judge(path, procedure, line, reads, total, segment, names)
+
+
+def split_else(tail: str) -> tuple[str, str | None]:
+    """The statements after Then of a single-line If, and those after its
+    Else, if any. An Else belongs to the nearest If before it that has none,
+    as in If a Then If b Then x Else y, where y runs when b is False."""
+    open_ifs = 0
+    for match in IF_OR_ELSE.finditer(tail):
+        if match.group().casefold() == "if":
+            open_ifs += 1
+        elif open_ifs:
+            open_ifs -= 1
+        else:
+            return tail[:match.start()], tail[match.end():]
+    return tail, None
+
+
+def check_single_line_if(path: str, procedure: Procedure, line: int, text: str,
+                         segment: Segment, names: Names) -> list[Finding]:
+    """Read a single-line If: its condition, then each branch as the
+    statements it runs, from the state after the condition. The branches
+    exclude each other, and the segment ends after the If."""
+    match = SINGLE_LINE_IF.match(text)
+    if match is None:
+        return check_statement(path, procedure, line, text, segment, names)
+    condition = match.group("condition")
+    findings = judge(path, procedure, line, condition, effect(condition, names), segment, names)
+    for branch in split_else(match.group("tail")):
+        if branch is not None:
+            findings += check_statements(path, procedure, line, split_statements(branch),
+                                         replace(segment), names, [])
+    segment.restart()
+    return findings
+
+
+def check_statements(path: str, procedure: Procedure, line: int, statements: list[str],
+                     segment: Segment, names: Names, with_err: list[bool]) -> list[Finding]:
+    """Read the statements of one line in order; ``with_err`` holds, for each
+    open With block, whether it is on Err, whose .Number reads Err.Number."""
+    findings: list[Finding] = []
+    for index, statement in enumerate(statements):
+        if with_err and with_err[-1]:
+            statement = WITH_MEMBER.sub("Err.", statement)
+        single = SINGLE_LINE_IF.match(statement)
+        if single and (single.group("tail").strip() or index < len(statements) - 1):
+            # The rest of the line belongs to the If's branches.
+            rest = [WITH_MEMBER.sub("Err.", item) if with_err and with_err[-1] else item
+                    for item in statements[index + 1:]]
+            return findings + check_single_line_if(path, procedure, line,
+                                                   " : ".join([statement, *rest]), segment,
+                                                   names)
+        findings += check_statement(path, procedure, line, statement, segment, names)
+        if WITH.match(statement):
+            with_err.append(bool(WITH_ERR.match(statement)))
+        elif END_WITH.match(statement) and with_err:
+            with_err.pop()
+    return findings
+
+
 def check_procedure(path: str, procedure: Procedure, names: Names) -> list[Finding]:
     handlers = handler_labels(procedure)
     segment = Segment()
     findings: list[Finding] = []
-    # Whether each open With block is on Err, whose .Number reads Err.Number.
     with_err: list[bool] = []
     for line, label, statements in procedure.units:
         if label is not None:
             segment.restart(in_handler=label.casefold() in handlers)
-        for statement in statements:
-            if with_err and with_err[-1]:
-                statement = WITH_MEMBER.sub("Err.", statement)
-            findings += check_statement(path, procedure, line, statement, segment, names)
-            if WITH.match(statement):
-                with_err.append(bool(WITH_ERR.match(statement)))
-            elif END_WITH.match(statement) and with_err:
-                with_err.pop()
-            if IF_START.match(statement):
-                # The rest of the line belongs to a single-line If's branches.
-                segment.restart()
-                break
+        findings += check_statements(path, procedure, line, statements, segment, names, with_err)
     return findings
 
 
@@ -470,7 +560,7 @@ def procedures(source: str) -> list[Procedure]:
         for statement in split_statements(code):
             opener = is_procedure(statement)
             if opener:
-                current = owner = Procedure(opener.group(2), line)
+                current = owner = Procedure(opener.group(2), line, statement)
                 found.append(current)
             elif PROC_CLOSE.match(statement):
                 current = None
@@ -508,6 +598,8 @@ def analyze(modules: dict[str, str]) -> tuple[list[Finding], int]:
         for procedure in procedures(source):
             count += 1
             names = procedure_names(scanned[path], project, procedure.line)
+            if procedure.calls_itself_with_arguments:
+                names = replace(names, calls=frozenset({procedure.name.casefold()}))
             findings += check_procedure(path, procedure, names)
     return findings, count
 

@@ -230,7 +230,13 @@ What they cannot prove:
   - a label and a branch or loop statement (`If`, `Select Case`, `Do`,
     `For`, `While`, `Exit`, `Resume`, `GoTo`) end what it tracks, and it
     does not read the conditions of `ElseIf`, `Case` and `Loop While`, so a
-    stale read after a branch, a loop or a jump is missed;
+    stale read after a branch, a loop or a jump is missed. A single-line `If`
+    is read as its condition and then each branch on its own, from the state
+    after the condition;
+  - inside a function, `Fetch(True)` calls the function again, unless its
+    declared result is an array or a `Variant`, as when it has no type: then
+    `Fetch(1)` counts as an element of the result, and a recursive call is
+    missed;
   - it cannot tell a procedure that keeps `Err` from one that clears it, so
     in a handler it treats every call, member access and property
     assignment as changing `Err`. A name without parentheses that is not a
