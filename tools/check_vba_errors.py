@@ -524,7 +524,7 @@ def check_statement(path: str, procedure: Procedure, line: int, statement: str,
         segment.stale = (line, "which cleared Err with an On Error statement")
         segment.resume_next = bool(RESUME_NEXT.match(statement))
         return []
-    if ERR_CLEAR.match(statement):
+    if ERR_CLEAR.match(CALL_KEYWORD.sub("", statement, count=1)):
         segment.stale = (line, "which cleared Err with Err.Clear")
         return []
     if BRANCH.match(statement):
