@@ -79,6 +79,8 @@ Use only the categories an entry needs.
   since applying it protects the default branch: the journal, report and
   evidence it writes are committed there and merged through a pull request
   (#470).
+- The setup guide and the README quote the `--evidence` path that holds
+  `{date}`, so that the documented command also works in PowerShell (#471).
 
 ### Fixed
 
