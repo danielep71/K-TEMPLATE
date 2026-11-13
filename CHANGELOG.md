@@ -713,6 +713,15 @@ milestones and their pull requests.
   accuracy contracts. The Dependabot `target-branch` test uses a longer name
   that `git ls-remote` returns for the branch, so it fails if the check stops
   comparing exact names (#423).
+- The Excel instance that `tools/devbuild/excel_run.py` starts no longer
+  outlives the run. The command records the process id of that instance,
+  from its window, and the process start time. After it quits Excel, it waits
+  up to 30 seconds for that process to exit and then ends it, but only while
+  the process with that id is named `EXCEL` and has the recorded start time,
+  so it never ends another Excel. It prints how Excel ended in an
+  `excel-quit:` line (`EXITED`, `STOPPED`, `SURVIVED` or `UNKNOWN`), which
+  the saved report also holds; `SECURITY.md` and the installation guide say
+  so (#401).
 
 ### Validation
 
