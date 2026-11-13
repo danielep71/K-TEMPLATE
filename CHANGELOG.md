@@ -83,6 +83,9 @@ Use only the categories an entry needs.
   `{date}`, so that the documented command also works in PowerShell (#471).
 - The journal of `tools/setup_repository.py --apply` also records the ID
   that GitHub returns for each ruleset it creates or replaces (#479).
+- The setup commands of the setup guide and the README are each on one line,
+  without `sh` line continuations, so that they can be pasted into
+  PowerShell (#478).
 
 ### Fixed
 
