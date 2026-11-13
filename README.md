@@ -60,7 +60,7 @@ that keeps them honest.
 | Area | What the template provides |
 | --- | --- |
 | Source control for Excel | Editing and Git policies for workbooks, exported VBA source and byte-preserved regulatory source copies |
-| VBA quality | Static checks of exported VBA (layout, names, `#If` structure, jump targets, visibility, dependency direction, identifiers, `Err` copies, calls) and a layout formatter, run on every change |
+| VBA quality | Static checks of exported VBA (layout, names, `#If` structure, jump targets, visibility, dependency direction, identifiers, `Err` copies, native declarations, calls) and a layout formatter, run on every change |
 | Reproducible builds | A macro-enabled workbook built from the source of one commit, without *Trust access to the VBA project object model*, with the export bound to the workbook it came from |
 | Testing and evidence | A VBA test harness with a certification entry point, numerical test cases and accuracy contracts, and an offline check that the evidence of an Excel run matches one commit |
 | Methodology | Guides for the sources, the data contract, the calculation and workbook contracts and the validation plan, with a traceability table from each rule to its tests |
@@ -182,6 +182,7 @@ flowchart LR
 | **OpenSSF Scorecard** | Pushes to the default branch and weekly | The repository's supply-chain posture |
 | **Link check** | Weekly | External links |
 | **Sync issue labels** · **Detect issue-label drift** | Catalogue changes · daily | The live labels against `.github/labels.json`, never deleting one in use |
+| **Detect settings drift** | Daily | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
 | **Issue triage** | Issue and milestone events | Assignee, one priority, an open milestone, a target end date and a dependency section on every open issue |
 | **Keep milestones issue-only** | Pull request events and daily | Removes any milestone set on a pull request, and lists each removal |
 | **Release** | A pushed `vX.Y.Z` tag | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |

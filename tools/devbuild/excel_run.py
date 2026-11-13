@@ -23,7 +23,12 @@ Excel run, and never needs Trust access to the VBA project object model:
    point of the example suite and of each project suite the policy lists, in
    order, qualified with the workbook's name so that Application.Run reaches
    an Option Private Module module (HB-03), with the evidence folder and
-   tests/fixtures, closes the workbook without saving and quits Excel;
+   tests/fixtures, closes the workbook without saving and quits Excel. It
+   records the process id and start time of the Excel instance it started,
+   and if that instance is still running QUIT_WAIT seconds after it quits,
+   it ends that process, never another one: a process whose name or start
+   time differs is left alone. It prints how Excel ended (excel-quit:), and
+   the report records it;
 4. writes host.txt, the host record of docs/methodology/TEST_HARNESS.md:
    the operator (--operator, by default the Windows user), when the run
    started and finished, Windows from the registry, the Excel build, its
@@ -39,7 +44,7 @@ Excel run, and never needs Trust access to the VBA project object model:
 5. runs tools/check_excel_run.py with --workbook and --require-binding: with
    no exported folder it proves identity by rebuilding the commit and
    comparing the workbook's parts. It prints the report, and saves it
-   beside the evidence folder as <folder>-report.txt.
+   beside the evidence folder as <folder>-report.txt, with how Excel ended.
 
 It exits 0 when the check passes, 1 when it fails or the run could not
 complete, and 2 for an invalid option, or when it is not run on Windows.
@@ -76,6 +81,21 @@ IMPLICIT_REFERENCES = ("Visual Basic For Applications", "Microsoft Excel 16.0 Ob
 WINDOWS_KEY = r"SOFTWARE\Microsoft\Windows NT\CurrentVersion"
 # Windows 11 keeps "Windows 10" in ProductName; its builds start at 22000.
 WINDOWS_11_BUILD = 22000
+# Seconds to wait, after Quit, for the Excel instance the run started to exit
+# before its process is ended; then seconds to wait for it to end.
+QUIT_WAIT = 30
+STOP_WAIT = 10
+# How the Excel instance the run started ended, as the script prints it
+# (EXCEL-QUIT=): what the command then tells you.
+QUIT_RESULTS = {
+    "EXITED": "Excel exited after Quit",
+    "STOPPED": (f"Excel was still running {QUIT_WAIT} s after Quit, so the run ended the "
+                "process of the instance it started, and no other"),
+    "SURVIVED": ("the Excel instance this run started is still running and could not be "
+                 "ended: close it yourself"),
+    "UNKNOWN": ("whether the Excel instance this run started has exited is not known: if "
+                "an Excel window of this run is left open, close it"),
+}
 
 
 class RunError(Exception):
@@ -212,6 +232,31 @@ def excel_host(output: str) -> dict[str, str]:
     return fields
 
 
+def excel_quit(output: str) -> str:
+    """How the Excel instance the run started ended, from the EXCEL-QUIT= line the
+    script prints: a key of QUIT_RESULTS, UNKNOWN when the line is absent (Excel did
+    not start, or PowerShell stopped first) or holds another value."""
+    result = check_excel_run.UNKNOWN
+    for line in output.splitlines():
+        name, separator, value = line.strip().partition("=")
+        if separator and name == "EXCEL-QUIT":
+            result = value.strip()
+    return result if result in QUIT_RESULTS else check_excel_run.UNKNOWN
+
+
+def quit_line(result: str) -> str:
+    """The line that says how Excel ended, for the output and the report."""
+    return f"excel-quit: {result} ({QUIT_RESULTS[result]})"
+
+
+def with_quit(report: str, result: str) -> str:
+    """The report, with how Excel ended after its Outcome line."""
+    lines = report.splitlines()
+    at = next((index + 1 for index, line in enumerate(lines) if line.startswith("Outcome: ")),
+              len(lines))
+    return "\n".join([*lines[:at], quit_line(result), *lines[at:]])
+
+
 def windows_found() -> str:
     try:
         return windows_version()
@@ -237,7 +282,8 @@ def quoted(text: str) -> str:
 
 
 def powershell_script(workbook: Path, folder: Path, fixtures: Path,
-                      entry_points: Sequence[str], probe: str, enable_timeout: int) -> str:
+                      entry_points: Sequence[str], probe: str, enable_timeout: int,
+                      quit_wait: int = QUIT_WAIT) -> str:
     """Open the workbook read-only, wait until its macros run, run each certification
     entry point (``Module.Procedure``) in order, close without saving, quit. Every
     entry point runs even when an earlier one fails, so each suite leaves its logs; the
@@ -246,8 +292,12 @@ def powershell_script(workbook: Path, folder: Path, fixtures: Path,
     changes a macro setting: when the workbook opens with macros disabled (HB-02), a
     person enables them with Enable Content, without reopening it (HB-04). Once Excel
     has started it prints its version, build, folder and AutomationSecurity, which it
-    only reads, for the host record. Its exit code says how the run ended
-    (OUTCOME_BY_EXIT)."""
+    only reads, for the host record. It records the process id of that instance, from
+    its window, and the process start time. After Quit it waits up to ``quit_wait``
+    seconds for that process to exit, then ends it, but only while its name is EXCEL
+    and its start time is the one recorded, so that a process that reuses the id is
+    never touched; it prints EXCEL-QUIT= with the result (QUIT_RESULTS). Its exit
+    code says how the run ended (OUTCOME_BY_EXIT)."""
     calls = "\n".join(
         f"""        try {{
             [void]$excel.Run($prefix + {quoted(entry)}, $evidence, $fixtures)
@@ -264,8 +314,34 @@ $excel = $null
 $book = $null
 $failure = $null
 $stopped = $null
+$excelId = $null
+$excelStart = $null
 try {{
     $excel = New-Object -ComObject Excel.Application
+    # The process of this instance, from its window, and when it started: after
+    # Quit, only a process with this id, name and start time is ever ended.
+    try {{
+        if (-not ('ExcelRunWindow' -as [type])) {{
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ExcelRunWindow {{
+    [DllImport("user32.dll")]
+    public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+}}
+'@
+        }}
+        [uint32]$windowProcess = 0
+        $window = [IntPtr][int64]$excel.Hwnd
+        [void][ExcelRunWindow]::GetWindowThreadProcessId($window, [ref]$windowProcess)
+        if ($windowProcess -ne 0) {{
+            $excelStart = (Get-Process -Id ([int]$windowProcess)).StartTime
+            $excelId = [int]$windowProcess
+        }}
+    }} catch {{
+        $excelId = $null
+        $excelStart = $null
+    }}
     # Read only, for the host record: the macro policy is recorded, never set.
     Write-Output ("EXCEL-VERSION=" + $excel.Version)
     Write-Output ("EXCEL-BUILD=" + $excel.Build)
@@ -300,13 +376,48 @@ try {{
     $stopped = if ($null -eq $excel) {{ "UNAVAILABLE" }} else {{ "INCOMPLETE" }}
     $failure = $_.Exception.Message
 }} finally {{
-    if ($null -ne $book) {{ $book.Close($false) }}
-    if ($null -ne $excel) {{
-        $excel.Quit()
-        [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($excel)
+    $started = $null -ne $excel
+    try {{
+        if ($null -ne $book) {{
+            $book.Close($false)
+            [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($book)
+            $book = $null
+        }}
+        if ($null -ne $excel) {{
+            $excel.Quit()
+            [void][System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel)
+            $excel = $null
+        }}
+        [GC]::Collect()
+        [GC]::WaitForPendingFinalizers()
+        [GC]::Collect()
+    }} finally {{
+        # Runs even when closing failed. The instance this script started has
+        # {quit_wait} s to exit; past that its process is ended, but only while the
+        # process with its id still has its name and its start time.
+        $quit = "UNKNOWN"
+        if ($null -ne $excelId -and $null -ne $excelStart) {{
+            try {{
+                $process = Get-Process -Id $excelId -ErrorAction SilentlyContinue
+                if ($null -eq $process -or $process.WaitForExit({quit_wait * 1000})) {{
+                    $quit = "EXITED"
+                }} else {{
+                    $process.Refresh()
+                    if ($process.ProcessName -ne 'EXCEL' -or $process.StartTime -ne $excelStart) {{
+                        # Another process has the id now: this instance exited.
+                        $quit = "EXITED"
+                    }} else {{
+                        try {{ Stop-Process -InputObject $process -Force }} catch {{ }}
+                        $ended = $process.WaitForExit({STOP_WAIT * 1000})
+                        $quit = if ($ended) {{ "STOPPED" }} else {{ "SURVIVED" }}
+                    }}
+                }}
+            }} catch {{
+                $quit = "UNKNOWN"
+            }}
+        }}
+        if ($started) {{ Write-Output ("EXCEL-QUIT=" + $quit) }}
     }}
-    [GC]::Collect()
-    [GC]::WaitForPendingFinalizers()
 }}
 if ($failure -eq "NOT-ENABLED") {{
     Write-Output "EXCEL-RUN=NOT-ENABLED"
@@ -403,6 +514,8 @@ def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300,
     # Written however the run ended, so that a run that stopped early is recorded.
     (folder / policy.host).write_text(host_record(host), encoding="utf-8")
     print(f"{policy.host}: outcome={host['outcome']}")
+    quit_result = excel_quit(output)
+    print(quit_line(quit_result))
     if stopped:
         raise stopped
     if code == NOT_ENABLED:
@@ -415,7 +528,7 @@ def record(root: Path, folder: Path, timeout: int, enable_timeout: int = 300,
     report = check_excel_run.report(built.commit, evidence)
     print(report)
     saved = folder.parent / f"{folder.name}-report.txt"
-    saved.write_text(report + "\n", encoding="utf-8")
+    saved.write_text(with_quit(report, quit_result) + "\n", encoding="utf-8")
     print(f"report saved to {saved}")
     return 1 if evidence.findings else 0
 
