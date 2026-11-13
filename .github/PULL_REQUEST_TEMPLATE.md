@@ -35,10 +35,12 @@ define them. Otherwise replace both lines with "No calculation change". -->
 
 ## ✅ Validated
 
-<!-- Commands and checks actually run, with results. Hosted checks run on this pull request. -->
+<!-- Commands and checks actually run, with results. Hosted checks run on this pull request.
+Negative controls: CONTRIBUTING.md. -->
 
 - [ ] `python -m unittest discover -s tests` (with `.github/requirements.txt` installed and Node.js available)
 - [ ] Ruff, strict mypy and actionlint pass in `Repository integrity`
+- [ ] Negative control, for a defect fix: the new or changed test fails on the defective code (a detached worktree of the base, or a mutant from `tools/make_mutant.py`) and passes on the fix. How, and the failing result:
 - [ ] Other checks specific to this change:
 
 ### 🧪 Excel run
