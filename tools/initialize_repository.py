@@ -15,7 +15,11 @@ and that **Repository integrity** requires with --template false:
   repository; with them go VERSION and the release rows of the *Current
   status* of RELEASING.md, which describe the template's releases;
 - docs/VBA_HOUSE_STYLE.md: replace <REGIME> in the naming table with
-  --regime.
+  --regime;
+- INSTALLATION.md and docs/methodology/VALIDATION_PLAN.md: with the
+  changelog's entries go the template's evidence, which cites its own commits
+  and issues: the rows of the Tested environment table are removed, and the
+  Issue column of the Host behaviour table becomes a dash.
 
 Without --apply it only lists the changes. With --apply it writes them, and
 refuses a working tree that differs from the commit, so that the result is
@@ -55,6 +59,12 @@ SECTION_START = "<!-- template-only:start -->"
 SECTION_END = "<!-- template-only:end -->"
 GITHUB_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/")
 DIRECTORY = re.compile(r"^(\s*)directory:.*$", re.M)
+INSTALLATION = "INSTALLATION.md"
+VALIDATION_PLAN = "docs/methodology/VALIDATION_PLAN.md"
+TESTED_HEADER = "| Tested environment |"
+HOST_HEADER = "| ID | Behaviour |"
+LAST_CELL = re.compile(r"\|[^|]*\|[ \t]*$")
+NO_EVIDENCE = "\u2014"
 STATUS_ROWS = {
     "Released versions": "None",
     "`VERSION`": "Does not exist yet; it is created when the first release is prepared",
@@ -209,6 +219,49 @@ def adapt_house_style(text: str, options: Options) -> Adapted:
                               "the naming table"]
 
 
+def table_rows(lines: list[str], header: str) -> list[int]:
+    """The indexes of the data rows of the table whose header row starts with header."""
+    start = next((index for index, line in enumerate(lines) if line.startswith(header)), None)
+    if start is None:
+        return []
+    rows = []
+    for index in range(start + 2, len(lines)):
+        if not lines[index].startswith("|"):
+            break
+        rows.append(index)
+    return rows
+
+
+def adapt_tested_environments(text: str, options: Options) -> Adapted:
+    lines = text.split("\n")
+    rows = table_rows(lines, TESTED_HEADER)
+    if not rows:
+        return text, []
+    del lines[rows[0]:rows[-1] + 1]
+    return "\n".join(lines), [f"remove the {len(rows)} row(s) of the Tested environment table: "
+                              "they record the template's Excel runs of its own commits"]
+
+
+def adapt_host_behaviour(text: str, options: Options) -> Adapted:
+    lines = text.split("\n")
+    changed = 0
+    for index in table_rows(lines, HOST_HEADER):
+        row = LAST_CELL.sub(f"| {NO_EVIDENCE} |", lines[index])
+        if row != lines[index]:
+            lines[index] = row
+            changed += 1
+    if not changed:
+        return text, []
+    return "\n".join(lines), [f"replace the Issue column of {changed} Host behaviour row(s) "
+                              f"with {NO_EVIDENCE}: they cite the template's issues"]
+
+
+# The template's evidence, which goes with its changelog entries.
+EVIDENCE: tuple[tuple[str, Adapter], ...] = (
+    (INSTALLATION, adapt_tested_environments),
+    (VALIDATION_PLAN, adapt_host_behaviour),
+)
+
 ADAPTERS: tuple[tuple[str, Adapter], ...] = (
     ("AGENTS.md", adapt_agents),
     (".github/ISSUE_TEMPLATE/config.yml", adapt_contact_links),
@@ -247,6 +300,14 @@ def plan(root: Path, options: Options) -> list[Change]:
                 adapted, notes = adapt_releasing(releasing, options)
                 if notes:
                     changes.append(Change("RELEASING.md", adapted, notes))
+            # So does its evidence, which cites the template's commits and issues.
+            for evidence, adapt_evidence in EVIDENCE:
+                text = read(root, evidence)
+                if text is None:
+                    continue
+                adapted, notes = adapt_evidence(text, options)
+                if notes:
+                    changes.append(Change(evidence, adapted, notes))
     return changes
 
 

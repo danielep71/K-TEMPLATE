@@ -136,6 +136,32 @@ Replace `<REGIME>` with the project's short name, once, in this table.
 | Enum and member | `<REGIME>` plus noun | `<REGIME>RunStatus`, `rsFailed` |
 """
 
+# The template's evidence: a tested environment and a host behaviour row that
+# cite its own commit and issue.
+INSTALLATION = """# Installation
+
+Record each host on which a commit has been compiled and run:
+
+| Tested environment | Commit | Evidence |
+| --- | --- | --- |
+| Excel 16.0, 64-bit | `0123456789abcdef0123456789abcdef01234567` | #204: `excel-run: PASS` |
+| Excel 16.0, 32-bit | `fedcba9876543210fedcba9876543210fedcba98` | #300: `excel-run: PASS` |
+
+## Next section
+"""
+
+VALIDATION_PLAN = """# Validation plan
+
+| ID | Behaviour | Status | Probe | Host | Date | Result | Issue |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `HB-01` | A name is re-cased | `assumed` | By hand | \u2014 | \u2014 | Not measured | #245 |
+| `HB-02` | Macros start disabled | `measured` | `Run` it | Excel 16.0 | 2026-11-03 | It failed | #204 |
+
+| Other | Issue |
+| --- | --- |
+| Not host behaviour | #9 |
+"""
+
 
 def write(root: Path, files: dict[str, str]) -> None:
     for name, text in files.items():
@@ -195,6 +221,36 @@ class AdaptationTests(unittest.TestCase):
         self.assertIn("Replace `<REGIME>` with the project's short name", adapted)
         with self.assertRaisesRegex(InitializeError, "already LCR_, not FRTB_"):
             initialize.adapt_house_style(adapted, Options(REPOSITORY, "FRTB"))
+
+    def test_tested_environments_lose_their_rows_but_keep_the_header(self) -> None:
+        adapted = self.assertIdempotent(initialize.adapt_tested_environments, INSTALLATION)
+        self.assertEqual(adapted, INSTALLATION.split("| Excel 16.0, 64-bit")[0]
+                         + "\n## Next section\n")
+        self.assertIn("| Tested environment | Commit | Evidence |\n| --- | --- | --- |\n", adapted)
+        self.assertNotIn("#204", adapted)
+
+    def test_host_behaviour_rows_cite_no_issue_and_other_tables_stay(self) -> None:
+        adapted = self.assertIdempotent(initialize.adapt_host_behaviour, VALIDATION_PLAN)
+        self.assertEqual(adapted, VALIDATION_PLAN.replace("| #245 |", "| \u2014 |")
+                         .replace("| #204 |", "| \u2014 |"))
+        self.assertIn("| Not host behaviour | #9 |", adapted)
+
+    def test_the_template_evidence_goes_with_the_changelog_entries(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="initialize-evidence-") as directory:
+            root = Path(directory)
+            files = {"INSTALLATION.md": INSTALLATION,
+                     "docs/methodology/VALIDATION_PLAN.md": VALIDATION_PLAN}
+            # A repository whose changelog is its own keeps its evidence.
+            write(root, files)
+            self.assertEqual(initialize.plan(root, OPTIONS), [])
+            write(root, {"CHANGELOG.md": CHANGELOG})
+            changes = initialize.plan(root, OPTIONS)
+            self.assertEqual([change.path for change in changes],
+                             ["CHANGELOG.md", *files])
+            initialize.apply(root, changes)
+            for name in files:
+                self.assertNotIn("#2", (root / name).read_text(encoding="utf-8"))
+            self.assertEqual(initialize.plan(root, OPTIONS), [])
 
     def test_options_are_validated(self) -> None:
         for options in (Options("no-slash", "LCR"), Options(REPOSITORY, "CORE"),
@@ -377,6 +433,14 @@ class GeneratedRepositoryTest(unittest.TestCase):
         applied = self.initialize("--apply")
         self.assertEqual(applied.returncode, 0, applied.stderr)
         self.assertIn("Nothing on GitHub was changed", applied.stdout)
+        # No evidence row cites a commit or an issue of the template.
+        installation = (self.root / initialize.INSTALLATION).read_text(encoding="utf-8")
+        rows = installation.split(initialize.TESTED_HEADER, 1)[1].split("\n")[2]
+        self.assertFalse(rows.startswith("|"), rows)
+        plan = (self.root / initialize.VALIDATION_PLAN).read_text(encoding="utf-8")
+        host = [line for line in plan.split("\n") if line.startswith("| `HB-")]
+        self.assertTrue(host)
+        self.assertTrue(all(line.endswith(f"| {initialize.NO_EVIDENCE} |") for line in host), host)
         self.commit("Initialize the repository")
         again = self.initialize("--apply")
         self.assertEqual(again.returncode, 0, again.stderr)
