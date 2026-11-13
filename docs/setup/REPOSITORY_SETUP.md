@@ -111,12 +111,13 @@ written to GitHub, and the read-back runs as usual.
 `--journal PATH` names a new file; an existing one is refused before any write.
 The journal is JSON with the plan digest, the repository, the configuration's
 SHA-256, the start time, each planned write with its method, endpoint and status
-(`pending`, `done` or `failed`, with the error text), the ruleset's name for a
-ruleset write, and the read-back result. It is written atomically before the
-first write and again after each write's result, so it exists before anything
-reaches GitHub. A failing write stops the sequence
-and is recorded; nothing is retried or rolled back. Keep the journal with the
-setup record, for example beside `SETTINGS_EVIDENCE.md` as the path above does.
+(`pending`, `done` or `failed`, with the error text), and the read-back result.
+A ruleset write also names its ruleset, and once done records the ID that GitHub
+returned for it. The journal is written atomically before the first write and
+again after each write's result, so it exists before anything reaches GitHub. A
+failing write stops the sequence and is recorded; nothing is retried or rolled
+back. Keep the journal with the setup record, for example beside
+`SETTINGS_EVIDENCE.md` as the path above does.
 
 The script first sets the three merge methods where they differ, because GitHub
 may reject a ruleset that allows a disabled one. It then creates missing rulesets,
