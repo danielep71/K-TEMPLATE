@@ -195,7 +195,7 @@ flowchart LR
 - The [house style](docs/VBA_HOUSE_STYLE.md) covers naming, contracts, errors
   and cleanup.
 - The [public API inventory](docs/PUBLIC_API.txt) lists the supported entry
-  points.
+  points, and every other public declaration under `src/`.
 - The [installation guide](INSTALLATION.md) moves source between the
   repository and Excel, and covers upgrades, troubleshooting and removal.
 

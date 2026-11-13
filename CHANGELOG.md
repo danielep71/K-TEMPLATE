@@ -637,6 +637,20 @@ milestones and their pull requests.
 - **Repository integrity** proves that actionlint rejects an invalid workflow,
   and the workflow control tests reject duplicate YAML keys in the workflows,
   Dependabot's configuration and the issue forms (#114).
+- The [public API inventory](docs/PUBLIC_API.txt) has two tiers.
+  `[supported]` lists the supported API in `src/modules/`, as before;
+  `[project-public]` lists every other `Public` declaration under `src/`,
+  including the public members of classes, forms and workbook modules.
+  `tools/check_vba_public_api.py` matches each tier with the source one to
+  one, with normalized signatures, and reports a declaration listed in the
+  wrong tier; test and example modules belong to neither tier. An inventory
+  without tier headings is read as `[supported]` alone, so it still passes
+  only while `src/` has no public declaration outside `src/modules/`. In a
+  generated repository, add the `[supported]` and `[project-public]` headings
+  and list each public declaration of core, classes, workbook modules and
+  forms under `[project-public]`, as the
+  [repository structure](docs/REPOSITORY_STRUCTURE.md#public-api-inventory)
+  guide describes (#405).
 
 ### Fixed
 

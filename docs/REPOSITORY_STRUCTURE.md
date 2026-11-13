@@ -1,7 +1,7 @@
 # 🗂️ Repository structure
 
 This guide says where each kind of file lives, which components may call
-which, and how the supported VBA API is recorded. The
+which, and how the public VBA declarations are recorded. The
 [house style](VBA_HOUSE_STYLE.md) covers how the code is written; the
 [methodology guides](methodology/README.md) cover what it must calculate.
 
@@ -76,30 +76,47 @@ calls back the other way, so there are no cycles.
 - Repository tooling is not a second implementation of the calculation.
 
 The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations
-and the role prefixes, and match the inventory below against `src/modules/`.
+and the role prefixes, and match the inventory below against `src/`.
 They enforce this dependency direction by name for core, classes and
 examples only; the direction of the facade and the adapters is checked in
 review.
 
 ## Public API inventory
 
-[PUBLIC_API.txt](PUBLIC_API.txt) lists the supported declarations; in the
-template it lists none. A `Public` declaration is supported only if it is
-listed there, and only the public declarations of the standard modules in
-`src/modules/` can be listed. A class is reached through the facade; its
-public members are not listed. `Option Private Module` limits visibility
-between projects; it is not a security boundary. Test and example modules
-are never part of a production workbook.
+[PUBLIC_API.txt](PUBLIC_API.txt) lists every `Public` declaration under
+`src/`, in two tiers; in the template both are empty.
 
-Each supported declaration is recorded as two tab-separated lines:
+- **`[supported]`:** the supported API, the public declarations of the
+  standard modules in `src/modules/`. A `Public` declaration is supported
+  only if it is listed here.
+- **`[project-public]`:** every other `Public` declaration under `src/`, in
+  core, classes, workbook modules and forms. Other components of the project
+  may call them; no caller outside the project may rely on them. A class is
+  reached through the facade, so its public members are listed here, never
+  under `[supported]`.
+
+The tiers let a reviewer tell a deliberate seam from a member made `Public`
+by mistake. `Option Private Module` limits visibility between projects; it is
+not a security boundary. Test and example modules are never part of a
+production workbook, so their public declarations belong to neither tier.
+
+Each tier starts with its heading on a line of its own. Each declaration is
+recorded under its tier as two tab-separated lines:
 
 ```text
+[supported]
+<component>	<kind>	<name>
+# SIG	<component>	<kind>	<name>	<normalized declaration>
+
+[project-public]
 <component>	<kind>	<name>
 # SIG	<component>	<kind>	<name>	<normalized declaration>
 ```
 
 - **Kinds:** `Function`, `Sub`, `Property Get`, `Property Let`,
-  `Property Set`, `Const`, `Enum` or `Type`.
+  `Property Set`, `Const`, `Enum` or `Type`. Under `[project-public]`, a
+  class, form or workbook module can also expose an `Event`, a `Variable` or
+  a `WithEvents Variable`.
 - **Normalized declaration:** the declaration on one line, outside string
   literals with its white space reduced to single spaces and none just inside
   parentheses, so `Total( ByVal Amount As Double )` is recorded as
@@ -110,10 +127,21 @@ Each supported declaration is recorded as two tab-separated lines:
   branches has one row. Its `# SIG` lines give each distinct signature once,
   so a declaration whose parameters differ between branches has one `# SIG`
   line per branch signature.
-- Blank lines and other lines starting with `#` are ignored.
+- Blank lines and other lines starting with `#` are ignored, so
+  `# [supported]` is a comment, not a heading.
+- **Matching:** each tier must list exactly the declarations of its
+  components. A declaration listed under the other tier is a finding, and so
+  are an unknown or repeated heading and a row or `# SIG` line before the
+  first heading.
+- **Inventory without headings:** an inventory with no tier heading is read
+  as `[supported]` alone. It passes only while `src/` holds no `Public`
+  declaration outside `src/modules/`; each such declaration is reported as
+  not listed. Add both headings and list those declarations under
+  `[project-public]`.
 
-A change to the supported API needs an issue and an update, in the same pull
-request, to:
+A change to a `[project-public]` declaration updates its row in the same pull
+request. A change to the supported API needs an issue and an update, in the
+same pull request, to:
 
 - the inventory;
 - the [calculation contract](methodology/CALCULATION_CONTRACTS.md);

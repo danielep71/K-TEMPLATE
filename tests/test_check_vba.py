@@ -68,8 +68,21 @@ Public Function DEMO_IsPositive( _
         DEMO_IsPositive = CORE_Validation.IsPositive(Value)
 End Function
 '''
+CLASS_ROWS = (
+    "CCalculationResult\tProperty Get\tAmount\n"
+    "# SIG\tCCalculationResult\tProperty Get\tAmount\tPublic Property Get Amount() As Double\n"
+    "CCalculationResult\tProperty Let\tAmount\n"
+    "# SIG\tCCalculationResult\tProperty Let\tAmount\t"
+    "Public Property Let Amount(ByVal Value As Double)\n"
+)
 INVENTORY = (
-    "# Supported VBA declarations\n"
+    "# Public VBA declarations\n"
+    "[project-public]\n"
+    "CORE_Validation\tFunction\tIsPositive\n"
+    "# SIG\tCORE_Validation\tFunction\tIsPositive\t"
+    "Public Function IsPositive(ByVal Value As Double) As Boolean\n"
+    + CLASS_ROWS +
+    "[supported]\n"
     "DEMO_Functions\tConst\tDEMO_FORMAT_TEXT\n"
     '# SIG\tDEMO_Functions\tConst\tDEMO_FORMAT_TEXT\tPublic Const DEMO_FORMAT_TEXT As String = "0.00"\n'
     "DEMO_Functions\tFunction\tDEMO_IsPositive\n"
@@ -1290,11 +1303,17 @@ API_ROWS = [
 ]
 
 
-def api_inventory(rows: list[tuple[str, str, str]], extra: str = "") -> str:
-    lines = ["# Supported VBA declarations"]
+INTERNAL_ROWS = ("[project-public]\nCORE_Internal\tFunction\tInside\n"
+                 "# SIG\tCORE_Internal\tFunction\tInside\tPublic Function Inside() As Long\n")
+
+
+def api_inventory(rows: list[tuple[str, str, str]], extra: str = "",
+                  internal: str = INTERNAL_ROWS) -> str:
+    """The facade's ``rows`` and ``extra`` under [supported], then ``internal``."""
+    lines = ["[supported]"]
     for kind, name, signature in rows:
         lines += [f"DEMO_Api\t{kind}\t{name}", f"# SIG\tDEMO_Api\t{kind}\t{name}\t{signature}"]
-    return "\n".join(lines) + "\n" + extra
+    return "\n".join(lines) + "\n" + extra + internal
 
 
 def api_files(facade: str = API_FACADE, inventory: str | None = None,
@@ -1335,19 +1354,20 @@ class PublicApiTest(unittest.TestCase):
     def test_repository_inventory_matches_its_source(self) -> None:
         # The inventory and the source of this repository together, so the test holds
         # whether or not the inventory lists a declaration yet.
-        findings, _, _ = check_vba_public_api.check(ROOT)
+        findings, _, _, _ = check_vba_public_api.check(ROOT)
         self.assertEqual([str(finding) for finding in findings], [])
-        # Each row names a declaration of the facade, and each declaration has a row.
+        # Each row names a declaration of its tier, and each declaration has a row.
         # One declaration may be compiled in several #If branches under one row.
-        facade = {declaration.key.casefold()
+        source = {(check_vba_public_api.tier_of(path), declaration.key.casefold())
                   for path in tracked_components(ROOT)
-                  if path.startswith(check_vba_public_api.PUBLIC_HOME)
+                  if check_vba_public_api.tier_of(path)
                   for declaration in check_vba_public_api.scan_component(
                       path, read_component(ROOT, path))[0]}
-        inventory = (ROOT / check_vba_public_api.INVENTORY).read_text(encoding="utf-8")
-        listed = [line.casefold() for line in inventory.splitlines()
-                  if line.strip() and not line.lstrip().startswith("#")]
-        self.assertEqual(sorted(listed), sorted(facade))
+        inventory, errors = check_vba_public_api.read_inventory(ROOT)
+        self.assertEqual(errors, [])
+        self.assertTrue(inventory.tiered)
+        listed = {(tier, folded) for folded, (tier, _) in inventory.rows.items()}
+        self.assertEqual(listed, source)
 
     def test_implicit_visibility_is_rejected_everywhere(self) -> None:
         self.assertFinding(api_files(API_FACADE.replace("Public Function DEMO_Echo",
@@ -1411,9 +1431,16 @@ class PublicApiTest(unittest.TestCase):
                            "duplicate inventory row")
 
     def test_only_the_facade_is_supported_api(self) -> None:
-        rows = api_inventory(API_ROWS, "CORE_Internal\tFunction\tInside\n")
-        self.assertFinding(api_files(inventory=rows),
-                           "listed declaration not in src/modules/: CORE_Internal")
+        # CORE_Internal's rows moved from [project-public] to [supported].
+        rows = api_inventory(API_ROWS, INTERNAL_ROWS.split("\n", 1)[1], internal="")
+        findings = self.findings(api_files(inventory=rows))
+        for text in ("public declaration listed under [supported], not [project-public]: "
+                     "CORE_Internal\tFunction\tInside",
+                     "signature record listed under [supported], not [project-public]: "
+                     "CORE_Internal\tFunction\tInside"):
+            with self.subTest(text=text):
+                self.assertTrue(any(text in item for item in findings), findings)
+        self.assertEqual(len(findings), 2, findings)
 
     def test_missing_inventory(self) -> None:
         files = {k: v for k, v in api_files().items() if k != "docs/PUBLIC_API.txt"}
@@ -1449,9 +1476,12 @@ class PublicApiTest(unittest.TestCase):
                "Public gCounter As Long\n"
         self.assertFinding({"src/core/CORE_State.bas": core, "docs/PUBLIC_API.txt": "# None\n"},
                            "public variable gCounter in a standard module")
+        # A class may expose a public field; it is listed under [project-public].
         field = CLASS.replace("Private mAmount As Double", "Public Label As String")
+        listed = ("[project-public]\n" + CLASS_ROWS + "CCalculationResult\tVariable\tLabel\n"
+                  "# SIG\tCCalculationResult\tVariable\tLabel\tPublic Label As String\n")
         self.assertEqual(self.findings({"src/classes/CCalculationResult.cls": field,
-                                        "docs/PUBLIC_API.txt": "# None\n"}), [])
+                                        "docs/PUBLIC_API.txt": listed}), [])
 
     def test_conditional_variants(self) -> None:
         variants = api_inventory(API_ROWS, HOST_ROW + MODERN_ROW + LEGACY_ROW)
@@ -1504,6 +1534,176 @@ class PublicApiTest(unittest.TestCase):
         dated = API_FACADE.replace("Private mHidden As Long",
                                    "Private Const START_DATE As Date = #1/2/2026#: Rem : Public x")
         self.assertEqual(self.findings(api_files(dated)), [])
+
+    def test_project_public_tier_lists_every_other_public_declaration(self) -> None:
+        self.assertEqual(self.findings(project_files()), [])
+        with repository(project_files()) as root:
+            _, _, supported, project = check_vba_public_api.check(root)
+        self.assertEqual((supported, project), (len(API_ROWS), 1 + len(PROJECT_ROWS)))
+        for component, kind, name, _ in PROJECT_ROWS:
+            key = f"{component}\t{kind}\t{name}"
+            with self.subTest(key=key):
+                rows = project_inventory().replace(f"{key}\n", "")
+                self.assertFinding(project_files(rows),
+                                   f"public declaration not listed: {key}; list it under "
+                                   "[project-public]")
+        self.assertFinding(project_files(project_inventory().replace(
+            "Seam(ByVal Value As Long) As Long", "Seam() As Long")),
+            "signature mismatch for CORE_Fixture\tFunction\tSeam")
+        self.assertFinding(project_files(project_inventory().replace(
+            "# SIG\tCFixture\tSub\tAdd\tPublic Sub Add(ByVal Amount As Double)\n", "")),
+            "signature record missing: CFixture\tSub\tAdd")
+        stale = project_inventory() + "CORE_Fixture\tSub\tGone\n" \
+                                      "# SIG\tCORE_Fixture\tSub\tGone\tPublic Sub Gone()\n"
+        findings = self.findings(project_files(stale))
+        self.assertIn("docs/PUBLIC_API.txt: listed declaration not in src/ outside "
+                      "src/modules/: CORE_Fixture\tSub\tGone", findings)
+        self.assertIn("docs/PUBLIC_API.txt: stale signature record: core_fixture\tsub\tgone",
+                      findings)
+        self.assertEqual(len(findings), 2, findings)
+
+    def test_tests_and_examples_belong_to_neither_tier(self) -> None:
+        listed = "TEST_Api\tSub\tRunAll\n# SIG\tTEST_Api\tSub\tRunAll\tPublic Sub RunAll()\n"
+        self.assertFinding(project_files(project_inventory() + listed),
+                           "listed declaration not in src/ outside src/modules/: TEST_Api")
+        self.assertFinding(project_files(api_inventory(API_ROWS, listed,
+                                                       INTERNAL_ROWS + rows_text(PROJECT_ROWS))),
+                           "listed declaration not in src/modules/: TEST_Api")
+
+    def test_declaration_listed_in_the_wrong_tier(self) -> None:
+        limit = "DEMO_Api\tConst\tDEMO_LIMIT"
+        moved = api_inventory(API_ROWS[1:], internal=INTERNAL_ROWS + rows_text(PROJECT_ROWS)
+                              + rows_text([("DEMO_Api", *API_ROWS[0])]))
+        findings = self.findings(project_files(moved))
+        self.assertEqual(sorted(findings), sorted([
+            f"docs/PUBLIC_API.txt: public declaration listed under [project-public], "
+            f"not [supported]: {limit}",
+            f"docs/PUBLIC_API.txt: signature record listed under [project-public], "
+            f"not [supported]: {limit}"]))
+        # A class member in [supported]: only its row is in the wrong tier.
+        add = "CFixture\tSub\tAdd"
+        rows = project_inventory().replace(f"{add}\n", "").replace("[project-public]",
+                                                                   f"{add}\n[project-public]")
+        self.assertEqual(self.findings(project_files(rows)), [
+            f"docs/PUBLIC_API.txt: public declaration listed under [supported], "
+            f"not [project-public]: {add}"])
+
+    def test_legacy_inventory_without_tier_headings(self) -> None:
+        legacy = "# Supported VBA declarations\n" + rows_text(
+            [("DEMO_Api", *row) for row in API_ROWS])
+        facade_only = {k: v for k, v in api_files(inventory=legacy).items()
+                       if k != "src/core/CORE_Internal.bas"}
+        self.assertEqual(self.findings(facade_only), [])
+        # With a public declaration elsewhere in src/, a legacy inventory fails.
+        findings = self.findings(api_files(inventory=legacy))
+        self.assertIn("docs/PUBLIC_API.txt: public declaration not listed: "
+                      "CORE_Internal\tFunction\tInside; list it under [project-public]", findings)
+        self.assertTrue(any("has no tier heading" in item for item in findings), findings)
+        # A heading inside a comment is a comment: the rows after it stay [supported].
+        commented = legacy + "# " + INTERNAL_ROWS
+        self.assertFinding(api_files(inventory=commented),
+                           "listed under [supported], not [project-public]: CORE_Internal")
+
+    def test_tier_headings(self) -> None:
+        empty = {"tests/modules/TEST_Api.bas": api_files()["tests/modules/TEST_Api.bas"],
+                 "docs/PUBLIC_API.txt": "# Nothing yet\n[supported]\n\n[project-public]\n"}
+        self.assertEqual(self.findings(empty), [])
+        unknown = api_inventory(API_ROWS, internal=INTERNAL_ROWS.replace("[project-public]",
+                                                                         "[internal]"))
+        findings = self.findings(api_files(inventory=unknown))
+        self.assertTrue(any("unknown tier heading [internal]" in item for item in findings),
+                        findings)
+        self.assertTrue(any("inventory entry outside a [supported] or [project-public] tier"
+                            in item for item in findings), findings)
+        self.assertFinding(api_files(inventory=api_inventory(API_ROWS, "[supported]\n")),
+                           "tier heading appears more than once: [supported]")
+        early = "DEMO_Api\tConst\tDEMO_EARLY\n" + api_inventory(API_ROWS)
+        self.assertFinding(api_files(inventory=early),
+                           "docs/PUBLIC_API.txt:1: inventory entry outside a [supported] or "
+                           "[project-public] tier")
+
+    def test_conditional_variants_in_project_public(self) -> None:
+        # A class member whose header differs between #If branches: one row, one
+        # # SIG record per distinct signature.
+        variants = rows_text([("CFixture", "Sub", "Attach",
+                               "Public Sub Attach(ByVal Handle As LongPtr)")]) + \
+            "# SIG\tCFixture\tSub\tAttach\tPublic Sub Attach(ByVal Handle As Long)\n"
+        source = project_sources()[CLASS_PATH]
+        assert isinstance(source, str)
+        conditional = {CLASS_PATH: source + "\n#If VBA7 Then\n"
+                       "Public Sub Attach(ByVal Handle As LongPtr)\n#Else\n"
+                       "Public Sub Attach(ByVal Handle As Long)\n#End If\nEnd Sub\n"}
+        self.assertEqual(self.findings(project_files(project_inventory() + variants,
+                                                     conditional)), [])
+        one = variants.rsplit("# SIG", 1)[0]
+        self.assertFinding(project_files(project_inventory() + one, conditional),
+                           "signature mismatch for CFixture\tSub\tAttach")
+        # A core constant compiled in one branch only, and its row.
+        core = project_sources()[CORE_PATH]
+        assert isinstance(core, str)
+        modern = {CORE_PATH: core + f"\n#If VBA7 Then\n{MODERN.replace('DEMO_', 'CORE_')}\n"
+                                    "#End If\n"}
+        host = rows_text([("CORE_Fixture", "Const", "CORE_HOST",
+                           MODERN.replace("DEMO_", "CORE_"))])
+        self.assertEqual(self.findings(project_files(project_inventory() + host, modern)), [])
+        self.assertFinding(project_files(None, modern),
+                           "not listed: CORE_Fixture\tConst\tCORE_HOST; list it under "
+                           "[project-public]")
+
+
+def rows_text(rows: list[tuple[str, str, str, str]]) -> str:
+    """Inventory rows with their # SIG records."""
+    return "".join(f"{component}\t{kind}\t{name}\n# SIG\t{component}\t{kind}\t{name}\t"
+                   f"{signature}\n" for component, kind, name, signature in rows)
+
+
+PROJECT_ROWS = [
+    ("CORE_Fixture", "Const", "CORE_STEP", "Public Const CORE_STEP As Long = 1"),
+    ("CORE_Fixture", "Enum", "CoreMode", "Public Enum CoreMode | cmFirst = 1 | End Enum"),
+    ("CORE_Fixture", "Function", "Seam", "Public Function Seam(ByVal Value As Long) As Long"),
+    ("CFixture", "Event", "Changed", "Public Event Changed(ByVal Total As Double)"),
+    ("CFixture", "Variable", "Label", "Public Label As String"),
+    ("CFixture", "Property Get", "Total", "Public Property Get Total() As Double"),
+    ("CFixture", "Sub", "Add", "Public Sub Add(ByVal Amount As Double)"),
+    ("ThisWorkbook", "Sub", "Refresh", "Public Sub Refresh()"),
+    ("frmRunOptions", "Property Get", "Confirmed",
+     "Public Property Get Confirmed() As Boolean"),
+]
+
+
+def project_inventory() -> str:
+    """Both tiers listing every public declaration of project_files()."""
+    return api_inventory(API_ROWS, internal=INTERNAL_ROWS + rows_text(PROJECT_ROWS))
+
+
+def project_sources() -> dict[str, str | bytes]:
+    """A public declaration in every home of src/, and in a test and an example."""
+    return {
+        CORE_PATH: core_module("Public Const CORE_STEP As Long = 1\nPublic Enum CoreMode\n"
+                               "    cmFirst = 1\nEnd Enum\n\nPublic Function Seam( _\n"
+                               "    ByVal Value As Long) _\n    As Long\n        Seam = Value\n"
+                               "End Function\n"),
+        CLASS_PATH: class_module("Public Event Changed(ByVal Total As Double)\n"
+                                 "Public Label As String\nPrivate mTotal As Double\n\n\n"
+                                 "Public Property Get Total() As Double\n"
+                                 "        Total = mTotal\nEnd Property\n\n\n"
+                                 "Public Sub Add(ByVal Amount As Double)\n"
+                                 "        mTotal = mTotal + Amount\nEnd Sub\n"),
+        "src/workbook/ThisWorkbook.cls": WORKBOOK + "\n\nPublic Sub Refresh()\nEnd Sub\n",
+        "src/forms/frmRunOptions.frm": FORM + "\n\nPublic Property Get Confirmed() As Boolean\n"
+                                              "End Property\n",
+        "src/forms/frmRunOptions.frx": b"\x00\x01\x02\x03",
+        EXAMPLE_PATH: example_module("Public Sub Run()\nEnd Sub\n"),
+    }
+
+
+def project_files(inventory: str | None = None,
+                  sources: Mapping[str, str] | None = None) -> dict[str, str | bytes]:
+    """api_files() plus project_sources(), with ``sources`` replacing them by path."""
+    files = api_files(inventory=project_inventory() if inventory is None else inventory)
+    files.update(project_sources())
+    files.update(sources or {})
+    return files
 
 
 def core_module(body: str) -> str:

@@ -2,13 +2,17 @@
 """Check VBA visibility and docs/PUBLIC_API.txt against the exported source.
 
 Every procedure and module-level declaration states its visibility. The
-public declarations of src/modules/ (the facade) and the inventory must match
-one to one, with the same normalized signatures, and no two public names may
-collide (docs/REPOSITORY_STRUCTURE.md, Public API inventory). A standard
-module declares no public variable (docs/VBA_HOUSE_STYLE.md: no mutable
-public globals) and no public Declare, so the supported kinds are the
-procedures, Const, Enum and Type. Each compilation environment of
-check_vba_conditionals.py is read separately.
+inventory has two tiers. [supported] lists the public declarations of
+src/modules/ (the facade); [project-public] lists every other public
+declaration under src/, including the public members of classes, forms and
+workbook modules. Each tier and the source must match one to one, with the
+same normalized signatures, and no two public names may collide
+(docs/REPOSITORY_STRUCTURE.md, Public API inventory). An inventory without a
+tier heading is read as [supported] alone. A standard module declares no
+public variable (docs/VBA_HOUSE_STYLE.md: no mutable public globals) and no
+public Declare, so the supported kinds are the procedures, Const, Enum and
+Type. Test and example modules belong to neither tier. Each compilation
+environment of check_vba_conditionals.py is read separately.
 """
 
 from __future__ import annotations
@@ -33,9 +37,16 @@ from vba_lexer import (
 ROOT = Path(__file__).resolve().parents[1]
 INVENTORY = "docs/PUBLIC_API.txt"
 SIG_PREFIX = "# SIG\t"
-# Only src/modules/ is supported API; every other home is in-project, test or
-# example code (docs/REPOSITORY_STRUCTURE.md, Public API inventory).
+# Only src/modules/ is supported API; the rest of src/ is project-public, and
+# test and example code is in neither tier (docs/REPOSITORY_STRUCTURE.md,
+# Public API inventory).
 PUBLIC_HOME = "src/modules/"
+PROJECT_HOME = "src/"
+SUPPORTED, PROJECT_PUBLIC = "supported", "project-public"
+TIERS = (SUPPORTED, PROJECT_PUBLIC)
+TIER_HOMES = {SUPPORTED: PUBLIC_HOME, PROJECT_PUBLIC: "src/ outside src/modules/"}
+# A tier heading is a whole line in brackets; a line starting with # stays a comment.
+HEADING = re.compile(r"^\[(?P<tier>[^\]]*)\]$")
 HOMES = ("src/core/", "src/modules/", "src/classes/", "src/workbook/", "src/forms/",
          "tests/modules/", "examples/modules/")
 PROPERTY_KINDS = frozenset({"property get", "property let", "property set"})
@@ -268,62 +279,122 @@ def collisions(declarations: dict[Declaration, list[str]]) -> list[Finding]:
     return findings
 
 
-def read_inventory(root: Path) -> tuple[dict[str, str], dict[str, set[str]], list[Finding]]:
-    """Inventory rows and signature records, keyed by their case-folded key."""
+def tier_of(path: str) -> str | None:
+    """The inventory tier of a component's public declarations, if any."""
+    if path.startswith(PUBLIC_HOME):
+        return SUPPORTED
+    if path.startswith(PROJECT_HOME):
+        return PROJECT_PUBLIC
+    return None
+
+
+@dataclass
+class Inventory:
+    """Rows and signature records by case-folded key, each with its tier."""
+
+    rows: dict[str, tuple[str, str]] = field(default_factory=dict)
+    signatures: dict[str, dict[str, set[str]]] = field(default_factory=dict)
+    tiered: bool = False
+
+
+def read_inventory(root: Path) -> tuple[Inventory, list[Finding]]:
+    """The inventory's rows and records; without a tier heading, all are [supported]."""
     path = root / INVENTORY
+    inventory = Inventory()
     if not path.is_file():
-        return {}, {}, [Finding(INVENTORY, None, "public API inventory is missing")]
-    rows: dict[str, str] = {}
-    signatures: dict[str, set[str]] = {}
+        return inventory, [Finding(INVENTORY, None, "public API inventory is missing")]
+    lines = path.read_text(encoding="utf-8").splitlines()
+    headings = [HEADING.match(raw.strip()) for raw in lines]
+    inventory.tiered = any(headings)
+    tier: str | None = None if inventory.tiered else SUPPORTED
+    seen: set[str] = set()
     findings: list[Finding] = []
-    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if raw.startswith(SIG_PREFIX):
+    for number, (raw, heading) in enumerate(zip(lines, headings), 1):
+        if heading:
+            name = heading.group("tier")
+            if name not in TIERS:
+                findings.append(Finding(INVENTORY, number, f"unknown tier heading [{name}]; "
+                                        "use [supported] or [project-public]"))
+            elif name in seen:
+                findings.append(Finding(INVENTORY, number,
+                                        f"tier heading appears more than once: [{name}]"))
+            seen.add(name)
+            tier = name if name in TIERS else None
+            continue
+        record = raw.startswith(SIG_PREFIX)
+        if not record and (not raw.strip() or raw.lstrip().startswith("#")):
+            continue
+        if tier is None:
+            findings.append(Finding(INVENTORY, number, "inventory entry outside a "
+                                    "[supported] or [project-public] tier"))
+            continue
+        if record:
             fields = raw[len(SIG_PREFIX):].split("\t", 3)
             if len(fields) != 4:
                 findings.append(Finding(INVENTORY, number, "malformed # SIG record"))
                 continue
-            variants = signatures.setdefault("\t".join(fields[:3]).casefold(), set())
+            variants = inventory.signatures.setdefault(
+                "\t".join(fields[:3]).casefold(), {}).setdefault(tier, set())
             if fields[3] in variants:
                 findings.append(Finding(INVENTORY, number, "duplicate signature record: "
                                                            + "\t".join(fields[:3])))
             variants.add(fields[3])
-        elif raw.strip() and not raw.lstrip().startswith("#"):
-            fields = raw.split("\t")
-            if len(fields) != 3 or not all(fields):
-                findings.append(Finding(INVENTORY, number,
-                                        "an inventory row needs component, kind and name"))
-            elif raw.casefold() in rows:
-                findings.append(Finding(INVENTORY, number, f"duplicate inventory row: {raw}"))
-            else:
-                rows[raw.casefold()] = raw
-    return rows, signatures, findings
+            continue
+        fields = raw.split("\t")
+        if len(fields) != 3 or not all(fields):
+            findings.append(Finding(INVENTORY, number,
+                                    "an inventory row needs component, kind and name"))
+        elif raw.casefold() in inventory.rows:
+            findings.append(Finding(INVENTORY, number, f"duplicate inventory row: {raw}"))
+        else:
+            inventory.rows[raw.casefold()] = (tier, raw)
+    return inventory, findings
 
 
-def inventory_findings(declarations: dict[Declaration, list[str]], rows: dict[str, str],
-                       signatures: dict[str, set[str]]) -> list[Finding]:
-    """Source and inventory must list the same declarations with the same signatures."""
-    actual: dict[str, tuple[str, set[str]]] = {}
+def inventory_findings(declarations: dict[Declaration, list[str]],
+                       inventory: Inventory) -> list[Finding]:
+    """Each tier and the source must list the same declarations with the same signatures."""
+    actual: dict[str, tuple[str, str, set[str]]] = {}
     for declaration in declarations:
-        entry = actual.setdefault(declaration.key.casefold(), (declaration.key, set()))
-        entry[1].add(declaration.signature)
+        tier = tier_of(declaration.path)
+        if tier is not None:
+            entry = actual.setdefault(declaration.key.casefold(),
+                                      (declaration.key, tier, set()))
+            entry[2].add(declaration.signature)
     findings: list[Finding] = []
-    for folded, (key, found) in actual.items():
-        if folded not in rows:
-            findings.append(Finding(INVENTORY, None, f"public declaration not listed: {key}"))
-        if folded not in signatures:
-            findings.append(Finding(INVENTORY, None, f"signature record missing: {key}"))
-        elif signatures[folded] != found:
+    for folded, (key, tier, found) in actual.items():
+        row = inventory.rows.get(folded)
+        if row is None:
+            findings.append(Finding(INVENTORY, None,
+                                    f"public declaration not listed: {key}; list it under "
+                                    f"[{tier}]"))
+        elif row[0] != tier:
+            findings.append(Finding(INVENTORY, None, f"public declaration listed under "
+                                                     f"[{row[0]}], not [{tier}]: {key}"))
+        records = inventory.signatures.get(folded, {})
+        findings.extend(Finding(INVENTORY, None, f"signature record listed under [{other}], "
+                                                 f"not [{tier}]: {key}")
+                        for other in records if other != tier)
+        if tier in records and records[tier] != found:
             findings.append(Finding(INVENTORY, None, f"signature mismatch for {key}: source "
                                                      f"{sorted(found)!r}, inventory "
-                                                     f"{sorted(signatures[folded])!r}"))
-    findings.extend(Finding(INVENTORY, None, f"listed declaration not in {PUBLIC_HOME}: {row}")
-                    for folded, row in rows.items() if folded not in actual)
+                                                     f"{sorted(records[tier])!r}"))
+        elif not records:
+            findings.append(Finding(INVENTORY, None, f"signature record missing: {key}"))
+    findings.extend(Finding(INVENTORY, None, f"listed declaration not in {TIER_HOMES[tier]}: "
+                                             f"{row}")
+                    for folded, (tier, row) in inventory.rows.items() if folded not in actual)
     findings.extend(Finding(INVENTORY, None, f"stale signature record: {folded}")
-                    for folded in signatures if folded not in actual)
+                    for folded in inventory.signatures if folded not in actual)
+    if not inventory.tiered and any(tier == PROJECT_PUBLIC for _, tier, _ in actual.values()):
+        findings.append(Finding(INVENTORY, None, "the inventory has no tier heading, so it is "
+                                                 "read as [supported] alone; list the other "
+                                                 "public declarations of src/ under "
+                                                 "[project-public]"))
     return findings
 
 
-def check(root: Path) -> tuple[list[Finding], int, int]:
+def check(root: Path) -> tuple[list[Finding], int, int, int]:
     components = [path for path in tracked_components(root) if path.startswith(HOMES)]
     declarations: dict[Declaration, list[str]] = {}
     findings: list[Finding] = []
@@ -334,21 +405,22 @@ def check(root: Path) -> tuple[list[Finding], int, int]:
     # Collisions span every home, since Excel compiles them into one project;
     # only the facade's declarations are supported API.
     findings.extend(collisions(declarations))
-    supported = {declaration: environments for declaration, environments
-                 in declarations.items() if declaration.path.startswith(PUBLIC_HOME)}
-    rows, signatures, errors = read_inventory(root)
+    inventory, errors = read_inventory(root)
     findings.extend(errors)
-    findings.extend(inventory_findings(supported, rows, signatures))
-    return findings, len(components), len(supported)
+    findings.extend(inventory_findings(declarations, inventory))
+    counts = {tier: len({declaration.key.casefold() for declaration in declarations
+                         if tier_of(declaration.path) == tier}) for tier in TIERS}
+    return findings, len(components), counts[SUPPORTED], counts[PROJECT_PUBLIC]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
-    findings, components, declarations = check(args.root.resolve())
+    findings, components, supported, project = check(args.root.resolve())
     return report("vba-public-api", findings, f"{components} VBA component(s), "
-                  f"{declarations} supported declaration(s) in {PUBLIC_HOME}")
+                  f"{supported} supported declaration(s) in {PUBLIC_HOME}, "
+                  f"{project} project-public declaration(s) in the rest of src/")
 
 
 if __name__ == "__main__":
