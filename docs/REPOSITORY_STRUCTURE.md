@@ -17,7 +17,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `VERSION` | The newest released version, published or not, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md#current-status)) | Present: the newest released version, which [current status](../RELEASING.md#current-status) also states; `tools/initialize_repository.py` deletes it in a new repository |
 | `.github/` | Workflows (`workflows/`) and the label scripts they run (`scripts/`); issue forms (`ISSUE_TEMPLATE/`) and the pull request template; the label catalogue `labels.json`; the Dependabot configuration and the hash-locked configuration parser of the workflow tests (`requirements.txt`); the binary allowlist `binary-allowlist.json`; the Excel evidence policy `excel-evidence-policy.json`; and, when needed, the expiring link exceptions `link-exceptions.json` | Present, without `link-exceptions.json` |
 | `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
-| `docs/native-declarations.json` | The [register of native declarations](#native-declarations): each export a `Declare` imports, with its library and whether its zero result is ambiguous | Present, with no declaration |
+| `docs/native-declarations.json` | The [register of native declarations](#native-declarations): each export a `Declare` imports, with its library, whether its zero result is ambiguous and, optionally, its ABI | Present, with no declaration |
 | `docs/methodology/` | The [index](methodology/README.md) of the guides: sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format, [workbook contract](methodology/WORKBOOK_CONTRACT.md) and [VBA test harness](methodology/TEST_HARNESS.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
 | `docs/methodology/sources/` | Byte-preserved copies of regulatory sources | Reserved |
 | `docs/methodology/workbook-protection.json` | The [protection matrix](methodology/WORKBOOK_CONTRACT.md#protection) of `src/workbook/Template.xlsx`, added with the template | Reserved |
@@ -127,15 +127,21 @@ the implementation.
 `docs/native-declarations.json` registers each native export that a
 `Declare` imports; in the template it lists none.
 `python tools/check_vba_declares.py`, which **Repository integrity** runs,
-reports a `Declare` whose export it does not list, and holds every call to
-the error-capture rules of the
-[house style](VBA_HOUSE_STYLE.md#naming-and-visibility).
+reports a `Declare` whose export it does not list or whose signature differs
+from the export's ABI, and holds every call to the error-capture rules of
+the [house style](VBA_HOUSE_STYLE.md#naming-and-visibility).
 
 ```json
 {
   "schema_version": 1,
   "declarations": [
-    {"export": "TlsGetValue", "library": "kernel32", "zero_is_ambiguous": true},
+    {
+      "export": "TlsGetValue",
+      "library": "kernel32",
+      "zero_is_ambiguous": true,
+      "arguments": [{"type": "Long", "byval": true}],
+      "returns": "pointer"
+    },
     {"export": "SetLastError", "library": "kernel32", "zero_is_ambiguous": false}
   ]
 }
@@ -154,12 +160,26 @@ the error-capture rules of the
   ambiguous on zero.
 - An entry that no `Declare` uses is not reported: remove it with the last
   `Declare` of its export.
-- `arguments` and `returns` are reserved for the export's signature. The
-  check does not read them yet, so an entry that holds either fails, as does
-  any other key.
+- **`arguments`** (optional): the export's parameters in order, each
+  `{"type": ..., "byval": true|false}`. `type` is a VBA type, such as `Long`
+  or `String`, with `()` for an array, or `pointer` for a pointer-sized value
+  such as a handle; never `LongPtr`, which VBA6 does not have. `byval` is
+  `false` for a parameter passed `ByRef`, which is also a parameter written
+  with neither keyword.
+- **`returns`** (optional): the type a `Function` returns, in the same
+  form, or `null` for a `Sub`.
+- With `arguments` or `returns`, each `Declare` of the export must match them
+  in every compilation environment: the number of parameters, each one's type
+  and passing, and `Sub` or `Function` with its type. A `pointer` must be
+  `LongPtr` where VBA7 is true and `Long` where it is not; every other type
+  must be the same, ignoring case. A type suffix, as in `dwIndex&`, gives a
+  type, and a name with neither suffix nor `As` is a `Variant`. An entry
+  without them is not compared.
+- Any other key fails.
 
 Add the entry in the pull request that adds the `Declare`, after checking
-the export's documentation for what a zero result means.
+the export's documentation for what a zero result means and, when you record
+its ABI, for the width of each argument and of the result.
 
 ## Input and output contracts
 
