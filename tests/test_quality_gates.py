@@ -13,11 +13,16 @@ elsewhere they are skipped without the tools.
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
+
+import check_repository  # noqa: E402
+
 REQUIRED = os.environ.get('REQUIRE_QUALITY_TOOLS') == '1'
 
 
@@ -94,6 +99,15 @@ class QualityGateTests(unittest.TestCase):
         self.assertEqual(ok_code, 0, ok_log)
         self.assertNotEqual(bad_code, 0, bad_log)
         self.assertIn('unexpected key "bogus-key"', bad_log)
+
+    @tool('actionlint')
+    def test_actionlint_rejects_the_probe_of_the_actionlint_check(self):
+        # The probe lies outside .github/workflows/, which GitHub runs and actionlint lints.
+        probe = check_repository.ACTIONLINT_PROBE
+        self.assertFalse(probe.startswith('.github/workflows/'))
+        code, log = run(['actionlint', '-no-color', '-shellcheck=', '-pyflakes=', probe])
+        self.assertNotEqual(code, 0, log)
+        self.assertIn(check_repository.ACTIONLINT_PROBE_FINDING, log)
 
 
 if __name__ == '__main__':

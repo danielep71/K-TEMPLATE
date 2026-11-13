@@ -492,6 +492,11 @@ milestones and their pull requests.
   `RELEASING.md` step 4, the release certification record and the pull
   request guide and template say when such a run counts and that its record
   names both commits (#402).
+- The `actionlint` check of **Repository integrity** first lints
+  `.github/actionlint/invalid-workflow.yml`, a workflow with a known error
+  that never runs, and fails unless actionlint rejects it with that finding.
+  Only then does it lint the workflows, so a broken or stubbed actionlint that
+  accepts everything can no longer pass the check (#404).
 
 ### Changed
 
