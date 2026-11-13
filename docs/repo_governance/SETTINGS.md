@@ -215,3 +215,49 @@ and a named one with stronger parameters covers itself. A covered ruleset is not
 drift and is never written, so renaming one in the configuration creates nothing
 while the old one covers it; a weaker named one is replaced. Apply writes only the plan whose digest, printed by the preview,
 I pass with `--approve-plan`, and journals each write to a new `--journal` file.
+
+<a id="drift"></a>
+
+### Scheduled drift check
+
+The **Detect settings drift** workflow (`.github/workflows/settings-drift.yml`)
+runs `tools/setup_repository.py --check --token-scope workflow` daily and on
+demand, so a ruleset changed or deleted in the GitHub settings does not wait for
+the next manual check. It uses the job's `GITHUB_TOKEN` with `contents: read`
+only. I give it no administrator token: nothing it runs can change a setting,
+and no stored credential is exposed to it. That token can read only part of the
+baseline:
+
+| Section | Compared by the workflow | Why |
+| --- | --- | --- |
+| Rulesets | Yes, except each bypass list | Reading rulesets needs only **Metadata: read**, which every workflow token has. GitHub returns a ruleset's bypass list only to a token that can write the ruleset. |
+| Visibility | Yes | GitHub reports it to every token that can read the repository. |
+| General settings | Those GitHub returns to the token, such as the Issues, Projects, Wiki, Discussions and downloads switches | GitHub returns the merge-related settings only to a token that can also write contents. |
+| Private vulnerability reporting | Yes, on a public repository | Its endpoint needs only **Metadata: read**. |
+| Dependabot alerts and security updates | No | Their endpoints need **Administration: read**, which no workflow permission grants. The workflow scope never calls them. |
+| Secret scanning and push protection | No | GitHub reports them only to administrators of the repository. |
+| Actions settings | No | Their endpoints need **Administration: read**. |
+
+The run fails on drift in any value it reads: a managed ruleset that is missing,
+disabled or changed in a rule, a condition or its target, a different
+visibility, or a different general setting. A ruleset that other rulesets cover
+counts as covered, as in `--check`. A value it cannot read is never drift and
+never a match: the output prints it as `NOT CHECKED`, and the job summary lists
+it under **Not checked**. When everything it reads matches, the result is
+`PARTIAL` and the run passes; the list names what only `--check` with an
+administrator's token verifies, as the [release closeout](../release/CLOSEOUT.md)
+and the [setup guide](../setup/REPOSITORY_SETUP.md#-verify-the-result) run it.
+A value is not checked only when GitHub leaves it out of its answer, or refuses
+to read it with HTTP 401, 403 or 404. Any other failed request, such as a server
+error or no answer, is an API failure, as is a refused read of the repository or
+its rulesets, such as rulesets that the account's GitHub plan does not offer for the
+repository: it fails the run with status 2. In a new repository the run fails until the baseline is applied.
+
+Sources: [repository REST API][repo-api] (merge-related settings and
+`security_and_analysis`), [ruleset REST API][rules-api] (bypass list),
+[permissions of fine-grained tokens][token-permissions] and
+[workflow token permissions][workflow-permissions].
+
+[rules-api]: https://docs.github.com/en/rest/repos/rules
+[token-permissions]: https://docs.github.com/en/rest/authentication/permissions-required-for-fine-grained-personal-access-tokens
+[workflow-permissions]: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions

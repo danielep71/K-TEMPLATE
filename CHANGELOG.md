@@ -466,6 +466,17 @@ milestones and their pull requests.
   of the source and the mutant printed. It refuses a text that does not occur
   exactly once, overlapping occurrences included, an output folder that Git
   does not ignore, and a symbolic link at the mutant's path (#400).
+- The daily **Detect settings drift** workflow compares the live rulesets with
+  `docs/setup/repository-settings.json` using only the job's read-only token,
+  and fails on drift. It runs the new
+  `tools/setup_repository.py --check --token-scope workflow`, which compares
+  what that token can read: each ruleset without its bypass list, the
+  visibility, the general settings GitHub returns to it and, on a public
+  repository, private vulnerability reporting. Each value it cannot read is
+  listed as not checked, never as drift or a match; with no drift the result
+  is `PARTIAL` and the run passes. `--summary PATH` appends a Markdown summary
+  in every mode. The [settings reference](docs/repo_governance/SETTINGS.md#drift)
+  lists what the workflow checks and why (#403).
 
 ### Changed
 
