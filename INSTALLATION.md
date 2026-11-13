@@ -291,7 +291,10 @@ evidence-grade. Then it:
    the workbook ([HB-04](docs/methodology/VALIDATION_PLAN.md#host-behaviour));
 3. runs the certification of step 5 below, with that folder and
    `tests\fixtures`;
-4. closes the workbook without saving, and quits Excel;
+4. closes the workbook without saving, and quits Excel. If the Excel
+   instance it started is still running 30 seconds later, it ends that
+   process, and only that one: it checks the process name and the start
+   time it recorded when it started Excel, so it never ends another Excel;
 5. writes `host.txt`, the
    [host record](docs/methodology/TEST_HARNESS.md#host-record): you as the
    operator (your Windows user name, or `--operator "<name>"`), the start and
@@ -303,7 +306,11 @@ evidence-grade. Then it:
 
 It prints the report and saves it as `test-results\excel-run-report.txt`.
 It must end with `Binding: VERIFIED` and `excel-run: PASS`; record it as
-step 10 says.
+step 10 says. The command also prints an `excel-quit:` line, which the
+saved report holds after its outcome, to say how Excel ended: `EXITED`;
+`STOPPED` when the command ended its process; `SURVIVED` when it could
+not, so close that Excel yourself; or `UNKNOWN` when it could not tell,
+so close any Excel window the run left open.
 
 There is no export: the check proves identity by rebuilding the commit in a
 temporary worktree. The workbook Excel ran must hold the same parts as that
@@ -476,12 +483,50 @@ also rebuilds the commit in a temporary Git worktree:
 | `export-manifest.json` does not match the exported files or the workbook, or the workbook's `build_commit` is not the commit of a clean build | The export is not bound to a workbook built from the commit (`Binding: FAIL`) |
 | With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
 | The commit holds `tests/accuracy/contracts.json`, and `results.json` or the results file a project suite names is missing or names another commit, a build with local changes or, for a workbook imported by hand, no commit; or two files hold the same result, the files together lack a result, a result lies outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
+| With `--equivalent-to`, a [run input](#a-run-for-another-commit) has another Git blob at the two commits, or exists at only one of them | The run does not show what the other commit would run |
 
 It cannot see Excel: the host record, from the operator to the outcome, is
 the runner's own record. A PASS says the evidence is consistent
 with the commit. It validates a calculation only as far as its accuracy
 contracts and their reference values do; the template's illustrative
 contract validates none.
+
+### A run for another commit
+
+A run is evidence for the commit the workbook was built from. It also counts
+for a later commit that changes none of its run inputs, such as a commit
+that changes only a guide outside `docs/methodology/` or a workflow. Check it
+from a clean checkout of that later commit, with `--commit` naming the commit
+of the run and `--equivalent-to` the full SHA of the commit to certify:
+
+```sh
+python tools/check_excel_run.py test-results/excel-run --commit RUN_SHA \
+  --equivalent-to CANDIDATE_SHA \
+  --workbook test-results/build/Workbook-development.xlsm --require-binding
+```
+
+The evidence and the binding are checked against `RUN_SHA`, as above: the
+workbook's `build_commit` and the results still name it. Then every run input
+must have the same Git blob at both commits, and none may be added or
+removed. The run inputs are:
+
+- every VBA component (`.bas`, `.cls`, `.frm`) and form resource (`.frx`)
+  of the tree;
+- every file in a directory of any configuration of
+  `tools/devbuild/workbook.json`, at either commit, and in `src/workbook/`;
+- every file in `docs/methodology/`, `tests/fixtures/`, `tests/expected/` and
+  `tests/accuracy/`, which the suites or the accuracy check read;
+- every `.gitattributes` file, at the root or in any directory, because each
+  one can change the bytes Git checks these files out with;
+- `tools/devbuild/workbook.json`, `src/workbook/Template.xlsx`,
+  `.github/excel-evidence-policy.json`, and the build tools
+  `tools/devbuild/build_workbook.py` and `tools/devbuild/vba_project.py`.
+
+The report then names `CANDIDATE_SHA` as the candidate and `RUN_SHA` as the
+run commit, and adds
+`Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)`. Any
+difference is a `FAIL` line that names the path; record a new run for that
+commit instead. Record both commits wherever you cite the run.
 
 ## 🔄 Upgrading to a new revision
 

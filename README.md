@@ -182,6 +182,7 @@ flowchart LR
 | **OpenSSF Scorecard** | Pushes to the default branch and weekly | The repository's supply-chain posture |
 | **Link check** | Weekly | External links |
 | **Sync issue labels** · **Detect issue-label drift** | Catalogue changes · daily | The live labels against `.github/labels.json`, never deleting one in use |
+| **Detect settings drift** | Daily | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
 | **Issue triage** | Issue and milestone events | Assignee, one priority, an open milestone, a target end date and a dependency section on every open issue |
 | **Keep milestones issue-only** | Pull request events and daily | Removes any milestone set on a pull request, and lists each removal |
 | **Release** | A pushed `vX.Y.Z` tag | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |
@@ -194,7 +195,7 @@ flowchart LR
 - The [house style](docs/VBA_HOUSE_STYLE.md) covers naming, contracts, errors
   and cleanup.
 - The [public API inventory](docs/PUBLIC_API.txt) lists the supported entry
-  points.
+  points, and every other public declaration under `src/`.
 - The [installation guide](INSTALLATION.md) moves source between the
   repository and Excel, and covers upgrades, troubleshooting and removal.
 

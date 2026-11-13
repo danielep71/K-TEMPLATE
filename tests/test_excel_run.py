@@ -4,7 +4,8 @@ The command runs only on Windows with Excel. These tests check the rest: the
 host record it writes is accepted by check_excel_run.py and names the
 project's references, the record of a run that stops early, the Windows
 description, the Excel bitness and Trust access it reads, the evidence folder
-it empties, and the PowerShell script that drives Excel, which is faked.
+it empties, the PowerShell script that drives Excel, which is faked, and how
+it reports the end of the Excel instance it started.
 """
 
 from __future__ import annotations
@@ -170,6 +171,28 @@ class HostRecordTest(unittest.TestCase):
         self.assertEqual(excel_run.excel_host("EXCEL-AUTOMATION-SECURITY=9"),
                          {"excel": "", "bitness": "", "automation_security": ""})
 
+    def test_how_excel_ended_comes_from_what_the_script_prints(self) -> None:
+        for result in excel_run.QUIT_RESULTS:
+            with self.subTest(result=result):
+                output = EXCEL_OUTPUT + f"EXCEL-QUIT={result}\r\nEXCEL-RUN=DONE\n"
+                self.assertEqual(excel_run.excel_quit(output), result)
+                self.assertTrue(excel_run.quit_line(result).startswith(
+                    f"excel-quit: {result} ("))
+        # No line (Excel did not start, or PowerShell stopped first) or another value.
+        self.assertEqual(excel_run.excel_quit(EXCEL_OUTPUT), "UNKNOWN")
+        self.assertEqual(excel_run.excel_quit("EXCEL-QUIT=KILLED"), "UNKNOWN")
+        self.assertIn("close it yourself", excel_run.quit_line("SURVIVED"))
+        # The line is not a field of the host record.
+        self.assertEqual(excel_run.excel_host("EXCEL-QUIT=STOPPED"),
+                         {"excel": "", "bitness": "", "automation_security": ""})
+
+    def test_the_report_holds_how_excel_ended_after_the_outcome(self) -> None:
+        report = "Candidate commit: abc\nOutcome: PASS\nBinding: VERIFIED\nexcel-run: PASS"
+        self.assertEqual(excel_run.with_quit(report, "STOPPED").splitlines(),
+                         ["Candidate commit: abc", "Outcome: PASS",
+                          excel_run.quit_line("STOPPED"), "Binding: VERIFIED",
+                          "excel-run: PASS"])
+
     def test_the_tool_reads_the_macro_settings_and_never_writes_them(self) -> None:
         source = (ROOT / "tools/devbuild/excel_run.py").read_text(encoding="utf-8")
         for call in ("SetValue", "CreateKey", "DeleteValue", "DeleteKey"):
@@ -240,6 +263,73 @@ class PowerShellTest(unittest.TestCase):
         self.assertIn('if ($null -eq $excel) { "UNAVAILABLE" } else { "INCOMPLETE" }',
                       self.script)
 
+    def test_the_process_of_the_instance_it_starts_is_recorded(self) -> None:
+        # From the window of the instance New-Object created, never by a process name,
+        # and before the workbook opens.
+        created = self.script.index("$excel = New-Object -ComObject Excel.Application")
+        window = self.script.index("$window = [IntPtr][int64]$excel.Hwnd")
+        found = self.script.index(
+            "[void][ExcelRunWindow]::GetWindowThreadProcessId($window, [ref]$windowProcess)")
+        start = self.script.index(
+            "$excelStart = (Get-Process -Id ([int]$windowProcess)).StartTime")
+        opened = self.script.index("$excel.Workbooks.Open(")
+        self.assertLess(created, window)
+        self.assertLess(window, found)
+        self.assertLess(found, start)
+        self.assertLess(start, opened)
+        self.assertIn("public static extern uint GetWindowThreadProcessId(IntPtr window, "
+                      "out uint processId);", self.script)
+        # A failure to read them leaves them unknown and does not stop the run.
+        self.assertIn("} catch {\n        $excelId = $null\n        $excelStart = $null\n"
+                      "    }", self.script)
+
+    def test_after_quit_only_the_recorded_process_is_ended_past_the_wait(self) -> None:
+        quit_ = self.script.index("$excel.Quit()")
+        released = self.script.index("FinalReleaseComObject($excel)")
+        wait = self.script.index(f"$process.WaitForExit({excel_run.QUIT_WAIT * 1000})")
+        guard = self.script.index("if ($process.ProcessName -ne 'EXCEL' -or "
+                                  "$process.StartTime -ne $excelStart) {")
+        stop = self.script.index("Stop-Process -InputObject $process -Force")
+        self.assertLess(quit_, released)
+        self.assertLess(released, wait)
+        self.assertLess(wait, guard)
+        self.assertLess(guard, stop)
+        self.assertIn("$process = Get-Process -Id $excelId -ErrorAction SilentlyContinue",
+                      self.script)
+        self.assertIn("$process.Refresh()", self.script)
+        self.assertIn(f"$ended = $process.WaitForExit({excel_run.STOP_WAIT * 1000})",
+                      self.script)
+        # The workbook is released too, so that no reference keeps Excel running.
+        self.assertIn("FinalReleaseComObject($book)", self.script)
+        # The wait runs even when closing failed.
+        self.assertIn("    } finally {\n        # Runs even when closing failed.", self.script)
+        # One process, by its id: never by a name, never all Excel processes.
+        self.assertEqual(self.script.count("Stop-Process"), 1)
+        for call in ("-Name", "taskkill", "Get-Process EXCEL", "Get-Process -ProcessName",
+                     ".Kill("):
+            self.assertNotIn(call, self.script)
+        self.assertIn('if ($started) { Write-Output ("EXCEL-QUIT=" + $quit) }', self.script)
+
+    def test_the_wait_after_quit_is_bounded_by_its_argument(self) -> None:
+        script = excel_run.powershell_script(Path(r"C:\Dev\Workbook-development.xlsm"),
+                                             Path(r"C:\Dev\run"), Path(r"C:\Dev\fixtures"),
+                                             ["TEST_Examples.CertifyExamples"],
+                                             "TEST_Harness.LastResult", 300, quit_wait=5)
+        self.assertIn("$process.WaitForExit(5000)", script)
+        self.assertNotIn(f"WaitForExit({excel_run.QUIT_WAIT * 1000})", script)
+
+    def test_the_guides_state_the_wait_after_quit(self) -> None:
+        for guide in ("SECURITY.md", "INSTALLATION.md"):
+            with self.subTest(guide=guide):
+                text = " ".join((ROOT / guide).read_text(encoding="utf-8").split())
+                self.assertIn(f"still running {excel_run.QUIT_WAIT} seconds", text)
+
+    def test_every_result_the_script_prints_is_known(self) -> None:
+        tail = self.script[self.script.index('$quit = "UNKNOWN"'):]
+        printed = set(re.findall(r'\$quit = "([A-Z]+)"', tail)) | set(
+            re.findall(r'\{ "([A-Z]+)" \}', tail))
+        self.assertEqual(printed, set(excel_run.QUIT_RESULTS))
+
     def test_progress_records_do_not_reach_the_output(self) -> None:
         self.assertIn("$ProgressPreference = 'SilentlyContinue'", self.script)
 
@@ -289,8 +379,10 @@ class PowerShellTest(unittest.TestCase):
 
 
 class CommandTest(unittest.TestCase):
-    def stopped(self, run: mock.Mock, error: str, outcome: str) -> dict[str, str]:
-        """The host record a run that stops early leaves, with PowerShell faked by ``run``."""
+    def stopped(self, run: mock.Mock, error: str, outcome: str,
+                quit: str = "UNKNOWN") -> dict[str, str]:
+        """The host record a run that stops early leaves, with PowerShell faked by ``run``;
+        the output says how Excel ended (``quit``)."""
         built = mock.Mock(commit="a" * 40, clean=True)
         folder = ROOT / "test-results" / "excel-run-unit-test"
         try:
@@ -308,6 +400,7 @@ class CommandTest(unittest.TestCase):
             check.assert_not_called()
             self.assertIn("click Enable Content", output.getvalue())
             self.assertIn(f"outcome={outcome}", output.getvalue())
+            self.assertIn(excel_run.quit_line(quit), output.getvalue())
             host = read_host(folder / POLICY.host)
             evidence = check_excel_run.Evidence()
             check_excel_run.check_host(folder, evidence, POLICY, rebuilt=True)
@@ -326,8 +419,9 @@ class CommandTest(unittest.TestCase):
 
     def test_macros_never_enabled_leave_a_record_of_that_outcome(self) -> None:
         run = mock.Mock(return_value=subprocess.CompletedProcess(
-            [], excel_run.NOT_ENABLED, EXCEL_OUTPUT + "EXCEL-RUN=NOT-ENABLED", ""))
-        host = self.stopped(run, "not enabled within 300 s", "NOT_ENABLED")
+            [], excel_run.NOT_ENABLED,
+            EXCEL_OUTPUT + "EXCEL-QUIT=EXITED\nEXCEL-RUN=NOT-ENABLED", ""))
+        host = self.stopped(run, "not enabled within 300 s", "NOT_ENABLED", "EXITED")
         self.assertEqual((host["excel"], host["bitness"], host["automation_security"],
                           host["vba_project_access"]),
                          ("16.0 build 17928", "64-bit", "ByUI", "NOT_TRUSTED"))
@@ -347,6 +441,32 @@ class CommandTest(unittest.TestCase):
         opened = mock.Mock(return_value=subprocess.CompletedProcess(
             [], 6, EXCEL_OUTPUT + "EXCEL-RUN=INCOMPLETE; cannot open", ""))
         self.stopped(opened, "exit 6, outcome INCOMPLETE", "INCOMPLETE")
+
+    def test_a_completed_run_prints_and_saves_how_excel_ended(self) -> None:
+        built = mock.Mock(commit="a" * 40, clean=True)
+        folder = ROOT / "test-results" / "excel-run-quit-unit-test"
+        saved = folder.parent / f"{folder.name}-report.txt"
+        run = mock.Mock(return_value=subprocess.CompletedProcess(
+            [], 0, EXCEL_OUTPUT + "EXCEL-QUIT=STOPPED\nEXCEL-RUN=DONE", ""))
+        evidence = check_excel_run.Evidence(host={"outcome": "PASS"}, binding="VERIFIED")
+        try:
+            with mock.patch("excel_run.build_workbook.build", return_value=built), \
+                    mock.patch.object(subprocess, "run", run), \
+                    mock.patch.object(excel_run, "windows_version", return_value="Windows 11"), \
+                    mock.patch.object(excel_run, "executable_bitness", return_value="64-bit"), \
+                    mock.patch.object(excel_run, "vba_project_access",
+                                      return_value="NOT_TRUSTED"), \
+                    mock.patch("excel_run.check_excel_run.check", return_value=evidence), \
+                    redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(excel_run.record(ROOT, folder, 600, 300, "Operator Name"), 0)
+            report = saved.read_text(encoding="utf-8").splitlines()
+        finally:
+            shutil.rmtree(folder, ignore_errors=True)
+            saved.unlink(missing_ok=True)
+        line = excel_run.quit_line("STOPPED")
+        self.assertIn(line, output.getvalue())
+        self.assertEqual(report[report.index(line) - 1], "Outcome: PASS")
+        self.assertTrue(report[-1].startswith("excel-run: PASS"))
 
     def test_the_wait_for_enable_content_is_shorter_than_the_run(self) -> None:
         with redirect_stdout(io.StringIO()), mock.patch("sys.stderr", io.StringIO()), \

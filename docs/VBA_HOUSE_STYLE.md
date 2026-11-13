@@ -43,8 +43,10 @@ it is `<REGIME>_`, they accept any project prefix that is not a reserved one
 Every component starts with `Option Explicit`. Core and test standard modules
 also use `Option Private Module`. Procedures are `Private` unless another
 component calls them. `Public` does not mean supported: only the declarations
-listed in [PUBLIC_API.txt](PUBLIC_API.txt) are the supported API, and a change
-to one updates the inventory, its contract and its tests together.
+listed under `[supported]` in [PUBLIC_API.txt](PUBLIC_API.txt) are the
+supported API, and a change to one updates the inventory, its contract and its
+tests together. Every other `Public` declaration under `src/` is listed under
+`[project-public]`, so making a member `Public` is a reviewed change.
 
 - Declare array bounds explicitly; never use `Option Base`.
 - Prefer specific types to `Variant`. Use `Variant` only at a boundary that
@@ -56,7 +58,11 @@ to one updates the inventory, its contract and its tests together.
 A native `Declare` needs its own compatibility review: `PtrSafe` alone does not
 make a declaration correct. Use `LongPtr` for pointers and handles, and the
 widths the API defines for every other argument; never replace `Long` with
-`LongPtr` wholesale.
+`LongPtr` wholesale. Record the export's ABI, its `arguments` and `returns`,
+in the [register of native declarations](REPOSITORY_STRUCTURE.md#native-declarations):
+`tools/check_vba_declares.py` then compares each `Declare` of the export with
+it in every compilation environment, so that a `Long` handle under VBA7 or a
+`LongPtr` in a VBA6 branch is reported.
 
 Every `Declare` imports an export listed in the
 [register of native declarations](REPOSITORY_STRUCTURE.md#native-declarations),
@@ -157,6 +163,11 @@ These are required fields of the result, not an existing type.
 - Return both outcomes, or publish the cleanup failures through a documented
   output before raising the saved primary error again. If only cleanup fails,
   report a cleanup failure, not success.
+- Disable the procedure's own handler with `On Error GoTo 0` before you raise
+  the saved primary error again, then pass the saved number, source and
+  description to `Err.Raise`. After `Resume <label>`, the
+  `On Error GoTo <label>` handler is enabled again: it would trap the raise
+  and resume to the same cleanup, which raises again, and Excel can hang.
 - Never reset `Calculation`, `EnableEvents`, `ScreenUpdating`, `DisplayAlerts`
   or `StatusBar` to an assumed default. Capture only what the operation
   changes. Sheets and other objects an operation creates need the same
@@ -214,12 +225,12 @@ integrity** reports its findings as a warning, not a failure.
 | --- | --- |
 | `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`; no tab or trailing white space, except in a form's VBE header; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
 | `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe` |
-| `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target is a label of the same procedure, in each environment; no label is defined twice in a procedure |
-| `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match [PUBLIC_API.txt](PUBLIC_API.txt) one to one, with normalized signatures; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
+| `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target, and the line number in `If x Then 100`, is a label of the same procedure, in each environment; no label is defined twice in a procedure; no `Err.Raise` or `Error` statement follows a `Resume <label>` while one of the procedure's own `On Error GoTo <label>` handlers is enabled |
+| `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match the `[supported]` tier of [PUBLIC_API.txt](PUBLIC_API.txt), and every other public declaration under `src/` its `[project-public]` tier, one to one, with normalized signatures; no declaration listed in the wrong tier; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
 | `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
 | `tools/check_vba_errors.py` | In each environment, on the straight-line code of each procedure: no read of `Err.Number`, `Err.Source` or `Err.Description` after an `On Error` statement or `Err.Clear`, also written `Call Err.Clear`, which clears `Err`, or, in an error handler, after a call or member access (`Helper`, `x = Helper(1)`, `x = Helper` without parentheses, `Debug.Print`, `Application.StatusBar = False`, `New`) or an assignment to a property (`Status = x` with a `Property Let Status`), which may change it. A copy into a variable or into a field of a variable declared `As` a user-defined `Type` of the project (`Saved.Number = Err.Number`), a literal, a constant or an Enum member, also qualified (`RunStatus.rsFailed`, `Module.LIMIT`), a VBA function such as `CLng`, `CStr` or `Len`, also written `VBA.CLng`, and a VBA statement such as `ReDim`, `Erase`, `Open` or `Print #` change nothing. After `On Error Resume Next`, `Err` belongs to the last statement that runs anything, since any can fail, even `Number = 1`: a read checks that statement, and only a declaration, a comment, `With Err`, `End With` or a write of a property of `Err` whose value runs nothing (`Err.Number = 0`) comes between `On Error` or `Err.Clear` and a read reported as stale. A read inside the arguments of a call, as in `CLng(Err.Number)`, comes before the call, and a call or member access that the same statement evaluates before a read counts as one before it; assigning a property of `Err` is not a read, and `.Number` inside `With Err` reads `Err.Number` |
-| `tools/check_vba_declares.py` | In each environment: every `Declare` imports an export that `docs/native-declarations.json` lists with its library, matched by its `Alias`, or else its name, ignoring case; no `Declare` of `GetLastError`; `Err.LastDllError` is read only as `<local> = Err.LastDllError`, into a `Dim` or `Static` variable, in the statement directly after a statement that is one `Declare` call (`Name args`, `Call Name(args)` or `<variable> = Name(args)`, the name alone or qualified by its module's name), never after a call inside a condition, a single-line `If`, an expression or an argument, or one assigned to an array element or a member, and never as `.LastDllError` in a `With Err` block or through another qualifier; a call to an export registered as ambiguous on zero assigns its result, and nothing else, to a local variable, directly after `SetLastError 0` and directly before that capture, and no `Declare Sub` is registered as ambiguous on zero; the register has the documented shape |
+| `tools/check_vba_declares.py` | In each environment: every `Declare` imports an export that `docs/native-declarations.json` lists with its library, matched by its `Alias`, or else its name, ignoring case; no `Declare` of `GetLastError`; `Err.LastDllError` is read only as `<local> = Err.LastDllError`, into a `Dim` or `Static` variable, in the statement directly after a statement that is one `Declare` call (`Name args`, `Call Name(args)` or `<variable> = Name(args)`, the name alone or qualified by its module's name), never after a call inside a condition, a single-line `If`, an expression or an argument, or one assigned to an array element or a member, and never as `.LastDllError` in a `With Err` block or through another qualifier; a call to an export registered as ambiguous on zero assigns its result, and nothing else, to a local variable, directly after `SetLastError 0` and directly before that capture, and no `Declare Sub` is registered as ambiguous on zero; a `Declare` whose export has an ABI in the register has its number of parameters, each one's type and `ByVal` or `ByRef`, and `Sub` or `Function` with its return type, with a registered `pointer` as `LongPtr` under VBA7 and `Long` under VBA6; the register has the documented shape |
 | `tools/check_vba_calls.py` (advisory) | In each environment, for every call that resolves to a procedure of the project, a statement call (`Name args`, `Call Name(args)`, `Module.Name args`) or a call with parentheses in an expression (`x = Helper(1)`): no more arguments than the procedure accepts and every required one passed, counting `Optional` parameters, a `ParamArray` and named arguments (`Name:=Value`); no named argument the procedure does not declare; no qualified call to a `Private` procedure of another module |
 
 What they cannot prove:
@@ -255,6 +266,18 @@ What they cannot prove:
   `CallByName`. Parentheses after a function without parameters may index its
   result, so their arguments are not counted, and it checks neither argument
   types nor `ByRef` passing;
+- the jump check follows the error handler from a `Resume <label>` target
+  along the text of the procedure, merging the branches of `If`,
+  `Select Case` and loop blocks. It follows no jump, and `Resume` and
+  `Resume Next` start no path, because the statement they continue at is
+  known only at run time. A `Resume <label>` that runs only under a
+  condition, as in a retry, starts no path either. Where branches, later
+  passes of a loop or a `GoSub` may leave the handler in different states,
+  it reports nothing; after a `GoSub`, that is the case unless the
+  subroutine runs straight to its `Return` with no branch, jump, raise or
+  `On Error` statement. It checks a raise in a loop body in the first pass
+  only, and never inside a subroutine. After a bare `Do ... Loop` around the
+  `Resume` target, it follows only an `Exit Do` reached in the first pass;
 - the error check follows straight-line code only, and says nothing where
   it cannot prove a read stale:
   - a label and a branch or loop statement (`If`, `Select Case`, `Do`,
@@ -340,9 +363,10 @@ What they cannot prove:
     which of several such statements a read was meant for;
 - the native declaration check reads the statements of a procedure in
   order: it follows no jump, so a `GoTo` past the call is not seen, nor an
-  error replaced inside the call itself. It compares a `Declare` with the
-  register by export and library only, not by parameters or return type. A
-  `Declare` is private to its module, so it resolves a call to a `Declare`
+  error replaced inside the call itself. It compares a `Declare`'s
+  signature only with an ABI the register records, and it cannot know
+  whether that ABI is the one the library documents. A `Declare` is private
+  to its module, so it resolves a call to a `Declare`
   of the calling module only, by its name alone or qualified by the
   module's name. It cannot tell a variable from a `Property` of the same
   class assigned without a qualifier, and it does not report a register
