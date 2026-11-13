@@ -143,11 +143,8 @@ GitHub copies files from a template, not its settings. In order:
    ```sh
    git switch -c docs/settings-evidence
    python tools/setup_repository.py --repo OWNER/NEW-REPO
-   python tools/setup_repository.py --repo OWNER/NEW-REPO --apply \
-     --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
-   python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
-     --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-     --evidence 'docs/repo_governance/settings-evidence-{date}.json'
+   python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
+   python tools/setup_repository.py --repo OWNER/NEW-REPO --check --report docs/repo_governance/SETTINGS_EVIDENCE.md --evidence 'docs/repo_governance/settings-evidence-{date}.json'
    ```
 
 5. Run **Sync issue labels** and create milestones with due dates

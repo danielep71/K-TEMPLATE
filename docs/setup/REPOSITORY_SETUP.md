@@ -37,7 +37,8 @@
 ## ▶️ Launch sequence
 
 Run from the copied repository directory. Replace `OWNER/NEW-REPO` with the
-**new destination**, not the source template.
+**new destination**, not the source template. Each command is on one line, so
+it can be pasted into PowerShell or `sh` alike.
 
 Run it on a task branch created from the default branch, such as
 `docs/settings-evidence`:
@@ -97,8 +98,7 @@ Apply needs it.
 ### ② Apply the baseline
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --apply \
-  --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
+python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
 ```
 
 Replace `PLAN_SHA256` with the digest that the preview printed. Apply reads the
@@ -140,9 +140,7 @@ repository's **Settings → Actions → General**, then rerun `--check`.
 ### ③ Verify the result
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
-  --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-  --evidence 'docs/repo_governance/settings-evidence-{date}.json'
+python tools/setup_repository.py --repo OWNER/NEW-REPO --check --report docs/repo_governance/SETTINGS_EVIDENCE.md --evidence 'docs/repo_governance/settings-evidence-{date}.json'
 ```
 
 A verified match returns **0**. `--report` writes the repository's **setup
@@ -205,8 +203,7 @@ A named ruleset that differs and is not covered blocks apply before any writes.
 After reviewing the preview, explicitly allow replacement of its entire definition:
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --update-existing \
-  --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
+python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --update-existing --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
 ```
 
 Replacement removes additional rules or bypasses inside that named ruleset; a
