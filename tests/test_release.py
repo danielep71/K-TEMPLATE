@@ -128,7 +128,7 @@ class ReleaseTest(unittest.TestCase):
     def test_deviations_may_be_a_list_on_the_next_lines(self) -> None:
         head = self.git("rev-parse", "HEAD").strip()
         self.tag(message=f"v1.2.0 - Release\n\nCandidate {head}.\nDeviations:\n"
-                         "- Invariant 7: the published workbook was not checked.\n"
+                         "- Invariant 8: the published workbook was not checked.\n"
                          "* Invariant 4: the run names another build.\n")
         self.assertEqual(self.problems(), [])
 
