@@ -81,6 +81,16 @@ Use only the categories an entry needs.
   (#470).
 - The setup guide and the README quote the `--evidence` path that holds
   `{date}`, so that the documented command also works in PowerShell (#471).
+- The journal of `tools/setup_repository.py --apply` also records the ID
+  that GitHub returns for each ruleset it creates or replaces (#479).
+- The setup commands of the setup guide and the README are each on one line,
+  without `sh` line continuations, so that they can be pasted into
+  PowerShell (#478).
+- The pull request review guide and README step 8 no longer say that Codex
+  needs an environment for the repository: a repository generated from the
+  template had its first pull request reviewed without one. If Codex asks
+  for an environment instead of reviewing, an `@codex review` comment
+  produces the review (#477).
 
 ### Fixed
 

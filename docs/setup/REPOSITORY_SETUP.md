@@ -37,7 +37,8 @@
 ## ▶️ Launch sequence
 
 Run from the copied repository directory. Replace `OWNER/NEW-REPO` with the
-**new destination**, not the source template.
+**new destination**, not the source template. Each command is on one line, so
+it can be pasted into PowerShell or `sh` alike.
 
 Run it on a task branch created from the default branch, such as
 `docs/settings-evidence`:
@@ -97,8 +98,7 @@ Apply needs it.
 ### ② Apply the baseline
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --apply \
-  --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
+python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
 ```
 
 Replace `PLAN_SHA256` with the digest that the preview printed. Apply reads the
@@ -111,12 +111,13 @@ written to GitHub, and the read-back runs as usual.
 `--journal PATH` names a new file; an existing one is refused before any write.
 The journal is JSON with the plan digest, the repository, the configuration's
 SHA-256, the start time, each planned write with its method, endpoint and status
-(`pending`, `done` or `failed`, with the error text), the ruleset's name for a
-ruleset write, and the read-back result. It is written atomically before the
-first write and again after each write's result, so it exists before anything
-reaches GitHub. A failing write stops the sequence
-and is recorded; nothing is retried or rolled back. Keep the journal with the
-setup record, for example beside `SETTINGS_EVIDENCE.md` as the path above does.
+(`pending`, `done` or `failed`, with the error text), and the read-back result.
+A ruleset write also names its ruleset, and once done records the ID that GitHub
+returned for it. The journal is written atomically before the first write and
+again after each write's result, so it exists before anything reaches GitHub. A
+failing write stops the sequence and is recorded; nothing is retried or rolled
+back. Keep the journal with the setup record, for example beside
+`SETTINGS_EVIDENCE.md` as the path above does.
 
 The script first sets the three merge methods where they differ, because GitHub
 may reject a ruleset that allows a disabled one. It then creates missing rulesets,
@@ -139,9 +140,7 @@ repository's **Settings → Actions → General**, then rerun `--check`.
 ### ③ Verify the result
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
-  --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-  --evidence 'docs/repo_governance/settings-evidence-{date}.json'
+python tools/setup_repository.py --repo OWNER/NEW-REPO --check --report docs/repo_governance/SETTINGS_EVIDENCE.md --evidence 'docs/repo_governance/settings-evidence-{date}.json'
 ```
 
 A verified match returns **0**. `--report` writes the repository's **setup
@@ -204,8 +203,7 @@ A named ruleset that differs and is not covered blocks apply before any writes.
 After reviewing the preview, explicitly allow replacement of its entire definition:
 
 ```sh
-python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --update-existing \
-  --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
+python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --update-existing --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
 ```
 
 Replacement removes additional rules or bypasses inside that named ruleset; a

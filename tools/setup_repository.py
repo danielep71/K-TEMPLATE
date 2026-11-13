@@ -998,12 +998,16 @@ def apply(call: Call, args: argparse.Namespace, config: dict[str, Json], state: 
     write_json_atomically(args.journal, journal)
     for entry, (method, endpoint, payload) in zip(journal['writes'], steps):
         try:
-            call(method, endpoint, payload)
+            response = call(method, endpoint, payload)
         except Exception as error:
             entry.update(status='failed', error=str(error))
             write_json_atomically(args.journal, journal)
             raise
         entry['status'] = 'done'
+        # A ruleset write records the ID GitHub answers with, so that a created
+        # ruleset can be found again even when a later write fails.
+        if 'ruleset' in entry and isinstance(response, dict) and isinstance(response.get('id'), int):
+            entry['ruleset_id'] = response['id']
         write_json_atomically(args.journal, journal)
         print(f'Applied {method} {endpoint}')
     # Read back after every apply, an empty one included, so that the journal

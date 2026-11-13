@@ -143,11 +143,8 @@ GitHub copies files from a template, not its settings. In order:
    ```sh
    git switch -c docs/settings-evidence
    python tools/setup_repository.py --repo OWNER/NEW-REPO
-   python tools/setup_repository.py --repo OWNER/NEW-REPO --apply \
-     --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
-   python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
-     --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-     --evidence 'docs/repo_governance/settings-evidence-{date}.json'
+   python tools/setup_repository.py --repo OWNER/NEW-REPO --apply --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
+   python tools/setup_repository.py --repo OWNER/NEW-REPO --check --report docs/repo_governance/SETTINGS_EVIDENCE.md --evidence 'docs/repo_governance/settings-evidence-{date}.json'
    ```
 
 5. Run **Sync issue labels** and create milestones with due dates
@@ -160,8 +157,9 @@ GitHub copies files from a template, not its settings. In order:
    illustrative methodology, cases and contracts.
 7. Optionally, enable traffic collection
    ([traffic history](docs/repo_governance/TRAFFIC.md)).
-8. If Codex reviews your pull requests, create its environment for the new
-   repository ([pull request review](docs/repo_governance/PULL_REQUESTS.md)).
+8. If Codex reviews your pull requests, check that it reviews the new
+   repository's first one; no Codex environment is needed
+   ([pull request review](docs/repo_governance/PULL_REQUESTS.md)).
 
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
 [JSON configuration](docs/setup/repository-settings.json) describe the baseline.
