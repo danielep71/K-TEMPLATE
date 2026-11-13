@@ -425,6 +425,27 @@ milestones and their pull requests.
   `Saved.Number = Err.Number`, are values, not member accesses. The
   [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
   see (#396, #419, #422, #427, #429).
+- **Repository integrity** runs a ninth static check of exported VBA,
+  `vba-declares` (`tools/check_vba_declares.py`), on the new register of
+  native declarations, `docs/native-declarations.json`, which is empty in the
+  template. In each compilation environment it reports, with file, line and
+  environment, a `Declare` whose export and library the register does not
+  list, a `Declare` of `GetLastError`, a `Declare Sub` registered as
+  ambiguous on zero, a read of `Err.LastDllError` other than
+  `<local> = Err.LastDllError` directly after a statement that is one native
+  call, such as a read after a call inside a single-line `If` or a condition,
+  or `.LastDllError` in a `With Err` block, and a call to an export registered
+  as ambiguous on zero that is not directly preceded by `SetLastError 0`,
+  whose whole result is not assigned to a local variable, or that is not
+  directly followed by that capture. A repository with a `Declare` must
+  register its export. An entry may also record the export's ABI, its
+  `arguments` (each type, or `pointer`, and `byval`) and `returns` (a type,
+  `pointer` or `null`); the check then reports, in each environment, a
+  `Declare` whose parameter count, parameter types, `ByVal` or `ByRef`,
+  `Sub` or `Function`, or return type differs from it, with a `pointer`
+  expected as `LongPtr` under VBA7 and `Long` under VBA6 (#399). The house
+  style, the structure guide and the setup guide document the rules and the
+  register; nothing was run in Excel (#398).
 - A pull request that fixes a defect now shows its new or changed test
   failing on the defective code, then passing on the fix, and records how in
   the *Validated* section of the pull request template
