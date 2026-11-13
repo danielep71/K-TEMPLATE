@@ -39,6 +39,18 @@
 Run from the copied repository directory. Replace `OWNER/NEW-REPO` with the
 **new destination**, not the source template.
 
+Run it on a task branch created from the default branch, such as
+`docs/settings-evidence`:
+
+```sh
+git switch -c docs/settings-evidence
+```
+
+Step ② writes its journal, and step ③ its report and evidence, into
+`docs/repo_governance/`, as files to commit. Step ② also creates `Protect main`,
+after which the default branch accepts changes only through a pull request.
+Commit the three files on the task branch and merge them through a pull request.
+
 ### ① Preview the changes
 
 ```sh
@@ -99,9 +111,10 @@ written to GitHub, and the read-back runs as usual.
 `--journal PATH` names a new file; an existing one is refused before any write.
 The journal is JSON with the plan digest, the repository, the configuration's
 SHA-256, the start time, each planned write with its method, endpoint and status
-(`pending`, `done` or `failed`, with the error text) and the read-back result. It
-is written atomically before the first write and again after each write's result,
-so it exists before anything reaches GitHub. A failing write stops the sequence
+(`pending`, `done` or `failed`, with the error text), the ruleset's name for a
+ruleset write, and the read-back result. It is written atomically before the
+first write and again after each write's result, so it exists before anything
+reaches GitHub. A failing write stops the sequence
 and is recorded; nothing is retried or rolled back. Keep the journal with the
 setup record, for example beside `SETTINGS_EVIDENCE.md` as the path above does.
 
@@ -128,7 +141,7 @@ repository's **Settings → Actions → General**, then rerun `--check`.
 ```sh
 python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
   --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-  --evidence docs/repo_governance/settings-evidence-{date}.json
+  --evidence 'docs/repo_governance/settings-evidence-{date}.json'
 ```
 
 A verified match returns **0**. `--report` writes the repository's **setup
@@ -142,15 +155,17 @@ Running apply again against matching settings makes no writes.
 
 `--evidence PATH` writes the same check as JSON, for a machine to read, whether or
 not you also pass `--report`; a `{date}` in the path becomes the UTC date of the
-check (`YYYY-MM-DD`). The record names the mode, repository, default branch and
-result, the configuration's path and SHA-256, and each managed value as configured
+check (`YYYY-MM-DD`). Keep such a path in single quotes, as above: PowerShell
+does not pass the braces of an unquoted `{date}` through. The record names the
+mode, repository, default branch and result, the configuration's path and
+SHA-256, and each managed value as configured
 and observed, with the source of each security feature and Actions setting, each
 managed ruleset with its differences and the rulesets that cover it, the unmanaged
-and inherited rulesets, the method and endpoint of each planned change, without
-its payload, and the plan digest (`plan_sha256`). It works in the
-same modes as `--report`. A public-only feature or Actions setting on another
-visibility is recorded as `not applied (public repositories only)` and does not
-count as drift.
+and inherited rulesets, the method and endpoint of each planned change, with the
+ruleset's name for a ruleset change but without its payload, and the plan digest
+(`plan_sha256`). It works in the same modes as `--report`. A public-only feature
+or Actions setting on another visibility is recorded as
+`not applied (public repositories only)` and does not count as drift.
 
 `--summary PATH` appends a short Markdown summary of the comparison to a file,
 such as `$GITHUB_STEP_SUMMARY`, in every mode.

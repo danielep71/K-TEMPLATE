@@ -136,15 +136,18 @@ GitHub copies files from a template, not its settings. In order:
    needs Python 3.11+ and GitHub CLI authentication; applying needs
    administrator access, the `PLAN SHA-256` that the preview prints and a new
    journal path. Set the Actions settings it reports, which it never
-   writes, in **Settings → Actions → General**:
+   writes, in **Settings → Actions → General**. Run it on a task branch, and
+   merge the journal, report and evidence it writes through a pull request:
+   applying protects the default branch.
 
    ```sh
+   git switch -c docs/settings-evidence
    python tools/setup_repository.py --repo OWNER/NEW-REPO
    python tools/setup_repository.py --repo OWNER/NEW-REPO --apply \
      --approve-plan PLAN_SHA256 --journal docs/repo_governance/settings-journal-YYYY-MM-DD.json
    python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
      --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-     --evidence docs/repo_governance/settings-evidence-{date}.json
+     --evidence 'docs/repo_governance/settings-evidence-{date}.json'
    ```
 
 5. Run **Sync issue labels** and create milestones with due dates

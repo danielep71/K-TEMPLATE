@@ -257,6 +257,9 @@ class SetupTests(unittest.TestCase):
         record = self.journal()
         self.assertEqual([(w['method'], w['status']) for w in record['writes']],
                          [(method, 'done') for method, _, _ in self.api.writes])
+        # Each ruleset write names its ruleset; the five POSTs share one endpoint.
+        names = [ruleset['name'] for ruleset in setup.load_config(setup.CONFIG)['rulesets']]
+        self.assertEqual([w.get('ruleset') for w in record['writes']], names + [None] * 3)
         self.assertEqual(record['readback'], 'VERIFIED')
         self.api.writes.clear()
         # The same plan is stale once applied: the second apply approves the empty one.
@@ -720,6 +723,9 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.api.writes, [])
         self.args.update_existing = True
         self.assertEqual(self.run_setup(), 0)
+        replaced = [w for w in self.journal()['writes'] if w['method'] == 'PUT' and '/rulesets/' in w['endpoint']]
+        self.assertEqual([(w['endpoint'], w['ruleset']) for w in replaced],
+                         [(f'{REPO}/rulesets/1', rule['name'])])
 
     def test_unrelated_rules_are_preserved(self) -> None:
         self.api.rules = [{'name': 'Other rule', 'id': 10, 'source_type': 'Repository'}]
@@ -965,8 +971,12 @@ class SetupTests(unittest.TestCase):
                            'source': 'GET actions/permissions/artifact-and-log-retention days', 'matches': True},
                           drift['actions'])
             self.assertEqual({r['status'] for r in drift['rulesets']}, {'missing'})
-            self.assertEqual(drift['planned_changes'][0], {'method': 'POST', 'endpoint': REPO + '/rulesets'})
-            self.assertTrue(all(set(step) == {'method', 'endpoint'} for step in drift['planned_changes']))
+            first = setup.load_config(setup.CONFIG)['rulesets'][0]['name']
+            self.assertEqual(drift['planned_changes'][0],
+                             {'method': 'POST', 'endpoint': REPO + '/rulesets', 'ruleset': first})
+            self.assertTrue(all(set(step) == {'method', 'endpoint'} | ({'ruleset'} if '/rulesets' in step['endpoint']
+                                                                         else set())
+                                for step in drift['planned_changes']))
             self.assertNotIn('"rules"', json.dumps(drift['planned_changes']))
             self.assertIn('Only the settings', drift['scope'])
 
@@ -1145,6 +1155,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual([w['status'] for w in record['writes']], ['done', 'failed'] + ['pending'] * 6)
         self.assertEqual(record['writes'][1]['method'], 'POST')
         self.assertEqual(record['writes'][1]['endpoint'], REPO + '/rulesets')
+        self.assertEqual(record['writes'][1]['ruleset'], setup.load_config(setup.CONFIG)['rulesets'][1]['name'])
         self.assertIn('HTTP 500', record['writes'][1]['error'])
         self.assertNotIn('error', record['writes'][0])
         self.assertIsNone(record['readback'])
