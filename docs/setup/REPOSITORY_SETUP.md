@@ -39,6 +39,18 @@
 Run from the copied repository directory. Replace `OWNER/NEW-REPO` with the
 **new destination**, not the source template.
 
+Run it on a task branch created from the default branch, such as
+`docs/settings-evidence`:
+
+```sh
+git switch -c docs/settings-evidence
+```
+
+Step ② writes its journal, and step ③ its report and evidence, into
+`docs/repo_governance/`, as files to commit. Step ② also creates `Protect main`,
+after which the default branch accepts changes only through a pull request.
+Commit the three files on the task branch and merge them through a pull request.
+
 ### ① Preview the changes
 
 ```sh

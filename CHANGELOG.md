@@ -75,6 +75,10 @@ Use only the categories an entry needs.
 - The journal of `tools/setup_repository.py --apply` and the planned changes
   of its `--evidence` record name the ruleset of each ruleset write, so that
   the writes to the shared `rulesets` endpoint can be told apart (#469).
+- The setup guide and the README run the settings baseline on a task branch,
+  since applying it protects the default branch: the journal, report and
+  evidence it writes are committed there and merged through a pull request
+  (#470).
 
 ### Fixed
 
