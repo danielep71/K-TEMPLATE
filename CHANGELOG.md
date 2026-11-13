@@ -438,8 +438,14 @@ milestones and their pull requests.
   as ambiguous on zero that is not directly preceded by `SetLastError 0`,
   whose whole result is not assigned to a local variable, or that is not
   directly followed by that capture. A repository with a `Declare` must
-  register its export. The house style, the structure guide and the setup
-  guide document the rules and the register; nothing was run in Excel (#398).
+  register its export. An entry may also record the export's ABI, its
+  `arguments` (each type, or `pointer`, and `byval`) and `returns` (a type,
+  `pointer` or `null`); the check then reports, in each environment, a
+  `Declare` whose parameter count, parameter types, `ByVal` or `ByRef`,
+  `Sub` or `Function`, or return type differs from it, with a `pointer`
+  expected as `LongPtr` under VBA7 and `Long` under VBA6 (#399). The house
+  style, the structure guide and the setup guide document the rules and the
+  register; nothing was run in Excel (#398).
 - The daily **Detect settings drift** workflow compares the live rulesets with
   `docs/setup/repository-settings.json` using only the job's read-only token,
   and fails on drift. It runs the new
