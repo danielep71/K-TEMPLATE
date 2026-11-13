@@ -63,6 +63,22 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Changed
+
+- *Start a new repository* in the README says that **Use this template**
+  copies the template's default branch, not a release tag, and asks to record
+  the template commit a new repository came from; the setup guide's
+  prerequisites say the same (#462). A new step leads to the setup guide's
+  handover table for the files the initializer leaves as they are, such as
+  the README's title, banner and wiki links, the social preview and the
+  repository's **About** fields (#463).
+
+### Fixed
+
+- `tools/initialize_repository.py` writes no file when it only lists the
+  changes, not even the bytecode of the tools it imports, as the README says
+  (#464).
+
 ## [1.0.0] - 2026-11-11
 
 Changes made before this changelog existed are described by the closed

@@ -78,7 +78,11 @@ that keeps them honest.
 
 GitHub copies files from a template, not its settings. In order:
 
-1. Create the repository with **Use this template**.
+1. Create the repository with **Use this template**. GitHub copies the
+   template's default branch as it is at that moment, not a release tag:
+   record the template commit the new repository came from, or the release
+   tag when the default branch equals it, so that later template changes
+   can be compared with it.
 2. Adapt the files to the new repository, in a clean clone of it. The first
    command lists the changes and writes nothing; `--apply` makes them. Neither
    changes anything on GitHub. `PREFIX` is the project's short name, such as
@@ -145,9 +149,15 @@ GitHub copies files from a template, not its settings. In order:
 
 5. Run **Sync issue labels** and create milestones with due dates
    ([issue labels](docs/repo_governance/ISSUE_LABELS.md)).
-6. Optionally, enable traffic collection
+6. Adapt, replace or remove the remaining template files, as the setup
+   guide's [handover table](docs/setup/REPOSITORY_SETUP.md#recommended-handover)
+   says. The initializer leaves them as they are: among them the title,
+   introduction, banner and wiki links of this README, the social preview
+   in `docs/assets/`, the repository's **About** fields, and the
+   illustrative methodology, cases and contracts.
+7. Optionally, enable traffic collection
    ([traffic history](docs/repo_governance/TRAFFIC.md)).
-7. If Codex reviews your pull requests, create its environment for the new
+8. If Codex reviews your pull requests, create its environment for the new
    repository ([pull request review](docs/repo_governance/PULL_REQUESTS.md)).
 
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
