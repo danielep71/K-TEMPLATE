@@ -18,6 +18,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -340,6 +341,21 @@ class GeneratedRepositoryTest(unittest.TestCase):
                             .read_text(encoding="utf-8"))
         return code, printed.getvalue(), {check["name"]: check["status"]
                                           for check in report["checks"]}
+
+    def test_the_dry_run_writes_no_file_not_even_an_ignored_one(self) -> None:
+        def every_path() -> list[str]:
+            return sorted(path.relative_to(self.root).as_posix() for path in self.root.rglob("*")
+                          if ".git" not in path.relative_to(self.root).parts)
+        before = every_path()
+        # Without this variable Python writes the bytecode of each module it imports.
+        environment = {key: value for key, value in os.environ.items()
+                       if key != "PYTHONDONTWRITEBYTECODE"}
+        dry_run = subprocess.run([sys.executable, "tools/initialize_repository.py", "--repository",
+                                  REPOSITORY, "--regime", "LCR"], cwd=self.root, env=environment,
+                                 capture_output=True, text=True, check=False)
+        self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
+        self.assertIn("dry run, nothing written", dry_run.stdout)
+        self.assertEqual(every_path(), before)
 
     def test_an_initialized_copy_passes_repository_integrity(self) -> None:
         code, _, statuses = self.integrity(list(CLEANUP_CHECKS))

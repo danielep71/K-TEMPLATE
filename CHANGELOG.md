@@ -63,6 +63,12 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Fixed
+
+- `tools/initialize_repository.py` writes no file when it only lists the
+  changes, not even the bytecode of the tools it imports, as the README says
+  (#464).
+
 ## [1.0.0] - 2026-11-11
 
 Changes made before this changelog existed are described by the closed

@@ -34,6 +34,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# The preview writes nothing, not even the bytecode of the tools it imports.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_changelog import NO_RELEASE, VERSION_HEADING, foreign_references  # noqa: E402
