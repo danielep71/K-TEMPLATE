@@ -745,6 +745,8 @@ SNAPSHOT_HEADER = ('snapshot_date,collected_at,observed_at,first_date,last_date,
                    'unique_views_14d,clones_14d,unique_clones_14d,stars,forks,watchers,open_issues\n')
 
 
+@unittest.skipUnless((WORKFLOWS / 'traffic-history.yml').is_file(),
+                     '.github/workflows/traffic-history.yml does not exist')
 @unittest.skipIf(yaml is None and not os.environ.get('GITHUB_ACTIONS'),
                  'PyYAML is not installed: python -m pip install -r .github/requirements.txt')
 @unittest.skipIf((shutil.which('bash') is None or shutil.which('jq') is None)

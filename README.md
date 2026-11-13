@@ -60,7 +60,7 @@ that keeps them honest.
 | Area | What the template provides |
 | --- | --- |
 | Source control for Excel | Editing and Git policies for workbooks, exported VBA source and byte-preserved regulatory source copies |
-| VBA quality | Static checks of exported VBA (layout, names, `#If` structure, jump targets, visibility, dependency direction, identifiers, calls) and a layout formatter, run on every change |
+| VBA quality | Static checks of exported VBA (layout, names, `#If` structure, jump targets, visibility, dependency direction, identifiers, `Err` copies, calls) and a layout formatter, run on every change |
 | Reproducible builds | A macro-enabled workbook built from the source of one commit, without *Trust access to the VBA project object model*, with the export bound to the workbook it came from |
 | Testing and evidence | A VBA test harness with a certification entry point, numerical test cases and accuracy contracts, and an offline check that the evidence of an Excel run matches one commit |
 | Methodology | Guides for the sources, the data contract, the calculation and workbook contracts and the validation plan, with a traceability table from each rule to its tests |
