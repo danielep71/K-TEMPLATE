@@ -131,6 +131,7 @@ either, `changelog` runs without `--repository`.
 | `vba-dependencies` | `python tools/check_vba_dependencies.py` |
 | `vba-identifiers` | `python tools/check_vba_identifiers.py` |
 | `vba-errors` | `python tools/check_vba_errors.py` |
+| `vba-declares` | `python tools/check_vba_declares.py` |
 | `vba-calls` | `python tools/check_vba_calls.py` (advisory: findings warn, never fail the run) |
 | `data-contract` | `python tools/check_data_contract.py` |
 | `test-cases` | `python tools/check_test_cases.py` |
