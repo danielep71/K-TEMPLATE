@@ -40,7 +40,7 @@ and the Excel checks of an attached workbook stay manual
 
 | Step | Needs | Produces |
 | ---: | --- | --- |
-| 1 | The milestone's remaining issues | Their changes merged and integrated into the default branch |
+| 1 | The milestone's remaining issues, and the [maintenance audit](MAINTENANCE_AUDIT.md) | The audit report on this issue; the issues' changes and the audit's fixes merged and integrated into the default branch |
 | 2 | Step 1; if I decide to release, RELEASING.md steps 1 and 2 | The candidate: the integration merge commit, or for a release the candidate of RELEASING.md step 2, in the candidate record |
 | 3 | Step 2 | The file audit below, at the candidate |
 | 4 | Step 3; for a release, RELEASING.md step 3 | The rest of the candidate record, the evidence index and the scope statement, at the candidate; every checklist row done |
@@ -58,6 +58,7 @@ and the Excel checks of an attached workbook stay manual
 | 5 | Repository settings match the baseline when the candidate is checked: `setup_repository.py --check` | Dated evidence record: the `--report` Markdown or the `--evidence` JSON | ☐ |
 | 6 | The file audit covers every tracked file at the candidate | File audit | ☐ |
 | 7 | The scope statement is recorded | This issue | ☐ |
+| 8 | The maintenance audit ran before the candidate was frozen; each finding is fixed, tracked in an issue or recorded as a deviation | Audit report comment | ☐ |
 
 ### Candidate record
 

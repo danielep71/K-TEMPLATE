@@ -84,18 +84,29 @@ A version may be published only when:
 4. the candidate's VBA is imported, compiled and run in Excel on the
    [supported host](INSTALLATION.md#%EF%B8%8F-host-policy), the run is
    [recorded](INSTALLATION.md#recording-an-excel-run) from a workbook built
-   from the candidate, and passes `tools/check_excel_run.py` with a
-   `VERIFIED` binding, and the result is in
+   from the candidate, or from an earlier commit whose run inputs are
+   identical ([step 4](#4-certify-the-workbook)), and passes
+   `tools/check_excel_run.py` with a `VERIFIED` binding, and the result is in
    the [release certification](docs/release/RELEASE_CERTIFICATION.md);
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
-6. the annotated tag targets the candidate; and
-7. the checks after publication pass.
+6. the [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) was run before
+   the candidate was frozen, its report is on the milestone closeout issue,
+   and each of its findings is fixed, tracked in an issue or accepted as a
+   deviation;
+7. the annotated tag targets the candidate; and
+8. the checks after publication pass.
 
 If the source changes after steps 3 to 5, the evidence is stale and is
 produced again for the new candidate.
 
 ## 🪜 Preparing and publishing a version
+
+Start with the [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) of the
+repository's issues, pull requests, review discussions and notifications, and
+post its report on the milestone closeout issue. Fix its findings through task
+pull requests before step 2 freezes the candidate, or track each in an issue
+and record it as a deviation.
 
 ### 1. Finalize the changelog and `VERSION`
 
@@ -146,7 +157,9 @@ open alerts under **Security → Code scanning**.
 
 Complete the [milestone closeout](docs/release/CLOSEOUT.md) for this
 candidate: its candidate record, file audit and settings check, and the rest
-of its checklist. Records made on an earlier commit do not count.
+of its checklist. Records made on an earlier commit do not count. The one
+exception is the Excel run of step 4, and only when
+`tools/check_excel_run.py --equivalent-to` proves its run inputs identical.
 
 ### 4. Certify the workbook
 
@@ -185,6 +198,24 @@ consistent with it. This check is a release gate, not a
 **Repository integrity** step, because the evidence exists only for a
 candidate. If a case or the check fails, fix it through a task pull request
 and start again at step 2.
+
+A run made on an earlier commit certifies the candidate only when every run
+input of the candidate has the same Git blob as at the run's commit, for
+example when the candidate adds only a fix to a workflow or a guide outside
+`docs/methodology/`. Check it from a clean checkout of the candidate, with
+`--commit` naming the run's commit
+([a run for another commit](INSTALLATION.md#a-run-for-another-commit)):
+
+```sh
+python tools/check_excel_run.py test-results/excel-run --commit RUN_SHA \
+  --equivalent-to CANDIDATE_SHA \
+  --workbook test-results/build/Workbook-development.xlsm --require-binding
+```
+
+It must also print
+`Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)`. The
+certification record names both commits. Any other earlier run does not
+count.
 
 If the repository keeps a [user manual](#user-manual), build its PDF from the
 candidate as that section describes, and record it, with the PDF tool and its
@@ -226,7 +257,7 @@ or list each invariant that was not met on the lines that follow it, one
 
 ```text
 Deviations:
-- Invariant 7: <what was not met, and why>.
+- Invariant 8: <what was not met, and why>.
 ```
 
 `Deviations:` with nothing after it fails. Copy results from the runs
@@ -370,6 +401,7 @@ Before attaching it, check that it opens and names version `X.Y.Z`.
 
 Keep with the release, in its certification issue and the release notes:
 
+- the maintenance audit report;
 - the candidate SHA and the integration pull request;
 - the **Repository integrity** run and the CodeQL assessment;
 - the Excel run, with the host it names;
@@ -404,14 +436,15 @@ Logs and artifacts expire, so copy the decisive lines.
 | # | Gate | Done |
 | ---: | --- | :---: |
 | 1 | I decided to prepare the version | ☐ |
-| 2 | Changelog section dated and `VERSION` created or updated | ☐ |
-| 3 | Release branch integrated into the default branch, and synced back | ☐ |
-| 4 | Candidate frozen: the integration merge commit's full SHA | ☐ |
-| 5 | Repository checks and **Repository integrity** pass on the candidate; CodeQL alerts assessed | ☐ |
-| 6 | Release certification recorded for the candidate | ☐ |
-| 7 | Distribution review recorded and closed | ☐ |
-| 8 | I decided to publish | ☐ |
-| 9 | Annotated tag on the candidate | ☐ |
-| 10 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
-| 11 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
-| 12 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |
+| 2 | Maintenance audit reported on the closeout issue; each finding fixed, tracked or accepted | ☐ |
+| 3 | Changelog section dated and `VERSION` created or updated | ☐ |
+| 4 | Release branch integrated into the default branch, and synced back | ☐ |
+| 5 | Candidate frozen: the integration merge commit's full SHA | ☐ |
+| 6 | Repository checks and **Repository integrity** pass on the candidate; CodeQL alerts assessed | ☐ |
+| 7 | Release certification recorded for the candidate | ☐ |
+| 8 | Distribution review recorded and closed | ☐ |
+| 9 | I decided to publish | ☐ |
+| 10 | Annotated tag on the candidate | ☐ |
+| 11 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
+| 12 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
+| 13 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |

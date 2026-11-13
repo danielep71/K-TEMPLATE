@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🧰 MyTemplate
+<img src="docs/assets/social-preview.png" alt="K-TEMPLATE: the starting point for regulatory risk calculation workbooks in Excel VBA, for SA-CCR, SFT, FRTB, LCR and NSFR" width="100%">
+
+# 🧰 K-TEMPLATE
 
 ### The starting point for regulatory risk calculation workbooks in Excel VBA
 
@@ -13,9 +15,9 @@
 [![Python](https://img.shields.io/badge/Tooling-Python_3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](#-quality-gates)
 [![GitHub Actions](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](#-quality-gates)
 [![License](https://img.shields.io/badge/License-MPL_2.0-2ea44f?style=for-the-badge)](#-license)
-<br>[![Clones, including CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/MyTemplate/traffic-history/data/badges/clones.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
-[![Unique visitors, last 14 days](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/MyTemplate/traffic-history/data/badges/visitors.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
-[![Daily unique visitors since tracking began](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/MyTemplate/traffic-history/data/badges/visits.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
+<br>[![Clones, including CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/K-TEMPLATE/traffic-history/data/badges/clones.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
+[![Unique visitors, last 14 days](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/K-TEMPLATE/traffic-history/data/badges/visitors.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
+[![Daily unique visitors since tracking began](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/K-TEMPLATE/traffic-history/data/badges/visits.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
 
 <br>
 
@@ -35,7 +37,7 @@
 &nbsp;·&nbsp;
 [Status](#-status)
 &nbsp;·&nbsp;
-[Template wiki](https://github.com/danielep71/MyTemplate/wiki)
+[Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki)
 
 ---
 
@@ -60,7 +62,7 @@ that keeps them honest.
 | Area | What the template provides |
 | --- | --- |
 | Source control for Excel | Editing and Git policies for workbooks, exported VBA source and byte-preserved regulatory source copies |
-| VBA quality | Static checks of exported VBA (layout, names, `#If` structure, jump targets, visibility, dependency direction, identifiers, `Err` copies, calls) and a layout formatter, run on every change |
+| VBA quality | Static checks of exported VBA (layout, names, `#If` structure, jump targets, visibility, dependency direction, identifiers, `Err` copies, native declarations, calls) and a layout formatter, run on every change |
 | Reproducible builds | A macro-enabled workbook built from the source of one commit, without *Trust access to the VBA project object model*, with the export bound to the workbook it came from |
 | Testing and evidence | A VBA test harness with a certification entry point, numerical test cases and accuracy contracts, and an offline check that the evidence of an Excel run matches one commit |
 | Methodology | Guides for the sources, the data contract, the calculation and workbook contracts and the validation plan, with a traceability table from each rule to its tests |
@@ -182,6 +184,7 @@ flowchart LR
 | **OpenSSF Scorecard** | Pushes to the default branch and weekly | The repository's supply-chain posture |
 | **Link check** | Weekly | External links |
 | **Sync issue labels** · **Detect issue-label drift** | Catalogue changes · daily | The live labels against `.github/labels.json`, never deleting one in use |
+| **Detect settings drift** | Daily | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
 | **Issue triage** | Issue and milestone events | Assignee, one priority, an open milestone, a target end date and a dependency section on every open issue |
 | **Keep milestones issue-only** | Pull request events and daily | Removes any milestone set on a pull request, and lists each removal |
 | **Release** | A pushed `vX.Y.Z` tag | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |
@@ -194,7 +197,7 @@ flowchart LR
 - The [house style](docs/VBA_HOUSE_STYLE.md) covers naming, contracts, errors
   and cleanup.
 - The [public API inventory](docs/PUBLIC_API.txt) lists the supported entry
-  points.
+  points, and every other public declaration under `src/`.
 - The [installation guide](INSTALLATION.md) moves source between the
   repository and Excel, and covers upgrades, troubleshooting and removal.
 
@@ -222,12 +225,12 @@ The full layout and its rules are in
 | [`docs/repo_governance/`](docs/repo_governance/README.md) | Settings, issue labels, pull requests, traffic, distribution |
 | [`docs/setup/REPOSITORY_SETUP.md`](docs/setup/REPOSITORY_SETUP.md) | Setting up a new repository and what to keep, adapt or remove |
 | [`RELEASING.md`](RELEASING.md) | How a version is prepared, certified and published, and the current status |
-| [`docs/release/`](docs/release/CLOSEOUT.md) | The milestone [closeout](docs/release/CLOSEOUT.md) and the [release certification](docs/release/RELEASE_CERTIFICATION.md) records |
+| [`docs/release/`](docs/release/CLOSEOUT.md) | The milestone [closeout](docs/release/CLOSEOUT.md) and the [release certification](docs/release/RELEASE_CERTIFICATION.md) records, and the [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) done before each release |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, checks, rules of evidence and pull requests |
 | [`SECURITY.md`](SECURITY.md) | Private vulnerability reporting, runtime risk surface and data handling |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Participant behaviour and conduct reporting |
 | [`CHANGELOG.md`](CHANGELOG.md) | Change history |
-| [Template wiki](https://github.com/danielep71/MyTemplate/wiki) | A guided tour of the template, page by page; the documents above govern where it differs |
+| [Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki) | A guided tour of the template, page by page; the documents above govern where it differs |
 
 ## 📌 Status
 

@@ -14,7 +14,8 @@ Each NAME has a renderer here that computes the block from the repository:
   by the same code that checks Excel-run evidence (tools/check_excel_run.py);
 - integrity-checks, in CONTRIBUTING.md: the checks that
   tools/check_repository.py runs, in order, with what each runs, as CI runs
-  it for the repository OWNER/REPOSITORY, and whether it is advisory;
+  it for the repository OWNER/REPOSITORY, the probe it must fail first, if
+  any, and whether it is advisory;
 - data-contract-datasets and data-contract-fields, in
   docs/methodology/DATA_CONTRACT.md: the Datasets table and one field table
   per dataset, read from docs/methodology/data-contract.json by the code that
@@ -125,6 +126,9 @@ def integrity_checks(root: Path) -> str:
                                  "docstring to describe it")
             summary = lines[0]
             runs = f"Built in: {summary}"
+        if check.probe is not None:
+            runs += (f", once the probe `{shown_command(check.probe.command)}` has failed "
+                     f"with `{check.probe.finding}`")
         if check.advisory:
             runs += " (advisory: findings warn, never fail the run)"
         rows.append(f"| `{check.name}` | {runs} |")

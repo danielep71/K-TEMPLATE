@@ -17,6 +17,7 @@ they hold whatever contracts, cases and suites this repository has.
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import dataclasses
 import io
@@ -371,6 +372,28 @@ class RebuildTest(unittest.TestCase):
         self.assertTrue(any("compile=FAIL, expected PASS or ON_DEMAND" in item
                             for item in failed.findings), failed.findings)
 
+    def test_a_workbook_built_with_overrides_never_certifies(self) -> None:
+        # Even an override identical to the commit's module marks the build.
+        folder = Path(self.temporary.name) / "overrides"
+        folder.mkdir()
+        harness = self.root / POLICY.harness
+        (folder / harness.name).write_bytes(harness.read_bytes())
+        workbook = Path(self.temporary.name) / "Workbook-overridden.xlsm"
+        built = build_workbook.build(self.root, "development", workbook, override=folder)
+        stamp = build_workbook.commit_stamp(built)
+
+        def overridden_results(folder: Path) -> None:
+            write_results(folder, results_document(stamp, self.root))
+        result = self.checked(workbook, overridden_results)
+        self.assertEqual(result.binding, "FAIL")
+        expected = f"built with overrides, so not evidence for {self.commit}"
+        self.assertIn(f"workbook {workbook.name}: {expected}", " ".join(result.findings))
+        self.assertIn(f"{POLICY.results}: written by a workbook {expected}",
+                      " ".join(result.findings))
+        report = check_excel_run.report(self.commit, result)
+        self.assertNotIn("Binding: VERIFIED", report)
+        self.assertIn("excel-run: FAIL", report)
+
     def test_without_an_export_or_a_workbook_the_sources_are_missing(self) -> None:
         with evidence(self.automated) as folder:
             result = check_excel_run.check(self.root, self.commit, folder)
@@ -435,6 +458,27 @@ class BindingTest(unittest.TestCase):
                 self.assertEqual(result.binding, "FAIL")
                 self.assertTrue(any("build stamp" in item and text in item
                                     for item in result.findings), result.findings)
+
+    def test_an_overridden_workbook_never_binds(self) -> None:
+        override = build_workbook.Override("TEST_Harness", Path("mutants/TEST_Harness.bas"),
+                                           "0" * 64)
+        build = build_workbook.Build(COMMIT, "2026-11-02T10:00:00+01:00", True, "development",
+                                     (), overrides=(override,), override_folder="mutants")
+        data = build_workbook.package(build_workbook.load_layout(SOURCE), build, b"project")
+        def bad_manifest(folder: Path, _: Path) -> None:
+            (folder / POLICY.manifest).write_text('{"format": "other"}', "utf-8")
+        # Every binding path with an export reads the stamp: with a manifest,
+        # without one, and with one that is not valid.
+        for name, options in (("manifest", {}), ("no manifest", {"manifest": False}),
+                              ("invalid manifest", {"change": bad_manifest})):
+            with self.subTest(path=name):
+                result = self.bound(data=data, **options)
+                self.assertEqual(result.binding, "FAIL")
+                found = [item for item in result.findings
+                         if f"built with overrides, so not evidence for {COMMIT}" in item
+                         and "TEST_Harness SHA-256 " + "0" * 64 in item]
+                self.assertEqual(len(found), 1, result.findings)
+                self.assertIn("excel-run: FAIL", check_excel_run.report(COMMIT, result))
 
     def test_the_stamp_is_read_from_shared_strings_after_excel_saves(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -738,6 +782,147 @@ class EvidenceTest(unittest.TestCase):
         self.assertIn("excel-run: FAIL", output.getvalue())
 
 
+def commit_change(root: Path, base: str, changes: dict[str, bytes | None]) -> str:
+    """A commit on top of ``base`` that writes each file of ``changes``, or deletes
+    it when its bytes are None."""
+    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", base],
+                   capture_output=True, check=True)
+    for name, data in changes.items():
+        if data is None:
+            (root / name).unlink()
+        else:
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(data)
+    for command in (["add", "-A"],
+                    ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                     "-c", "commit.gpgsign=false", "commit", "-qm", "Change"]):
+        subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
+    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
+                          check=True, text=True).stdout.strip()
+
+
+@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+class EquivalenceTest(unittest.TestCase):
+    """--equivalent-to: one run certifies a commit whose run inputs are identical."""
+
+    root: ClassVar[Path]
+    built: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root, cls.built = make_repository()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def run_main(self, *arguments: str) -> tuple[int, str]:
+        with evidence(root=self.root, commit=self.built) as folder, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            code = check_excel_run.main([str(folder), "--commit", self.built,
+                                         "--root", str(self.root), *arguments])
+        return code, output.getvalue()
+
+    def findings(self, target: str) -> list[str]:
+        with evidence(root=self.root, commit=self.built) as folder:
+            return check_excel_run.check(self.root, self.built, folder,
+                                         equivalent_to=target).findings
+
+    def test_identical_run_inputs_certify_the_other_commit(self) -> None:
+        target = commit_change(self.root, self.built, {
+            "README.md": b"Documentation only.\n",
+            ".github/workflows/ci.yml": b"on: push\n"})
+        code, text = self.run_main("--equivalent-to", target)
+        self.assertEqual(code, 0, text)
+        # Every file of the fixture commit is a run input; the two added are not.
+        tracked = subprocess.run(["git", "-C", str(self.root), "ls-tree", "-r", "--name-only",
+                                  self.built], capture_output=True, check=True,
+                                 text=True).stdout.split()
+        self.assertIn(f"Candidate commit: {target}", text)
+        self.assertIn(f"Run commit: {self.built} (the workbook was built from it)", text)
+        self.assertIn(f"Equivalent: {target} ({len(tracked)} run inputs identical to "
+                      f"{self.built})", text)
+        self.assertIn("excel-run: PASS", text)
+
+    def test_a_changed_run_input_fails_and_is_named(self) -> None:
+        harness = (self.root / POLICY.harness).read_bytes()
+        policy = (self.root / check_excel_run.POLICY).read_bytes()
+        fixtures = subprocess.run(["git", "-C", str(self.root), "ls-tree", "-r", "--name-only",
+                                   self.built, "--", "tests/fixtures"], capture_output=True,
+                                  check=True, text=True).stdout.split()
+        layout = json.loads((self.root / check_excel_run.BUILD_CONFIG).read_bytes())
+        layout["configurations"]["development"].append("lib")
+        changes: list[tuple[str, dict[str, bytes | None], list[str]]] = [
+            ("changed module", {POLICY.harness: harness + b"' changed\n"},
+             [f"run input {POLICY.harness}: differs between"]),
+            ("changed policy", {check_excel_run.POLICY: policy + b"\n"},
+             [f"run input {check_excel_run.POLICY}: differs between"]),
+            ("added module", {"src/modules/MAdded.bas": b'Attribute VB_Name = "MAdded"\n'},
+             ["run input src/modules/MAdded.bas: only at"]),
+            ("removed resource", {"src/forms/frmFixture.frx": None},
+             [f"run input src/forms/frmFixture.frx: only at {self.built[:12]}"]),
+            ("changed build tool", {check_excel_run.BUILD_TOOLS[1]: b"# changed\n"},
+             [f"run input {check_excel_run.BUILD_TOOLS[1]}: only at"]),
+            ("file of a configuration directory", {"src/core/notes.txt": b"notes\n"},
+             ["run input src/core/notes.txt: only at"]),
+            # An attribute file in any directory is a run input, since attributes can
+            # change the bytes a checkout writes. This one changes no stored bytes, so
+            # it stays the only difference however much of the tree Git re-reads.
+            ("nested attributes", {"tests/.gitattributes": b"*.bas diff\n"},
+             ["run input tests/.gitattributes: only at"]),
+            ("directory only the other configuration names",
+             {check_excel_run.BUILD_CONFIG: json.dumps(layout).encode(),
+              "lib/data.txt": b"data\n"},
+             [f"run input {check_excel_run.BUILD_CONFIG}: differs between",
+              "run input lib/data.txt: only at"])]
+        if fixtures:
+            changes.append(("changed fixture",
+                            {fixtures[0]: (self.root / fixtures[0]).read_bytes() + b" "},
+                            [f"run input {fixtures[0]}: differs between"]))
+        for label, change, expected in changes:
+            with self.subTest(label):
+                target = commit_change(self.root, self.built, change)
+                found = self.findings(target)
+                for text in expected:
+                    self.assertTrue(any(text in item and f"does not certify {target[:12]}"
+                                        in item for item in found), found)
+                self.assertEqual(len(found), len(expected), found)
+        target = commit_change(self.root, self.built, {POLICY.harness: harness + b"' x\n"})
+        code, text = self.run_main("--equivalent-to", target)
+        self.assertEqual(code, 1)
+        self.assertNotIn("Equivalent:", text)
+        self.assertIn(f"FAIL: run input {POLICY.harness}: differs between", text)
+        self.assertIn("excel-run: FAIL", text)
+
+    def test_the_commit_to_certify_is_named_by_its_full_sha(self) -> None:
+        for name in ("HEAD", self.built[:12], self.built.upper()):
+            with self.subTest(name=name):
+                code, text = self.run_main("--equivalent-to", name)
+                self.assertEqual(code, 1)
+                self.assertIn(f"--equivalent-to {name}: not a full lower-case commit SHA", text)
+        code, text = self.run_main("--equivalent-to", "0" * 40)
+        self.assertEqual(code, 1)
+        self.assertIn(f"commit {'0' * 40} not found", text)
+
+    def test_the_build_tools_are_the_modules_the_build_loads(self) -> None:
+        home = SOURCE / "tools" / "devbuild"
+        loaded: set[str] = set()
+        pending = ["build_workbook"]
+        while pending:
+            name = pending.pop()
+            path = home / f"{name}.py"
+            if name in loaded or not path.is_file():
+                continue
+            loaded.add(name)
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Import):
+                    pending += [alias.name for alias in node.names]
+                elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+                    pending.append(node.module)
+        self.assertEqual({f"tools/devbuild/{name}.py" for name in loaded},
+                         set(check_excel_run.BUILD_TOOLS))
+
+
 # A synthetic calculation, declared after the working tree's calculation contracts,
 # and the draft accuracy contracts on synthetic cases of it that the measurement
 # tests use in place of this repository's contracts.
@@ -843,6 +1028,13 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(len(result.findings), 1, result.findings)
         self.assertIn(f"{POLICY.results}: {folder / POLICY.results}: not valid UTF-8 JSON",
                       result.findings[0])
+
+    def test_results_of_an_overridden_build_are_named(self) -> None:
+        stamp = f"{self.commit}{build_workbook.OVERRIDDEN}mutants: CORE_A SHA-256 " \
+            f"{'0' * 64}: NOT evidence-grade)"
+        found = self.changed(lambda document: document.update(commit=stamp))
+        self.assertIn(f"{POLICY.results}: written by a workbook built with overrides, so not "
+                      f"evidence for {self.commit}", " ".join(found))
 
     def test_a_marked_or_missing_stamp_fails(self) -> None:
         for commit in (self.commit + "+local-changes", ""):

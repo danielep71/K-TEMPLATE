@@ -58,7 +58,10 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   SHA-256 of the workbook and of every exported file, and the workbook's
   build stamp names the commit. The binding is VERIFIED, FAIL, or UNVERIFIED
   when no workbook or manifest is given; --require-binding fails anything
-  but VERIFIED.
+  but VERIFIED;
+- a workbook built with tools/devbuild/build_workbook.py --override, which
+  its build stamp names, or a results file that such a workbook wrote: it is
+  never evidence for the commit, and the check names it as such.
 
 Without an exported folder, --workbook proves source identity instead by
 rebuild: the commit is checked out in a temporary worktree and built with
@@ -75,6 +78,31 @@ whole project without Trust access to the VBA project, so VBA compiled only
 the modules the run called, each when it was first used. Any other run must
 record compile=PASS from Debug > Compile VBAProject, which a person can run
 without Trust access.
+
+With --equivalent-to, one run certifies another commit too: the evidence is
+checked against --commit, the commit the workbook was built from, exactly as
+above, binding included, and then every run input must have the same Git blob
+at both commits, none added or removed. The run inputs are the files that
+decide what a build writes, what Excel runs and what this check reads:
+
+- every VBA component and form resource of the tree, which source identity
+  compares;
+- every file in a directory of a configuration of tools/devbuild/workbook.json
+  at either commit, and in src/workbook/, the home of the document modules
+  and of the layout template;
+- every file the accuracy check reads (CASE_PATHS): the methodology guides,
+  the fixtures, which the suites also read, the expected results and the
+  accuracy contracts;
+- every .gitattributes file of the tree, at the root or in any directory,
+  since each one can change the bytes Git checks these files out with;
+- tools/devbuild/workbook.json itself, the layout template, the evidence
+  policy and the build tools (BUILD_TOOLS). A rebuild uses the build tools of
+  the checkout that runs this check, so they must be those of the build.
+
+A run input that differs, or exists at only one commit, is a finding that
+names it. This check is not a run input: run it from a checkout of the
+commit to certify. The workbook's stamp and the results still name the
+commit it was built from, so the report names both commits.
 
 It proves only that this evidence is consistent with the commit. It does not
 run Excel, and a PASS validates a calculation only as far as the commit's
@@ -163,6 +191,15 @@ REBUILT_CONFIGURATION = "development"
 # What tools/check_accuracy.py reads of a commit to measure its contracts.
 CASE_PATHS = ("docs/methodology", "tests/fixtures", "tests/expected",
               check_accuracy.REGISTRY.parent.as_posix())
+# The modules of tools/devbuild/ whose code decides the bytes of a build:
+# build_workbook.py and what it loads from its own directory
+# (tests/test_check_excel_run.py keeps the two equal).
+BUILD_TOOLS = ("tools/devbuild/build_workbook.py", "tools/devbuild/vba_project.py")
+# The single files among the run inputs of --equivalent-to; the directories
+# come from CASE_PATHS and the build configuration, and every Git attribute
+# file of the tree, at any depth, is one too (run_input_paths).
+RUN_INPUT_FILES = (BUILD_CONFIG, build_workbook.TEMPLATE, POLICY, *BUILD_TOOLS)
+ATTRIBUTES = ".gitattributes"
 
 VB_OBJECT_ERROR = -2147221504
 # ERR_TEST_FAILED as vbObjectError + n, or as the literal &H8004xxxx equal to it.
@@ -360,6 +397,7 @@ class Evidence:
     binding_notes: list[str] = field(default_factory=list)
     accuracy: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    equivalence: str = ""
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -961,6 +999,10 @@ def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -
     if not workbook.is_file():
         evidence.findings.append(f"workbook {workbook}: missing")
         return
+    override = workbook_override(root, commit, workbook)
+    if override:
+        evidence.findings.append(override)
+        return
     with tempfile.TemporaryDirectory(prefix="excel-run-rebuild-") as temporary:
         tree = Path(temporary) / "tree"
         target = Path(temporary) / "rebuilt.xlsm"
@@ -995,6 +1037,37 @@ def check_rebuild(root: Path, commit: str, workbook: Path, evidence: Evidence) -
     evidence.binding_notes.append(f"workbook parts byte-identical to the "
                                   f"{REBUILT_CONFIGURATION} build of {commit[:12]}; no export "
                                   "needed")
+
+
+def stamp_name(root: Path, commit: str) -> str | None:
+    """The defined name of the commit stamp in the commit's build configuration."""
+    try:
+        layout = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
+        return str(layout["stamp"]["commit"])
+    except (RuntimeError, ValueError, KeyError, TypeError):
+        return None
+
+
+def overridden(stamp: object) -> bool:
+    """Whether a commit stamp marks a build with --override."""
+    return isinstance(stamp, str) and build_workbook.OVERRIDDEN in stamp
+
+
+def not_evidence(stamp: object, commit: str) -> str:
+    return f"built with overrides, so not evidence for {commit} (build stamp {stamp!r})"
+
+
+def workbook_override(root: Path, commit: str, workbook: Path) -> str:
+    """The finding for a workbook whose build stamp records --override; empty when
+    it records none or cannot be read, which the binding checks report."""
+    stamp_cell = stamp_name(root, commit)
+    try:
+        stamp = read_stamp(workbook, stamp_cell) if stamp_cell else None
+    except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
+            ElementTree.ParseError):
+        return ""
+    return f"workbook {workbook.name}: {not_evidence(stamp, commit)}" if overridden(stamp) \
+        else ""
 
 
 def package_parts(data: bytes) -> list[tuple[str, bytes]]:
@@ -1062,17 +1135,17 @@ def workbook_findings(root: Path, commit: str, workbook: Path, digest: str,
     if actual != digest:
         findings.append(f"workbook {workbook.name}: sha256 {actual}, but {manifest} records "
                         f"{digest}")
-    try:
-        layout = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
-        name = str(layout["stamp"]["commit"])
-    except (RuntimeError, ValueError, KeyError, TypeError):
+    name = stamp_name(root, commit)
+    if name is None:
         return [*findings, f"{BUILD_CONFIG} at {commit[:12]} names no commit stamp"]
     try:
         stamp = read_stamp(workbook, name)
     except (OSError, KeyError, ValueError, IndexError, zipfile.BadZipFile,
             ElementTree.ParseError) as error:
         return [*findings, f"workbook {workbook.name}: build stamp not readable: {error!r}"]
-    if stamp != commit:
+    if overridden(stamp):
+        findings.append(f"workbook {workbook.name}: {not_evidence(stamp, commit)}")
+    elif stamp != commit:
         findings.append(f"workbook {workbook.name}: build stamp {name} is {stamp!r}, expected "
                         f"{commit} from a clean build")
     return findings
@@ -1095,6 +1168,20 @@ def results_files(policy: Policy) -> list[str]:
     suite that names one. BeginRun clears the results, so each suite saves its own."""
     return [policy.results,
             *(item.results for item in policy.project_suites if item.results is not None)]
+
+
+def check_overridden_results(commit: str, folder: Path, evidence: Evidence,
+                             policy: Policy) -> None:
+    """A results file whose commit is the stamp of a build with --override names it,
+    whether or not the commit holds accuracy contracts."""
+    for name in results_files(policy):
+        try:
+            stamp = json.loads((folder / name).read_text(encoding="utf-8")).get("commit")
+        except (OSError, ValueError, AttributeError):
+            continue
+        if overridden(stamp):
+            evidence.findings.append(f"{name}: written by a workbook "
+                                     f"{not_evidence(stamp, commit)}")
 
 
 def check_results(root: Path, commit: str, folder: Path, evidence: Evidence,
@@ -1150,9 +1237,74 @@ def suite_findings(policy: Policy | ProjectSuite, suite: Suite, source: bytes,
     return findings
 
 
+def tree_blobs(root: Path, commit: str) -> dict[str, str]:
+    """Every file of the commit, by path, with its Git blob id."""
+    blobs = {}
+    for entry in filter(None, git(root, "ls-tree", "-r", "-z", "--full-tree", commit)
+                        .split(b"\0")):
+        info, _, path = entry.partition(b"\t")
+        _, kind, blob = info.decode("ascii").split()
+        if kind == "blob":
+            blobs[path.decode("utf-8")] = blob
+    return blobs
+
+
+def configured_directories(root: Path, commit: str) -> set[str]:
+    """The source directories of every configuration of the commit's build
+    configuration; none when the commit has no build configuration, whose
+    absence is itself compared. ValueError when it names none."""
+    try:
+        git(root, "cat-file", "-e", f"{commit}:{BUILD_CONFIG}")
+    except RuntimeError:
+        return set()
+    try:
+        data = json.loads(git(root, "show", f"{commit}:{BUILD_CONFIG}").decode("utf-8"))
+        directories = {str(item).strip("/") for paths in data["configurations"].values()
+                       for item in paths}
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        raise ValueError(f"{BUILD_CONFIG} at {commit[:12]} names no configuration "
+                         f"directories: {error!r}") from error
+    return {item for item in directories if item not in ("", ".")}
+
+
+def run_input_paths(directories: set[str], paths: set[str]) -> set[str]:
+    """Those of ``paths`` that are run inputs, given the configuration directories."""
+    homes = {*directories, *CASE_PATHS, build_workbook.DOCUMENT_HOME}
+    return {path for path in paths
+            if path in RUN_INPUT_FILES or PurePosixPath(path).name == ATTRIBUTES
+            or path.lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)
+            or any(path.startswith(f"{home}/") for home in homes)}
+
+
+def check_equivalence(root: Path, commit: str, target: str, evidence: Evidence) -> None:
+    """Every run input has the same Git blob at ``commit``, the commit the workbook
+    was built from, and at ``target``, the commit to certify; a finding names each
+    one that differs or exists at only one of them."""
+    try:
+        directories = configured_directories(root, commit) | \
+            configured_directories(root, target)
+        built, other = tree_blobs(root, commit), tree_blobs(root, target)
+    except (ValueError, RuntimeError) as error:
+        evidence.findings.append(f"cannot compare the run inputs of {commit[:12]} and "
+                                 f"{target[:12]}: {error}")
+        return
+    inputs = run_input_paths(directories, set(built) | set(other))
+    changed = sorted(path for path in inputs if built.get(path) != other.get(path))
+    for path in changed:
+        where = (f"only at {commit[:12]}, not at {target[:12]}" if path not in other else
+                 f"only at {target[:12]}, not at {commit[:12]}" if path not in built else
+                 f"differs between {commit[:12]} and {target[:12]}")
+        evidence.findings.append(f"run input {path}: {where}, so the run does not certify "
+                                 f"{target[:12]}")
+    if not changed:
+        evidence.equivalence = f"{target} ({len(inputs)} run inputs identical to {commit})"
+
+
 def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
-          require_binding: bool = False) -> Evidence:
+          require_binding: bool = False, equivalent_to: str | None = None) -> Evidence:
     evidence = Evidence()
+    if equivalent_to is not None:
+        check_equivalence(root, commit, equivalent_to, evidence)
     try:
         policy = policy_at(root, commit)
     except PolicyError as error:
@@ -1188,19 +1340,29 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
     check_logs(folder, runs, evidence)
     check_host(folder, evidence, policy, rebuilt)
     check_results(root, commit, folder, evidence, policy)
+    check_overridden_results(commit, folder, evidence, policy)
     if not rebuilt:
         check_binding(root, commit, folder, workbook, evidence, policy)
+        # Whatever the export and its manifest show, a workbook built with
+        # --override is never evidence for the commit.
+        override = workbook_override(root, commit, workbook) if workbook is not None else ""
+        if override:
+            evidence.binding = "FAIL"
+            if override not in evidence.findings:
+                evidence.findings.append(override)
     if require_binding and evidence.binding == "UNVERIFIED":
         evidence.findings.append("binding UNVERIFIED, but --require-binding needs VERIFIED: "
                                  + "; ".join(evidence.binding_notes))
     return evidence
 
 
-def report(commit: str, evidence: Evidence) -> str:
+def report(commit: str, evidence: Evidence, equivalent_to: str | None = None) -> str:
     environment = "; ".join(f"{key}={evidence.environment.get(key, '')}"
                             for key in ENVIRONMENT_FIELDS)
-    lines = [f"Candidate commit: {commit}",
-             f"Environment: {environment}",
+    lines = [f"Candidate commit: {equivalent_to or commit}"]
+    if equivalent_to:
+        lines.append(f"Run commit: {commit} (the workbook was built from it)")
+    lines += [f"Environment: {environment}",
              f"Operator: {evidence.host.get('operator', '')}",
              f"Run: {evidence.host.get('started', '')} to {evidence.host.get('finished', '')}",
              f"Windows: {evidence.host.get('windows', '')}",
@@ -1217,6 +1379,8 @@ def report(commit: str, evidence: Evidence) -> str:
     lines += [f"Accuracy: {line}" for line in evidence.accuracy]
     notes = f" ({'; '.join(evidence.binding_notes)})" if evidence.binding_notes else ""
     lines.append(f"Binding: {evidence.binding}{notes}")
+    if evidence.equivalence:
+        lines.append(f"Equivalent: {evidence.equivalence}")
     lines += [f"FAIL: {finding}" for finding in evidence.findings]
     status = "FAIL" if evidence.findings else "PASS"
     lines.append(f"excel-run: {status} (evidence checked against the commit; Excel is not run "
@@ -1237,16 +1401,28 @@ def main(argv: Sequence[str] | None = None) -> int:
                              "rebuild of the commit")
     parser.add_argument("--require-binding", action="store_true",
                         help="fail unless the binding is VERIFIED (release evidence)")
+    parser.add_argument("--equivalent-to", metavar="SHA",
+                        help="the full SHA of a commit to certify with this run: every run "
+                             "input must have the same Git blob there as at --commit")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    try:
-        commit = git(root, "rev-parse", "--verify", f"{args.commit}^{{commit}}").decode().strip()
-    except RuntimeError as error:
-        print(f"FAIL: commit {args.commit} not found: {error}")
+    if args.equivalent_to is not None and not check_accuracy.SHA.fullmatch(args.equivalent_to):
+        print(f"FAIL: --equivalent-to {args.equivalent_to}: not a full lower-case commit SHA")
         return 1
-    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding)
-    print(report(commit, evidence))
+    resolved = []
+    for name in (args.commit, args.equivalent_to):
+        if name is None:
+            continue
+        try:
+            resolved.append(git(root, "rev-parse", "--verify",
+                                f"{name}^{{commit}}").decode().strip())
+        except RuntimeError as error:
+            print(f"FAIL: commit {name} not found: {error}")
+            return 1
+    commit, target = resolved[0], (resolved[1] if len(resolved) > 1 else None)
+    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding, target)
+    print(report(commit, evidence, target))
     return 1 if evidence.findings else 0
 
 

@@ -1,7 +1,7 @@
 # 🗂️ Repository structure
 
 This guide says where each kind of file lives, which components may call
-which, and how the supported VBA API is recorded. The
+which, and how the public VBA declarations are recorded. The
 [house style](VBA_HOUSE_STYLE.md) covers how the code is written; the
 [methodology guides](methodology/README.md) cover what it must calculate.
 
@@ -16,7 +16,9 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | Repository root | The README; the contribution, conduct, security, installation and release guides (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `INSTALLATION.md`, `RELEASING.md`); `CHANGELOG.md`, `AGENTS.md` and `LICENSE`; the Ruff and mypy settings in `pyproject.toml`; and the Git and editor rules in `.gitattributes`, `.gitignore` and `.editorconfig` | Present |
 | `VERSION` | The newest released version, published or not, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md#current-status)) | Present: the newest released version, which [current status](../RELEASING.md#current-status) also states; `tools/initialize_repository.py` deletes it in a new repository |
 | `.github/` | Workflows (`workflows/`) and the label scripts they run (`scripts/`); issue forms (`ISSUE_TEMPLATE/`) and the pull request template; the label catalogue `labels.json`; the Dependabot configuration and the hash-locked configuration parser of the workflow tests (`requirements.txt`); the binary allowlist `binary-allowlist.json`; the Excel evidence policy `excel-evidence-policy.json`; and, when needed, the expiring link exceptions `link-exceptions.json` | Present, without `link-exceptions.json` |
-| `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
+| `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records and the pre-release maintenance audit (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
+| `docs/assets/` | The repository's social preview image, `social-preview.png`, shown at the top of the README, and its editable source `social-preview.svg` | Present |
+| `docs/native-declarations.json` | The [register of native declarations](#native-declarations): each export a `Declare` imports, with its library, whether its zero result is ambiguous and, optionally, its ABI | Present, with no declaration |
 | `docs/methodology/` | The [index](methodology/README.md) of the guides: sources, data contract and its machine-readable form `data-contract.json`, calculation contracts, validation plan, test-case format, [workbook contract](methodology/WORKBOOK_CONTRACT.md) and [VBA test harness](methodology/TEST_HARNESS.md) | Present, as guides to fill in, with the illustrative dataset `DS-01` |
 | `docs/methodology/sources/` | Byte-preserved copies of regulatory sources | Reserved |
 | `docs/methodology/workbook-protection.json` | The [protection matrix](methodology/WORKBOOK_CONTRACT.md#protection) of `src/workbook/Template.xlsx`, added with the template | Reserved |
@@ -34,7 +36,7 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 | `tests/independent/` | The adapters that run an [independent implementation](methodology/TEST_CASES.md#independent-implementations) on the test cases, and their registry `adapters.json` | Reserved |
 | `tools/` | Repository checks, setup and build tooling, in Python; `tools/devbuild/` builds a workbook from source ([building a workbook from source](../INSTALLATION.md#building-a-workbook-from-source)) | Present |
 | `examples/modules/` | Synthetic VBA examples that use only the supported API | Reserved |
-| `test-results/` | Disposable output of local and CI runs | Ignored by Git |
+| `test-results/` | Disposable output of local and CI runs, and the mutants that `tools/make_mutant.py` writes under `test-results/mutants/` | Ignored by Git |
 
 - **Source first.** The exported source is authoritative. A change made in a
   workbook is exported and reviewed like any other change.
@@ -75,30 +77,47 @@ calls back the other way, so there are no cycles.
 - Repository tooling is not a second implementation of the calculation.
 
 The [static checks](VBA_HOUSE_STYLE.md#static-checks) enforce the locations
-and the role prefixes, and match the inventory below against `src/modules/`.
+and the role prefixes, and match the inventory below against `src/`.
 They enforce this dependency direction by name for core, classes and
 examples only; the direction of the facade and the adapters is checked in
 review.
 
 ## Public API inventory
 
-[PUBLIC_API.txt](PUBLIC_API.txt) lists the supported declarations; in the
-template it lists none. A `Public` declaration is supported only if it is
-listed there, and only the public declarations of the standard modules in
-`src/modules/` can be listed. A class is reached through the facade; its
-public members are not listed. `Option Private Module` limits visibility
-between projects; it is not a security boundary. Test and example modules
-are never part of a production workbook.
+[PUBLIC_API.txt](PUBLIC_API.txt) lists every `Public` declaration under
+`src/`, in two tiers; in the template both are empty.
 
-Each supported declaration is recorded as two tab-separated lines:
+- **`[supported]`:** the supported API, the public declarations of the
+  standard modules in `src/modules/`. A `Public` declaration is supported
+  only if it is listed here.
+- **`[project-public]`:** every other `Public` declaration under `src/`, in
+  core, classes, workbook modules and forms. Other components of the project
+  may call them; no caller outside the project may rely on them. A class is
+  reached through the facade, so its public members are listed here, never
+  under `[supported]`.
+
+The tiers let a reviewer tell a deliberate seam from a member made `Public`
+by mistake. `Option Private Module` limits visibility between projects; it is
+not a security boundary. Test and example modules are never part of a
+production workbook, so their public declarations belong to neither tier.
+
+Each tier starts with its heading on a line of its own. Each declaration is
+recorded under its tier as two tab-separated lines:
 
 ```text
+[supported]
+<component>	<kind>	<name>
+# SIG	<component>	<kind>	<name>	<normalized declaration>
+
+[project-public]
 <component>	<kind>	<name>
 # SIG	<component>	<kind>	<name>	<normalized declaration>
 ```
 
 - **Kinds:** `Function`, `Sub`, `Property Get`, `Property Let`,
-  `Property Set`, `Const`, `Enum` or `Type`.
+  `Property Set`, `Const`, `Enum` or `Type`. Under `[project-public]`, a
+  class, form or workbook module can also expose an `Event`, a `Variable` or
+  a `WithEvents Variable`.
 - **Normalized declaration:** the declaration on one line, outside string
   literals with its white space reduced to single spaces and none just inside
   parentheses, so `Total( ByVal Amount As Double )` is recorded as
@@ -109,10 +128,21 @@ Each supported declaration is recorded as two tab-separated lines:
   branches has one row. Its `# SIG` lines give each distinct signature once,
   so a declaration whose parameters differ between branches has one `# SIG`
   line per branch signature.
-- Blank lines and other lines starting with `#` are ignored.
+- Blank lines and other lines starting with `#` are ignored, so
+  `# [supported]` is a comment, not a heading.
+- **Matching:** each tier must list exactly the declarations of its
+  components. A declaration listed under the other tier is a finding, and so
+  are an unknown or repeated heading and a row or `# SIG` line before the
+  first heading.
+- **Inventory without headings:** an inventory with no tier heading is read
+  as `[supported]` alone. It passes only while `src/` holds no `Public`
+  declaration outside `src/modules/`; each such declaration is reported as
+  not listed. Add both headings and list those declarations under
+  `[project-public]`.
 
-A change to the supported API needs an issue and an update, in the same pull
-request, to:
+A change to a `[project-public]` declaration updates its row in the same pull
+request. A change to the supported API needs an issue and an update, in the
+same pull request, to:
 
 - the inventory;
 - the [calculation contract](methodology/CALCULATION_CONTRACTS.md);
@@ -120,6 +150,65 @@ request, to:
 
 There are no supported entry points until these are reviewed together with
 the implementation.
+
+## Native declarations
+
+`docs/native-declarations.json` registers each native export that a
+`Declare` imports; in the template it lists none.
+`python tools/check_vba_declares.py`, which **Repository integrity** runs,
+reports a `Declare` whose export it does not list or whose signature differs
+from the export's ABI, and holds every call to the error-capture rules of
+the [house style](VBA_HOUSE_STYLE.md#naming-and-visibility).
+
+```json
+{
+  "schema_version": 1,
+  "declarations": [
+    {
+      "export": "TlsGetValue",
+      "library": "kernel32",
+      "zero_is_ambiguous": true,
+      "arguments": [{"type": "Long", "byval": true}],
+      "returns": "pointer"
+    },
+    {"export": "SetLastError", "library": "kernel32", "zero_is_ambiguous": false}
+  ]
+}
+```
+
+- **`export`:** the name the library exports: the `Alias` of the `Declare`
+  if it has one, else its name, or an ordinal such as `#12`. Case is
+  ignored.
+- **`library`:** the `Lib` of the `Declare`, such as `kernel32`. Case and a
+  `.dll` suffix are ignored.
+- **`zero_is_ambiguous`:** `true` when a zero result can mean success as well
+  as failure, so that only the error tells them apart. Each call then
+  clears the error with `SetLastError 0` and captures it.
+- Each export and library has one entry. `GetLastError` has none, because it
+  is never declared, and a `Declare Sub`, which returns nothing, is never
+  ambiguous on zero.
+- An entry that no `Declare` uses is not reported: remove it with the last
+  `Declare` of its export.
+- **`arguments`** (optional): the export's parameters in order, each
+  `{"type": ..., "byval": true|false}`. `type` is a VBA type, such as `Long`
+  or `String`, with `()` for an array, or `pointer` for a pointer-sized value
+  such as a handle; never `LongPtr`, which VBA6 does not have. `byval` is
+  `false` for a parameter passed `ByRef`, which is also a parameter written
+  with neither keyword.
+- **`returns`** (optional): the type a `Function` returns, in the same
+  form, or `null` for a `Sub`.
+- With `arguments` or `returns`, each `Declare` of the export must match them
+  in every compilation environment: the number of parameters, each one's type
+  and passing, and `Sub` or `Function` with its type. A `pointer` must be
+  `LongPtr` where VBA7 is true and `Long` where it is not; every other type
+  must be the same, ignoring case. A type suffix, as in `dwIndex&`, gives a
+  type, and a name with neither suffix nor `As` is a `Variant`. An entry
+  without them is not compared.
+- Any other key fails.
+
+Add the entry in the pull request that adds the `Declare`, after checking
+the export's documentation for what a zero result means and, when you record
+its ABI, for the width of each argument and of the result.
 
 ## Input and output contracts
 

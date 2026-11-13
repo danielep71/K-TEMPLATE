@@ -425,6 +425,104 @@ milestones and their pull requests.
   `Saved.Number = Err.Number`, are values, not member accesses. The
   [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
   see (#396, #419, #422, #427, #429).
+- **Repository integrity** runs a ninth static check of exported VBA,
+  `vba-declares` (`tools/check_vba_declares.py`), on the new register of
+  native declarations, `docs/native-declarations.json`, which is empty in the
+  template. In each compilation environment it reports, with file, line and
+  environment, a `Declare` whose export and library the register does not
+  list, a `Declare` of `GetLastError`, a `Declare Sub` registered as
+  ambiguous on zero, a read of `Err.LastDllError` other than
+  `<local> = Err.LastDllError` directly after a statement that is one native
+  call, such as a read after a call inside a single-line `If` or a condition,
+  or `.LastDllError` in a `With Err` block, and a call to an export registered
+  as ambiguous on zero that is not directly preceded by `SetLastError 0`,
+  whose whole result is not assigned to a local variable, or that is not
+  directly followed by that capture. A repository with a `Declare` must
+  register its export. An entry may also record the export's ABI, its
+  `arguments` (each type, or `pointer`, and `byval`) and `returns` (a type,
+  `pointer` or `null`); the check then reports, in each environment, a
+  `Declare` whose parameter count, parameter types, `ByVal` or `ByRef`,
+  `Sub` or `Function`, or return type differs from it, with a `pointer`
+  expected as `LongPtr` under VBA7 and `Long` under VBA6 (#399). The house
+  style, the structure guide and the setup guide document the rules and the
+  register; nothing was run in Excel (#398).
+- `tools/check_vba_jumps.py` reports an `Err.Raise` or `Error` statement
+  reached after an unconditional `Resume <label>` while the procedure's own
+  `On Error GoTo <label>` handler is enabled, in each compilation environment:
+  the handler would trap the raise again, and a cleanup that raises the saved
+  error can loop and hang Excel. The check also requires the line number in
+  `If x Then 100`, an implicit `GoTo`, to be a label of the procedure. The
+  [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the handler with
+  `On Error GoTo 0` before raising the saved error again. The check is static;
+  nothing was run in Excel (#397).
+- A pull request that fixes a defect now shows its new or changed test
+  failing on the defective code, then passing on the fix, and records how in
+  the *Validated* section of the pull request template
+  ([negative controls](CONTRIBUTING.md#-negative-controls)).
+  `python tools/make_mutant.py FILE --find TEXT --replace TEXT` writes the
+  defective variant of a file reproducibly: a copy with the one occurrence of
+  the text replaced, under the ignored `test-results/mutants/`, with every
+  other byte, CRLF line endings and `Attribute VB_Name` kept, and the SHA-256
+  of the source and the mutant printed. It refuses a text that does not occur
+  exactly once, overlapping occurrences included, an output folder that Git
+  does not ignore, and a symbolic link at the mutant's path (#400).
+- The daily **Detect settings drift** workflow compares the live rulesets with
+  `docs/setup/repository-settings.json` using only the job's read-only token,
+  and fails on drift. It runs the new
+  `tools/setup_repository.py --check --token-scope workflow`, which compares
+  what that token can read: each ruleset without its bypass list, the
+  visibility, the general settings GitHub returns to it and, on a public
+  repository, private vulnerability reporting. Each value it cannot read is
+  listed as not checked, never as drift or a match; with no drift the result
+  is `PARTIAL` and the run passes. `--summary PATH` appends a Markdown summary
+  in every mode. The [settings reference](docs/repo_governance/SETTINGS.md#drift)
+  lists what the workflow checks and why (#403).
+- `tools/check_excel_run.py --equivalent-to SHA` lets one Excel run certify a
+  later commit that changes none of the run's inputs, such as a fix to a
+  workflow or a guide. The evidence and the binding are still checked against
+  `--commit`, the commit the workbook was built from. Then every run input
+  must have the same Git blob at both commits: the VBA components and form
+  resources, the files of the build configuration's directories, the
+  methodology guides, fixtures, expected results and accuracy contracts, the
+  build configuration, the layout template, the evidence policy, every
+  `.gitattributes` file at any depth and the build tools. A difference fails and names each
+  path; a match prints
+  `Equivalent: <SHA> (N run inputs identical to <commit>)`, and the report
+  names both commits. `INSTALLATION.md`,
+  `RELEASING.md` step 4, the release certification record and the pull
+  request guide and template say when such a run counts and that its record
+  names both commits (#402).
+- The `actionlint` check of **Repository integrity** first lints
+  `.github/actionlint/invalid-workflow.yml`, a workflow with a known error
+  that never runs, and fails unless actionlint rejects it with that finding.
+  Only then does it lint the workflows, so a broken or stubbed actionlint that
+  accepts everything can no longer pass the check (#404).
+- `tools/devbuild/build_workbook.py --override DIR` builds a workbook in which
+  each `.bas` or `.cls` file of `DIR` and its subfolders replaces the module
+  with the same `Attribute VB_Name`, for the negative control of a VBA fix. A
+  file that names no module or the same module as another, a file without one
+  `VB_Name` or outside the source rules, and a `.frm` stop the build. The build
+  prints each replaced module with its SHA-256, and the stamp's commit records
+  the folder and those SHA-256 values as *NOT evidence-grade*.
+  `tools/check_excel_run.py` reports a workbook built this way, or a results
+  file it wrote, as not evidence for the commit, never as
+  `Binding: VERIFIED`. [INSTALLATION.md](INSTALLATION.md#building-a-workbook-from-source)
+  describes the option and its limits (#406).
+- Every release starts with a
+  [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) of the repository's
+  issues, pull requests, review discussions and notifications. It checks that
+  closed issues meet their acceptance criteria, that open issues and `blocked`
+  labels are current, that review threads are resolved only on evidence, and
+  that no text claims a change, test or review its evidence does not support.
+  Its report goes on the milestone closeout issue before the candidate is
+  frozen; a release invariant, the release checklist and the closeout
+  checklist require it (#438).
+- `docs/assets/social-preview.png`, exported from its editable source
+  `social-preview.svg`, is the repository's social preview and the banner at
+  the top of the README. It is allowlisted in `.github/binary-allowlist.json`
+  with its SHA-256. The setup guide tells a generated repository to replace
+  or remove both, and to set its own **About** description, website, topics
+  and social preview, which GitHub does not copy from a template (#434).
 
 ### Changed
 
@@ -565,6 +663,28 @@ milestones and their pull requests.
 - **Repository integrity** proves that actionlint rejects an invalid workflow,
   and the workflow control tests reject duplicate YAML keys in the workflows,
   Dependabot's configuration and the issue forms (#114).
+- The [public API inventory](docs/PUBLIC_API.txt) has two tiers.
+  `[supported]` lists the supported API in `src/modules/`, as before;
+  `[project-public]` lists every other `Public` declaration under `src/`,
+  including the public members of classes, forms and workbook modules.
+  `tools/check_vba_public_api.py` matches each tier with the source one to
+  one, with normalized signatures, and reports a declaration listed in the
+  wrong tier; test and example modules belong to neither tier. An inventory
+  without tier headings is read as `[supported]` alone, so it still passes
+  only while `src/` has no public declaration outside `src/modules/`. In a
+  generated repository, add the `[supported]` and `[project-public]` headings
+  and list each public declaration of core, classes, workbook modules and
+  forms under `[project-public]`, as the
+  [repository structure](docs/REPOSITORY_STRUCTURE.md#public-api-inventory)
+  guide describes (#405).
+- The template repository is `danielep71/K-TEMPLATE`. The README title, its
+  badges and wiki links, the issue forms' contact links and the changelog's
+  link references use the new name; GitHub redirects links that use the old
+  one (#433).
+- `tools/format_vba.py` and `tests/test_format_vba.py` are licensed under the
+  Mozilla Public License 2.0 of the root `LICENSE`, like the repository's own
+  files. The third-party notice and the provenance register no longer list
+  them (#440).
 
 ### Fixed
 
@@ -683,6 +803,15 @@ milestones and their pull requests.
   accuracy contracts. The Dependabot `target-branch` test uses a longer name
   that `git ls-remote` returns for the branch, so it fails if the check stops
   comparing exact names (#423).
+- The Excel instance that `tools/devbuild/excel_run.py` starts no longer
+  outlives the run. The command records the process id of that instance,
+  from its window, and the process start time. After it quits Excel, it waits
+  up to 30 seconds for that process to exit and then ends it, but only while
+  the process with that id is named `EXCEL` and has the recorded start time,
+  so it never ends another Excel. It prints how Excel ended in an
+  `excel-quit:` line (`EXITED`, `STOPPED`, `SURVIVED` or `UNKNOWN`), which
+  the saved report also holds; `SECURITY.md` and the installation guide say
+  so (#401).
 
 ### Validation
 
@@ -692,5 +821,5 @@ milestones and their pull requests.
   worst error 0.0, `compile=ON_DEMAND`. The host behaviours `HB-02` to `HB-04`
   of the validation plan are measured on that host (#204, #211).
 
-[Unreleased]: https://github.com/danielep71/MyTemplate/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/danielep71/MyTemplate/releases/tag/v1.0.0
+[Unreleased]: https://github.com/danielep71/K-TEMPLATE/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/danielep71/K-TEMPLATE/releases/tag/v1.0.0

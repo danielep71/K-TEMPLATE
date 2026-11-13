@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Build a macro-enabled workbook from the source of one commit.
 
-Usage: python tools/devbuild/build_workbook.py [--configuration NAME] [OUTPUT]
+Usage: python tools/devbuild/build_workbook.py [--configuration NAME] [--override DIR]
+       [OUTPUT]
 Default: the development configuration, written to
 test-results/build/Workbook-development.xlsm, which Git ignores.
 
@@ -35,12 +36,23 @@ Forms are not built: a .frm in a source directory stops the build, and forms
 are imported by hand. For a given commit and working tree the output is
 byte-identical, because the stamp carries the commit's committer time, not
 the clock. A tracked change, or an untracked file in a source directory,
-stamps the build as not evidence-grade. Standard library only.
+stamps the build as not evidence-grade.
+
+With --override DIR, each .bas or .cls file found in DIR or its subfolders
+replaces the module of the configuration whose Attribute VB_Name it carries,
+and other files there are ignored. A file whose name matches no module, two
+files with the same name, a file without exactly one VB_Name, a .frm, or a
+file that breaks the encoding, header or line ending rules of exported source
+stops the build: an override never adds or drops a module. The stamp's commit
+then records the folder and the SHA-256 of each replacement and says
+NOT evidence-grade, so tools/check_excel_run.py never accepts the workbook as
+evidence for the commit. Standard library only.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import posixpath
@@ -50,7 +62,7 @@ import sys
 import uuid
 import zipfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
@@ -78,6 +90,11 @@ TEST_ROLE = "Test"
 FORM_HOME = "src/forms"
 VBA_ENCODING = "cp1252"
 NOT_EVIDENCE = " (working tree with changes: NOT evidence-grade)"
+# The start of the stamp's note on a build with --override, which
+# tools/check_excel_run.py looks for.
+OVERRIDDEN = " (built with overrides from "
+OVERRIDE_SUFFIXES = (".bas", ".cls")
+VB_NAME = re.compile(r'^Attribute VB_Name = "([^"]*)"[ \t]*\r?$', re.M)
 ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 CELL = re.compile(r"^([A-Z]{1,3})([1-9][0-9]{0,6})$")
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
@@ -140,6 +157,16 @@ class Layout:
 
 
 @dataclass(frozen=True)
+class Override:
+    """A module that a file of the override folder replaces."""
+
+    name: str
+    path: Path
+    sha256: str
+    source: str = field(repr=False, default="")
+
+
+@dataclass(frozen=True)
 class Build:
     commit: str
     time: str
@@ -147,6 +174,8 @@ class Build:
     configuration: str
     components: tuple[Path, ...]
     template: bool = False
+    overrides: tuple[Override, ...] = ()
+    override_folder: str = ""
 
 
 def load_layout(root: Path) -> Layout:
@@ -281,6 +310,90 @@ def vba_modules(root: Path, layout: Layout, paths: Sequence[Path]) -> list[Modul
     return modules
 
 
+def override_problem(path: Path, data: bytes) -> str:
+    """How an override file, whose bytes are ``data``, breaks the encoding,
+    header or line ending rules of exported source; empty when it does not."""
+    if data.startswith(b"\xef\xbb\xbf"):
+        return "byte-order mark; VBA source is ASCII only"
+    wide = next((byte for byte in data if byte > 0x7F), None)
+    if wide is not None:
+        return f"non-ASCII byte 0x{wide:02X}; VBA source is ASCII only"
+    if re.search(rb"\r(?!\n)", data):
+        return "carriage return without a line feed; end each line with CRLF or LF"
+    text = module_text(path)
+    if len(VB_NAME.findall(text)) != 1:
+        return 'needs exactly one Attribute VB_Name = "<module>" line'
+    if not text.startswith('Attribute VB_Name = "'):
+        return ("does not start with its Attribute VB_Name line (after the VERSION and "
+                "BEGIN ... END header of a class)")
+    return ""
+
+
+def read_overrides(folder: Path) -> tuple[Override, ...]:
+    """The .bas and .cls files of ``folder`` and its subfolders, each with the
+    module it names; BuildError on a form, an invalid file or a name used twice."""
+    if not folder.is_dir():
+        raise BuildError(f"override folder {folder}: not a folder")
+    files = sorted((path for path in folder.rglob("*") if path.is_file() and
+                    path.suffix.lower() in (*OVERRIDE_SUFFIXES, ".frm")),
+                   key=lambda path: path.relative_to(folder).as_posix())
+    forms = [path.relative_to(folder).as_posix() for path in files
+             if path.suffix.lower() == ".frm"]
+    if forms:
+        raise BuildError(f"override folder {folder}: forms are not built ({', '.join(forms)}); "
+                         "an override replaces a standard, class or document module")
+    if not files:
+        raise BuildError(f"override folder {folder}: holds no .bas or .cls file")
+    found: dict[str, Override] = {}
+    for path in files:
+        data = path.read_bytes()
+        problem = override_problem(path, data)
+        if problem:
+            raise BuildError(f"override {path}: {problem}")
+        text = module_text(path)
+        name = VB_NAME.findall(text)[0]
+        other = found.get(name.casefold())
+        if other is not None:
+            raise BuildError(f"overrides {other.path} and {path} both name the module {name} "
+                             "(VBA names are case-insensitive)")
+        found[name.casefold()] = Override(name, path, hashlib.sha256(data).hexdigest(), text)
+    return tuple(found.values())
+
+
+def apply_overrides(modules: Sequence[Module], overrides: Sequence[Override],
+                    configuration: str) -> list[Module]:
+    """The modules with each override in place of the module it names: the same
+    name, in the same case, and the same kind; BuildError otherwise."""
+    replaced = list(modules)
+    index = {module.name.casefold(): number for number, module in enumerate(modules)}
+    for item in overrides:
+        number = index.get(item.name.casefold())
+        if number is None:
+            raise BuildError(f"override {item.path}: VB_Name {item.name} matches no module of "
+                             f"the {configuration} configuration; an override replaces a "
+                             "module and never adds one")
+        module = modules[number]
+        if item.name != module.name:
+            raise BuildError(f"override {item.path}: VB_Name {item.name} differs from the "
+                             f"module {module.name} in case; spell it {module.name}")
+        suffix = ".bas" if module.kind == STANDARD else ".cls"
+        if item.path.suffix.lower() != suffix:
+            raise BuildError(f"override {item.path}: {module.name} is a {module.kind} module, "
+                             f"which only a {suffix} file replaces")
+        replaced[number] = Module(module.name, item.source, kind=module.kind)
+    return replaced
+
+
+def folder_label(root: Path, folder: Path) -> str:
+    """The override folder as the stamp records it: relative to the checkout when
+    it lies inside it, absolute otherwise."""
+    resolved = folder.resolve()
+    try:
+        return resolved.relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
 def is_clean(root: Path, layout: Layout, configuration: str) -> bool:
     """No tracked change, and no untracked file where the build reads source."""
     directories = [d for d in {*source_directories(layout, configuration), DOCUMENT_HOME}
@@ -310,9 +423,19 @@ def quoted_tab(tab: str) -> str:
     return "'" + tab.replace("'", "''") + "'"
 
 
+def commit_stamp(build: Build) -> str:
+    """The stamp's commit, marked when the build is not evidence for it."""
+    text = build.commit + ("" if build.clean else NOT_EVIDENCE)
+    if build.overrides:
+        text += (f"{OVERRIDDEN}{build.override_folder}: "
+                 + ", ".join(f"{item.name} SHA-256 {item.sha256}" for item in build.overrides)
+                 + ": NOT evidence-grade)")
+    return text
+
+
 def stamp_values(layout: Layout, build: Build) -> dict[str, str]:
     """The text of each stamp name."""
-    return {layout.stamp["commit"]: build.commit + ("" if build.clean else NOT_EVIDENCE),
+    return {layout.stamp["commit"]: commit_stamp(build),
             layout.stamp["time"]: build.time,
             layout.stamp["configuration"]: build.configuration}
 
@@ -775,20 +898,28 @@ def for_configuration(layout: Layout, configuration: str) -> Layout:
                   layout.stamp, layout.configurations)
 
 
-def build(root: Path, configuration: str, target: Path) -> Build:
-    """Write the workbook to ``target`` and describe what it holds."""
+def build(root: Path, configuration: str, target: Path, *,
+          override: Path | None = None) -> Build:
+    """Write the workbook to ``target`` and describe what it holds. With
+    ``override``, the folder's modules replace those of the same name."""
     # Document modules are checked against every sheet, Test sheets included,
     # before the configuration drops what it does not build.
     complete = load_layout(root)
     paths = components(root, complete, configuration)
     layout = for_configuration(complete, configuration)
+    modules = vba_modules(root, layout, paths)
+    overrides: tuple[Override, ...] = ()
+    if override is not None:
+        overrides = read_overrides(override)
+        modules = apply_overrides(modules, overrides, configuration)
     commit = git(root, "rev-parse", "HEAD")
     result = Build(commit, git(root, "show", "-s", "--format=%cI", "HEAD"),
                    is_clean(root, layout, configuration), configuration, tuple(paths),
-                   (root / TEMPLATE).is_file())
+                   (root / TEMPLATE).is_file(), overrides,
+                   folder_label(root, override) if override is not None else "")
     project_id = "{" + str(uuid.uuid5(uuid.NAMESPACE_URL,
                                       f"workbook-build:{commit}:{configuration}")).upper() + "}"
-    vba_bin = build_vba_project(vba_modules(root, layout, paths), project_id)
+    vba_bin = build_vba_project(modules, project_id)
     data = template_package(read_template(root / TEMPLATE), layout, result, vba_bin)         if result.template else package(layout, result, vba_bin)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(data)
@@ -802,13 +933,16 @@ def main(argv: Sequence[str] | None = None) -> int:
                              "Workbook-<configuration>.xlsm)")
     parser.add_argument("--configuration", default="development",
                         help=f"a configuration of {CONFIG} (default: development)")
+    parser.add_argument("--override", type=Path, metavar="DIR",
+                        help="replace each module named by a .bas or .cls file of DIR or its "
+                             "subfolders; the stamp then marks the build NOT evidence-grade")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
     root = args.root.resolve()
     target = args.output or root / "test-results" / "build" / \
         f"Workbook-{args.configuration}.xlsm"
     try:
-        result = build(root, args.configuration, target)
+        result = build(root, args.configuration, target, override=args.override)
     except (BuildError, ValueError) as error:
         print(f"FAIL: {error}")
         return 1
@@ -818,6 +952,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"built {target}: {result.configuration}, commit {result.commit}{grade}")
     print(f"layout: {TEMPLATE if result.template else 'blank sheets of ' + CONFIG}")
     print(f"components: {names}")
+    if result.overrides:
+        print(f"overrides from {result.override_folder}: NOT evidence for commit "
+              f"{result.commit}")
+        for item in result.overrides:
+            print(f"  replaced {item.name} with {item.path}, SHA-256 {item.sha256}")
     return 0
 
 
