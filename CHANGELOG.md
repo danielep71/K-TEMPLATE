@@ -87,10 +87,10 @@ Use only the categories an entry needs.
   without `sh` line continuations, so that they can be pasted into
   PowerShell (#478).
 - The pull request review guide and README step 8 no longer say that Codex
-  needs an environment for the repository: a generated repository's first
-  pull request was reviewed without one. If Codex asks for an environment
-  instead of reviewing, an `@codex review` comment produces the review
-  (#477).
+  needs an environment for the repository: a repository generated from the
+  template had its first pull request reviewed without one. If Codex asks
+  for an environment instead of reviewing, an `@codex review` comment
+  produces the review (#477).
 
 ### Fixed
 
