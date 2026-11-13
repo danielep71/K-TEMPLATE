@@ -72,6 +72,9 @@ Use only the categories an entry needs.
   handover table for the files the initializer leaves as they are, such as
   the README's title, banner and wiki links, the social preview and the
   repository's **About** fields (#463).
+- The journal of `tools/setup_repository.py --apply` and the planned changes
+  of its `--evidence` record name the ruleset of each ruleset write, so that
+  the writes to the shared `rulesets` endpoint can be told apart (#469).
 
 ### Fixed
 
