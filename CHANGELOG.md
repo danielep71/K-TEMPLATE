@@ -812,6 +812,10 @@ milestones and their pull requests.
   `excel-quit:` line (`EXITED`, `STOPPED`, `SURVIVED` or `UNKNOWN`), which
   the saved report also holds; `SECURITY.md` and the installation guide say
   so (#401).
+- The tests accept a non-empty register of native declarations: a
+  repository that registers the exports its `Declare` statements import, as
+  the structure and setup guides say, no longer fails the `tests` check
+  (#445).
 
 ### Validation
 
