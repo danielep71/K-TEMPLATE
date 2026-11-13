@@ -11,9 +11,15 @@ The pull request template has a *Final-head review* section for it.
 
 A review covers only the commit it read. When Codex reviews pull requests in
 this repository, it runs when a pull request is opened or a draft is marked
-ready, not after later pushes. It needs an environment for this repository in
-its settings; without one it answers with a request to create an environment
-instead of reviewing. Before merging a pull request I authored:
+ready, not after later pushes. A review needs no Codex environment for the
+repository: in a repository generated from K-TEMPLATE, with none created,
+Codex reviewed the first pull request when its draft was marked ready
+([K-TEMPLATE#454](https://github.com/danielep71/K-TEMPLATE/issues/454)). If
+Codex answers a pull request with a request to create an environment instead
+of reviewing, as it once did when one was opened in K-TEMPLATE
+([pull request 21](https://github.com/danielep71/K-TEMPLATE/pull/21)), comment
+`@codex review`: that comment produced the review, still without an
+environment. Before merging a pull request I authored:
 
 1. Push the last fixes and note the current head commit SHA.
 2. If no completed review covers that SHA, for example because fixes were
