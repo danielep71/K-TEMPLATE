@@ -96,6 +96,9 @@ Use only the categories an entry needs.
   *Tested environment* table of `INSTALLATION.md`, and the *Issue* column of
   the *Host behaviour* table of the validation plan, which becomes a dash.
   The validation plan's `HB-04` result no longer names a commit (#485).
+- The traffic guide creates the `traffic-history` branch in a separate
+  worktree with commands that work alike in PowerShell and `sh`, instead of
+  `sh`-only commands with a temporary directory and a shell variable (#484).
 
 ### Fixed
 
