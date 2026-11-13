@@ -136,8 +136,10 @@ class FileCheckTest(RepositoryTest):
         self.assertEqual(check_repository.dependabot_branches(Context(clone)), [])
 
     def test_dependabot_target_branch_nowhere_fails(self) -> None:
-        # A longer name that ends with the branch's name is not the branch.
-        clone = self.single_branch_clone("old/release/1.0.0")
+        # A longer name that ends with the branch's name is not the branch. git ls-remote
+        # returns the second one for the pattern refs/heads/release/1.0.0, so only the
+        # exact-name filter rejects it.
+        clone = self.single_branch_clone("old/release/1.0.0", "x/refs/heads/release/1.0.0")
         self.assertEqual(check_repository.dependabot_branches(Context(clone)),
                          [(".github/dependabot.yml", "target-branch release/1.0.0 does not "
                            "exist; set it to the active release branch or remove it.")])
@@ -492,11 +494,14 @@ class RunTest(RepositoryTest):
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "secret-files",
-                         "vba-format", "vba-calls", "data-contract", "test-cases", "derivations",
-                         "independent-implementations", "workbook-protection",
+                         "vba-format", "vba-errors", "vba-calls", "data-contract", "test-cases",
+                         "derivations", "independent-implementations", "workbook-protection",
                          "changelog", "generated-docs", "markdown-links", "documented-commands",
                          "codeql-default-branch", "whitespace-committed"):
             self.assertIn(expected, names)
+        advisory = {check.name for check in check_repository.checks(self.context())
+                    if check.advisory}
+        self.assertNotIn("vba-errors", advisory)
         # Only --ci checks the working tree, after every other check.
         self.assertNotIn("clean-working-tree", names)
         in_ci = check_repository.checks(self.context(ci=True))
