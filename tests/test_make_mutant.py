@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import io
+import os
 import shutil
 import subprocess
 import sys
@@ -287,6 +288,52 @@ class SymlinkDestinationTest(Fixture):
         self.assertEqual(frx.read_bytes(), b"\0\1binary")
         self.assertFalse((self.mutants / "src/forms/F_Input.frm").exists())
         self.assert_refused(code, err)
+
+
+def hard_link(link: Path, target: Path) -> bool:
+    """Create ``link`` as a hard link to ``target``; False where that is impossible."""
+    link.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(target, link)
+    except (OSError, NotImplementedError):
+        return False
+    return True
+
+
+@unittest.skipUnless(shutil.which("git"), "needs Git")
+class HardLinkDestinationTest(Fixture):
+    """A hard link left at the mutant's path is replaced, never written through."""
+
+    def link_or_skip(self, link: Path, target: Path) -> None:
+        if not hard_link(link, target):
+            self.skipTest("cannot create hard links here")
+
+    def test_a_hard_link_to_the_source_is_replaced_and_the_source_kept(self) -> None:
+        mutant = self.mutants / MODULE
+        self.link_or_skip(mutant, self.root / MODULE)
+        code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b")
+        self.assertEqual((self.root / MODULE).read_bytes(), CRLF_MODULE)
+        self.assertEqual(code, 0, err)
+        self.assertEqual(mutant.read_bytes(), CRLF_MODULE.replace(b"a + b", b"a * b"))
+        self.assertFalse(os.path.samefile(mutant, self.root / MODULE))
+
+    def test_a_hard_link_to_the_frx_is_replaced(self) -> None:
+        self.put("src/forms/F_Input.frm",
+                 b'VERSION 5.00\r\nAttribute VB_Name = "F_Input"\r\nPrivate X As Long\r\n')
+        frx = self.put("src/forms/F_Input.frx", b"\0\1binary")
+        copy = self.mutants / "src/forms/F_Input.frx"
+        self.link_or_skip(copy, frx)
+        code, _, err = self.run_tool("--find", "Long", "--replace", "Integer",
+                                     file="src/forms/F_Input.frm")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(frx.read_bytes(), b"\0\1binary")
+        self.assertEqual(copy.read_bytes(), b"\0\1binary")
+        self.assertFalse(os.path.samefile(copy, frx))
+
+    def test_no_temporary_file_is_left_behind(self) -> None:
+        self.assertEqual(self.run_tool("--find", "a + b", "--replace", "a * b")[0], 0)
+        self.assertEqual(sorted(p.name for p in (self.mutants / MODULE).parent.iterdir()),
+                         ["M_Sample.bas"])
 
 
 @unittest.skipUnless(shutil.which("git"), "needs Git")

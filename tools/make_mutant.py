@@ -39,7 +39,9 @@ It refuses, and writes nothing, when:
 
 On success it prints the changed lines, with the line number where the
 replaced text starts, and the SHA-256 of the source and of the mutant.
-Running it again replaces the mutant. Exit status: 0 when the mutant is
+Each output is written to a new file and renamed over its path, so a file
+already there, even a hard link to the source, is replaced and never
+written through. Running it again replaces the mutant. Exit status: 0 when the mutant is
 written, 1 when it refuses, 2 on a usage error.
 """
 
@@ -51,6 +53,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -184,12 +187,22 @@ def check_destination(output: Path, path: Path, source: Path) -> None:
 
 
 def write_new(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` without following a symbolic link at ``path``."""
-    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
-    flags |= getattr(os, "O_BINARY", 0)
-    descriptor = os.open(path, flags, 0o666)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(data)
+    """Write ``data`` to a new file and move it to ``path``.
+
+    The file is created fresh in ``path``'s folder and then renamed over
+    ``path``, which replaces the directory entry. An existing file at ``path``
+    is never opened or truncated, so a hard link left there to the source or
+    to any other file leaves that file unchanged.
+    """
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp",
+                                             dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+        os.replace(temporary, path)
+    except BaseException:
+        Path(temporary).unlink(missing_ok=True)
+        raise
 
 
 def read_text(value: str | None, path: Path | None) -> bytes:
