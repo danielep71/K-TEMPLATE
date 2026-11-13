@@ -84,8 +84,9 @@ A version may be published only when:
 4. the candidate's VBA is imported, compiled and run in Excel on the
    [supported host](INSTALLATION.md#%EF%B8%8F-host-policy), the run is
    [recorded](INSTALLATION.md#recording-an-excel-run) from a workbook built
-   from the candidate, and passes `tools/check_excel_run.py` with a
-   `VERIFIED` binding, and the result is in
+   from the candidate, or from an earlier commit whose run inputs are
+   identical ([step 4](#4-certify-the-workbook)), and passes
+   `tools/check_excel_run.py` with a `VERIFIED` binding, and the result is in
    the [release certification](docs/release/RELEASE_CERTIFICATION.md);
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
@@ -146,7 +147,9 @@ open alerts under **Security → Code scanning**.
 
 Complete the [milestone closeout](docs/release/CLOSEOUT.md) for this
 candidate: its candidate record, file audit and settings check, and the rest
-of its checklist. Records made on an earlier commit do not count.
+of its checklist. Records made on an earlier commit do not count. The one
+exception is the Excel run of step 4, and only when
+`tools/check_excel_run.py --equivalent-to` proves its run inputs identical.
 
 ### 4. Certify the workbook
 
@@ -185,6 +188,24 @@ consistent with it. This check is a release gate, not a
 **Repository integrity** step, because the evidence exists only for a
 candidate. If a case or the check fails, fix it through a task pull request
 and start again at step 2.
+
+A run made on an earlier commit certifies the candidate only when every run
+input of the candidate has the same Git blob as at the run's commit, for
+example when the candidate adds only a fix to a workflow or a guide outside
+`docs/methodology/`. Check it from a clean checkout of the candidate, with
+`--commit` naming the run's commit
+([a run for another commit](INSTALLATION.md#a-run-for-another-commit)):
+
+```sh
+python tools/check_excel_run.py test-results/excel-run --commit RUN_SHA \
+  --equivalent-to CANDIDATE_SHA \
+  --workbook test-results/build/Workbook-development.xlsm --require-binding
+```
+
+It must also print
+`Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)`. The
+certification record names both commits. Any other earlier run does not
+count.
 
 If the repository keeps a [user manual](#user-manual), build its PDF from the
 candidate as that section describes, and record it, with the PDF tool and its
