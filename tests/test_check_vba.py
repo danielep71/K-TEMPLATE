@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import re
 import shutil
 import subprocess
 import sys
@@ -2417,6 +2418,12 @@ ERRORS_INVALID = {
     "resume-next-err-clear": (
         guarded("        Helper\n        Err.Clear\n        Text = Err.Description\n"), 9,
         "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
+    "resume-next-call-err-clear": (
+        guarded("        Helper\n        Call Err.Clear\n        Text = Err.Description\n"), 9,
+        "Err.Description read in First after line 8, which cleared Err with Err.Clear"),
+    "resume-next-call-err-clear-with-parentheses": (
+        guarded("        Helper\n        Call VBA.Err.Clear()\n        Number = Err.Number\n"), 9,
+        "Err.Number read in First after line 8, which cleared Err with Err.Clear"),
     "select-case-after-on-error": (guarded("        Helper\n        On Error GoTo 0\n"
                                            "        Select Case Err.Number\n"
                                            "        End Select\n"), 9,
@@ -2521,7 +2528,60 @@ STATEMENT_SWEEP = [
     "Flag = EOF(1)", 'Text = Format(Date, "yyyy") & Dir(Text) & Environ("TEMP")',
     'Number = DateDiff("d", Date, Now)', "If TypeOf Item Is Collection Then Number = 1",
     "If TypeOf Item Is VBA.Collection Then Number = 1",
+    # Error raises: in a handler the read after it is never reached, and after
+    # On Error Resume Next it reads the error Error raised, so no claim.
+    "Error 5",
 ]
+# One call of each VBA function of PURE_FUNCTIONS, with arguments it accepts;
+# Spc and Tab exist only in Print. The test checks that this table and the
+# check's set name the same functions.
+PURE_CALLS = {
+    **{name: f"Result = {name}(Number)" for name in """
+        Abs Atn CBool CByte CCur CDbl CDec Chr ChrB ChrW CInt CLng CLngLng CLngPtr Cos CSng CStr
+        CVar Exp Fix Hex Int IsEmpty IsError IsNull IsNumeric IsObject Log Oct QBColor Sgn Sin
+        Space Sqr Str Tan TypeName VarType MonthName WeekdayName
+        """.split()},
+    **{name: f"Result = {name}(Text)" for name in """
+        Asc AscB AscW CurDir Dir FileDateTime FileLen GetAttr IsDate LCase Len LenB LTrim RTrim
+        Split StrReverse Trim UCase Val
+        """.split()},
+    **{name: f"Result = {name}(Now)" for name in """
+        CDate CVDate Day FormatDateTime Hour Minute Month Second Weekday Year
+        """.split()},
+    **{name: f"Result = {name}" for name in "Date Now Rnd Time Timer FreeFile".split()},
+    "Array": "Result = Array(1, 2)", "Choose": "Result = Choose(1, Text)",
+    "CVErr": "Result = CVErr(2007)", "DateAdd": 'Result = DateAdd("d", 1, Now)',
+    "DateDiff": 'Result = DateDiff("d", Now, Now)', "DatePart": 'Result = DatePart("d", Now)',
+    "DateSerial": "Result = DateSerial(2026, 1, 1)",
+    "DateValue": 'Result = DateValue("2026-01-01")', "DDB": "Result = DDB(1000, 100, 5, 1)",
+    "Environ": 'Result = Environ("TEMP")', "EOF": "Result = EOF(1)", "Loc": "Result = Loc(1)",
+    "LOF": "Result = LOF(1)", "Filter": "Result = Filter(Other, Text)",
+    "Format": 'Result = Format(Number, "0.00")',
+    "FormatCurrency": "Result = FormatCurrency(Number)",
+    "FormatNumber": "Result = FormatNumber(Number, 2)",
+    "FormatPercent": "Result = FormatPercent(Number)", "FV": "Result = FV(0.1, 12, -100)",
+    "GetSetting": 'Result = GetSetting("App", "Section", "Key")',
+    "IIf": "Result = IIf(Flag, 1, 2)", "Input": "Result = Input(1, #1)",
+    "InputB": "Result = InputB(1, #1)", "InStr": 'Result = InStr(Text, "a")',
+    "InStrB": 'Result = InStrB(Text, "a")', "InStrRev": 'Result = InStrRev(Text, "a")',
+    "IPmt": "Result = IPmt(0.1, 1, 12, 1000)", "IRR": "Result = IRR(Amounts)",
+    "IsArray": "Result = IsArray(Values)", "IsMissing": "Result = IsMissing(Result)",
+    "Join": "Result = Join(Other)", "LBound": "Result = LBound(Values)",
+    "UBound": "Result = UBound(Values)", "Left": "Result = Left(Text, 1)",
+    "LeftB": "Result = LeftB(Text, 1)", "Right": "Result = Right(Text, 1)",
+    "RightB": "Result = RightB(Text, 1)", "Mid": "Result = Mid(Text, 1, 1)",
+    "MidB": "Result = MidB(Text, 1, 1)", "MIRR": "Result = MIRR(Amounts, 0.1, 0.1)",
+    "NPer": "Result = NPer(0.1, -100, 1000)", "NPV": "Result = NPV(0.1, Amounts)",
+    "Pmt": "Result = Pmt(0.1, 12, 1000)", "PPmt": "Result = PPmt(0.1, 1, 12, 1000)",
+    "PV": "Result = PV(0.1, 12, -100)", "Rate": "Result = Rate(12, -100, 1000)",
+    "Replace": 'Result = Replace(Text, "a", "b")', "RGB": "Result = RGB(1, 2, 3)",
+    "Round": "Result = Round(Number, 2)", "SLN": "Result = SLN(1000, 100, 5)",
+    "Spc": "Print #1, Spc(2); Text", "Tab": "Print #1, Tab(4); Text",
+    "StrComp": "Result = StrComp(Text, Text)", "StrConv": "Result = StrConv(Text, vbUpperCase)",
+    "String": 'Result = String(3, "x")', "Switch": "Result = Switch(Flag, 1)",
+    "SYD": "Result = SYD(1000, 100, 5, 1)", "TimeSerial": "Result = TimeSerial(1, 2, 3)",
+    "TimeValue": 'Result = TimeValue("12:00")',
+}
 # Procedures of the VBA library that are written as statements, with the
 # module of the library that holds them, as in VBA.Interaction.Beep.
 LIBRARY_STATEMENTS = [
@@ -2546,6 +2606,239 @@ RESUME_NEXT_OPERATIONS = [
 ]
 
 
+# A standard module of public error codes and records, as the house style
+# prescribes, and a procedure whose handler runs a statement at line 24 and
+# then reads Err.Number at line 25.
+CODES = """Attribute VB_Name = "TEST_Codes"
+Option Explicit
+Option Private Module
+
+Public Const LIMIT As Long = 3
+Public Enum RunStatus
+    rsOk = 0
+    rsFailed = 1
+End Enum
+Public Type SavedError
+    Number As Long
+    Source As String
+    Inner As InnerRecord
+End Type
+Public Type InnerRecord
+    Field As String
+End Type
+Public LastError As SavedError
+Private mHidden As Long
+
+
+Public Function Describe() As Long
+End Function
+"""
+
+
+def qualified(statement: str) -> str:
+    """``statement`` in a handler at line 24, then a read of Err.Number."""
+    return module("""Private Const OWN As Long = 1
+Private Enum Kind
+    kOne = 1
+End Enum
+Private Type Record
+    Count As Long
+    Items(1 To 3) As Long
+    Owner As Object
+    Things(1 To 2) As Object
+    Data As Variant
+End Type
+Private mRecord As Record
+
+
+Private Sub First(ByRef Given As SavedError, ByVal Book As Object, ByVal Loose As Variant)
+        Dim Number As Long, Text As String, Saved As SavedError, Many(1 To 2) As SavedError
+        Dim Index As Long, Grown() As SavedError
+        On Error GoTo Handler
+        Exit Sub
+Handler:
+        """ + statement + """
+        Number = Err.Number
+End Sub
+""")
+
+
+# Each reads or writes a value, not a member: no finding.
+QUALIFIED_VALUES = [
+    "Number = RunStatus.rsFailed", "Number = TEST_Codes.RunStatus.rsFailed",
+    "Number = TEST_Codes.rsFailed", "Number = Kind.kOne", "Number = TEST_Codes.LIMIT",
+    "Number = TEST_Fixture.OWN + TEST_Fixture.kOne", "Number = TEST_Codes.LastError.Number",
+    "Err.Raise RunStatus.rsFailed + 0, , Err.Description: Exit Sub",
+    "Saved.Number = Err.Number: Saved.Source = Err.Source", "Number = Saved.Number",
+    "Saved.Inner.Field = Err.Description", "Many(1).Number = Err.Number",
+    "Many(Index).Source = Err.Source", "Number = Given.Number",
+    "mRecord.Count = Err.Number: mRecord.Items(1) = 2", "LastError.Source = Err.Source",
+    "TEST_Codes.LastError.Number = Err.Number",
+    "With Saved: .Number = Err.Number: .Source = Err.Source: End With",
+    "Number = mRecord.Items(2)", "ReDim Grown(1 To 2): Grown(1).Number = Err.Number",
+    "Text = Saved.Source: Saved.Source = Err.Source",
+]
+# Each is a member access or a call before the read: one finding.
+QUALIFIED_MEMBERS = [
+    "Number = Book.Count", "Text = Application.Name", "Number = mRecord.Owner.Count",
+    "Number = TEST_Codes.Describe", "Number = Kind.kTwo", "Number = Saved.Missing",
+    "Number = TEST_Codes.mHidden", "Number = Many(TEST_Codes.Describe()).Number",
+    # An index on anything but an array may call a default property, as
+    # Owner(1) does on a Collection; a Variant that holds an array too.
+    "Number = mRecord.Owner(1)", "mRecord.Owner(1) = 3", "Number = mRecord.Data(1)",
+    "Number = Loose(1).Number", "Number = Saved(1).Number",
+    # Reading or assigning an object or a Variant calls its default property,
+    # and even Set may create an object declared As New.
+    "Number = mRecord.Owner", "mRecord.Owner = 3", "Number = mRecord.Data",
+    "Set Book = mRecord.Owner", "Set mRecord.Owner = Nothing",
+    "Set Book = mRecord.Things(1)",
+]
+
+
+# The same name declared at two scope levels, with a different kind at each:
+# a variable against a property or function, or an Enum against a variable.
+# The nearer level decides, as in VBA. Each case is
+# (module-level declarations, parameters, local declaration, declaration of
+# another standard module, statement in the handler, whether the read of
+# Err.Number after it is stale).
+SAVED_PROPERTY = "Private Property Get Saved() As Object\nEnd Property"
+SAVED_FUNCTION = "Private Function Saved() As Long\nEnd Function"
+PRECEDENCE = {
+    "local-variable-over-own-property": (SAVED_PROPERTY, "", "Dim Saved As SavedError", "",
+                                         "Number = Saved.Number", False),
+    "own-property-over-other-variable": (SAVED_PROPERTY, "", "", "Public Saved As SavedError",
+                                         "Number = Saved.Number", True),
+    "own-property-over-other-variable-bare": (SAVED_PROPERTY, "", "",
+                                              "Public Saved As SavedError", "Number = Saved",
+                                              True),
+    "own-variable-over-other-function": ("Private Saved As SavedError", "", "",
+                                         "Public Function Saved() As Object\nEnd Function",
+                                         "Number = Saved.Number", False),
+    "own-variable-over-other-function-bare": ("Private Saved As Long", "", "",
+                                              "Public Function Saved() As Long\nEnd Function",
+                                              "Number = Saved", False),
+    "parameter-over-own-function": (SAVED_FUNCTION, "ByRef Saved As SavedError", "", "",
+                                    "Number = Saved.Number", False),
+    "parameter-over-own-function-bare": (SAVED_FUNCTION, "ByVal Saved As Long", "", "",
+                                         "Number = Saved", False),
+    "own-function-over-other-variable": (SAVED_FUNCTION, "", "", "Public Saved As SavedError",
+                                         "Number = Saved.Number", True),
+    "own-enum-over-other-variable": ("Private Enum Kind\n    kOne = 1\nEnd Enum", "", "",
+                                     "Public Kind As Object", "Number = Kind.kOne", False),
+    "own-variable-over-other-enum": ("Private Kind As Object", "", "",
+                                     "Public Enum Kind\n    kOne = 1\nEnd Enum",
+                                     "Number = Kind.kOne", True),
+    "local-variable-over-other-enum": ("", "", "Dim Kind As Object",
+                                       "Public Enum Kind\n    kOne = 1\nEnd Enum",
+                                       "Number = Kind.kOne", True),
+}
+
+
+def precedence_files(module_level: str, parameters: str, local: str, other: str,
+                     statement: str) -> dict[str, str | bytes]:
+    """The fixture of one PRECEDENCE case, with TEST_Codes for its Type."""
+    body = (f"{module_level}\n\n\nPrivate Sub First({parameters})\n"
+            f"        Dim Number As Long\n        {local}\n        On Error GoTo Handler\n"
+            f"        Exit Sub\nHandler:\n        {statement}\n        Number = Err.Number\n"
+            "End Sub\n")
+    files = {**standalone(module(body)), "tests/modules/TEST_Codes.bas": CODES}
+    if other:
+        files["tests/modules/TEST_Other.bas"] = ('Attribute VB_Name = "TEST_Other"\n'
+                                                 "Option Explicit\n" + other + "\n")
+    return files
+
+
+# A Type, Enum or public variable that two components declare may mean
+# either: a dotted name through it is a member access, as is a type
+# qualified by anything but the component that declares it. Each case is
+# (module-level declarations, local declaration, statement in the handler,
+# whether TEST_Second is present, whether the read of Err.Number after the
+# statement is stale).
+LIBRARY = """Attribute VB_Name = "TEST_Library"
+Option Explicit
+Public Type Payload
+    Item As Object
+End Type
+Public Type Unique
+    Item As Long
+End Type
+Public Saved As Payload
+Public Kept As Unique
+Public Enum Kind
+    kOne = 1
+End Enum
+"""
+SECOND = """Attribute VB_Name = "TEST_Second"
+Option Explicit
+Public Type Payload
+    Item As Long
+End Type
+Public Enum Kind
+    kOne = 1
+End Enum
+Public Kept As Long
+"""
+LOCAL_PAYLOAD = "Private Type Payload\n    Item As Long\nEnd Type"
+SHADOWING = {
+    "qualified-type-shadowed-in-the-module": (LOCAL_PAYLOAD, "Dim Rec As TEST_Library.Payload",
+                                              "Number = Rec.Item", False, True),
+    "variable-of-a-type-declared-twice": (LOCAL_PAYLOAD, "", "Number = TEST_Library.Saved.Item",
+                                          False, True),
+    "type-declared-in-two-components": ("", "Dim Rec As Payload", "Number = Rec.Item", True,
+                                        True),
+    "enum-declared-in-two-components": ("", "", "Number = Kind.kOne", True, True),
+    "qualified-enum-declared-twice": ("", "", "Number = TEST_Library.Kind.kOne", True, True),
+    "public-variable-in-two-components": ("", "", "Number = Kept.Item", True, True),
+    "library-qualified-type": ("", "Dim Rec As VBA.Collection", "Number = Rec.Count", False,
+                               True),
+    "qualified-unique-type": ("", "Dim Rec As TEST_Library.Unique", "Number = Rec.Item", False,
+                              False),
+    "unqualified-unique-type": ("", "Dim Rec As Unique", "Number = Rec.Item", False, False),
+    "enum-declared-once": ("", "", "Number = Kind.kOne", False, False),
+}
+
+
+def shadowing_files(module_level: str, local: str, statement: str, second: bool
+                    ) -> dict[str, str | bytes]:
+    """The fixture of one SHADOWING case."""
+    body = (f"{module_level}\n\n\nPrivate Sub First()\n        Dim Number As Long\n"
+            f"        {local}\n        On Error GoTo Handler\n        Exit Sub\nHandler:\n"
+            f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
+    files = {**standalone(module(body)), "tests/modules/TEST_Library.bas": LIBRARY}
+    if second:
+        files["tests/modules/TEST_Second.bas"] = SECOND
+    return files
+
+
+# A Function or Property Get holds its result in its own name: a field of a
+# result of a user-defined Type is a value there. Each case is (procedure
+# header, its End keyword, statement in the handler, whether the read of
+# Err.Number after it is stale).
+OWN_RESULT = {
+    "function-result-written": ("Public Function TryRun() As SavedError", "Function",
+                                "TryRun.Number = Err.Number: TryRun.Source = Err.Source", False),
+    "function-result-read": ("Public Function TryRun() As SavedError", "Function",
+                             "Number = TryRun.Number", False),
+    "property-get-result-written": ("Public Property Get Last() As SavedError", "Property",
+                                    "Last.Number = Err.Number: Last.Source = Err.Source",
+                                    False),
+    "object-result-member": ("Public Function TryRun() As Object", "Function",
+                             "Number = TryRun.Owner", True),
+    "recursive-call": ("Public Function TryRun(ByVal Retry As Long) As Long", "Function",
+                       "Number = TryRun(1)", True),
+    "recursive-call-of-a-record": ("Public Function TryRun(ByVal Retry As Long) As SavedError",
+                                   "Function", "Number = TryRun(1).Number", True),
+}
+
+
+def own_result(header: str, end: str, statement: str) -> dict[str, str | bytes]:
+    """A procedure ``header`` whose handler runs ``statement``, then reads Err.Number."""
+    body = (f"{header}\n        Dim Number As Long\n        On Error GoTo Fail\n"
+            f"        Exit {end}\nFail:\n        {statement}\n        Number = Err.Number\n"
+            f"End {end}\n")
+    return {**standalone(module(body)), "tests/modules/TEST_Codes.bas": CODES}
+
+
 def resume_next_operation(statement: str) -> str:
     """``statement`` after On Error Resume Next, then a read of Err.Number."""
     return ("Private Sub First()\n"
@@ -2556,9 +2849,10 @@ def resume_next_operation(statement: str) -> str:
 
 
 def sweep_statements() -> list[str]:
-    """Each statement of the sweep, and each library statement written
-    plain, with Call, and qualified by VBA. and by its module."""
-    statements = list(STATEMENT_SWEEP)
+    """Each statement of the sweep, one call of each VBA function, and each
+    library statement written plain, with Call, and qualified by VBA. and by
+    its module."""
+    statements = list(STATEMENT_SWEEP) + list(PURE_CALLS.values())
     for name, arguments, library in LIBRARY_STATEMENTS:
         for qualifier in ("", "VBA.", f"VBA.{library}."):
             statements.append(f"{qualifier}{name} {arguments}".rstrip())
@@ -2568,10 +2862,12 @@ def sweep_statements() -> list[str]:
 
 
 def sweep_handler(statement: str) -> str:
-    """A handler that runs ``statement`` at line 11, then reads Err.Number."""
+    """A handler that runs ``statement`` at line 10, then reads Err.Number
+    at line 11; the module header takes lines 1 to 3."""
     return ("Private Sub First()\n"
             "        Dim Number As Long, Text As String, Flag As Boolean, Item As Object\n"
-            "        Dim Values() As Long, Other() As String, FileNumber As Integer\n"
+            "        Dim Values() As Long, Other() As String, FileNumber As Integer, "
+            "Result As Variant, Amounts() As Double\n"
             "        On Error GoTo Handler\n        Exit Sub\nHandler:\n"
             f"        {statement}\n        Number = Err.Number\nEnd Sub\n")
 
@@ -2592,6 +2888,62 @@ class ErrorTest(unittest.TestCase):
                                 findings)
                 self.assertIn(text, findings[0])
                 self.assertTrue(findings[0].endswith(ALL_ENVIRONMENTS), findings)
+
+    def test_qualified_values_and_type_fields_are_data(self) -> None:
+        for statement in QUALIFIED_VALUES:
+            with self.subTest(statement=statement):
+                files = {**standalone(qualified(statement)), "tests/modules/TEST_Codes.bas": CODES}
+                self.assertEqual(run_check(check_vba_errors.check, files), [])
+        for statement in QUALIFIED_MEMBERS:
+            with self.subTest(statement=statement):
+                files = {**standalone(qualified(statement)), "tests/modules/TEST_Codes.bas": CODES}
+                findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(len(findings), 1, findings)
+                self.assertTrue(findings[0].startswith(
+                    "tests/modules/TEST_Fixture.bas:25: Err.Number read in First after line 24, "
+                    "which may have changed Err with a call or member access"), findings)
+
+    def test_set_of_an_object_declared_as_new_is_a_member_access(self) -> None:
+        # Reading a variable declared As New creates it on first use, which
+        # runs Class_Initialize, here a call of Err.Clear: even Set reads it.
+        owner = ('VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  \'True\nEND\n'
+                 'Attribute VB_Name = "COwner"\nOption Explicit\n\n'
+                 "Private Sub Class_Initialize()\n        Err.Clear\nEnd Sub\n")
+        body = ("Private mOwner As New COwner\n\n\nPrivate Sub First()\n"
+                "        Dim Number As Long, Book As Object\n        On Error GoTo Handler\n"
+                "        Exit Sub\nHandler:\n        Set Book = TEST_Fixture.mOwner\n"
+                "        Number = Err.Number\nEnd Sub\n")
+        files = {**standalone(module(body)), "src/classes/COwner.cls": owner}
+        findings = run_check(check_vba_errors.check, files)
+        self.assertEqual(len(findings), 1, findings)
+        self.assertTrue(findings[0].startswith(
+            "tests/modules/TEST_Fixture.bas:13: Err.Number read in First after line 12, "
+            "which may have changed Err with a call or member access"), findings)
+
+    def test_names_resolve_by_scope_level(self) -> None:
+        for name, (module_level, parameters, local, other, statement, stale) in \
+                PRECEDENCE.items():
+            with self.subTest(name=name):
+                files = precedence_files(module_level, parameters, local, other, statement)
+                findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(bool(findings), stale, findings)
+                if stale:
+                    self.assertEqual(len(findings), 1, findings)
+                    self.assertIn("TEST_Fixture.bas:", findings[0])
+                    self.assertIn("Err.Number read in First after line ", findings[0])
+
+    def test_names_declared_twice_are_member_accesses(self) -> None:
+        for name, (module_level, local, statement, second, stale) in SHADOWING.items():
+            with self.subTest(name=name):
+                files = shadowing_files(module_level, local, statement, second)
+                findings = run_check(check_vba_errors.check, files)
+                self.assertEqual(bool(findings), stale, findings)
+
+    def test_own_result_is_a_variable(self) -> None:
+        for name, (header, end, statement, stale) in OWN_RESULT.items():
+            with self.subTest(name=name):
+                findings = run_check(check_vba_errors.check, own_result(header, end, statement))
+                self.assertEqual(bool(findings), stale, findings)
 
     def test_every_statement_can_fail_after_resume_next(self) -> None:
         for statement in RESUME_NEXT_OPERATIONS:
@@ -2618,7 +2970,20 @@ class ErrorTest(unittest.TestCase):
             index = int(finding.split(".bas")[0].removeprefix("tests/modules/TEST_Sweep"))
             with self.subTest(statement=statements[index]):
                 self.fail(finding)
-        self.assertGreater(len(statements), 100)
+        self.assertGreater(len(statements), 250)
+
+    def test_sweep_covers_what_the_check_knows(self) -> None:
+        # The sweep is checked against the check's own lists, so that a name
+        # removed from them, or added without a case, fails here.
+        self.assertEqual({name.casefold() for name in PURE_CALLS}, check_vba_errors.PURE_FUNCTIONS)
+        statements = sweep_statements()
+        for keyword in (*check_vba_errors.BUILTIN_STATEMENTS,
+                        *check_vba_errors.BUILTIN_TARGETS):
+            with self.subTest(keyword=keyword):
+                words = r"\s+".join(keyword.split())
+                pattern = re.compile(rf"^(?:Call\s+)?(?:VBA\.(?:\w+\.)?)?{words}\b",
+                                     re.IGNORECASE)
+                self.assertTrue(any(pattern.match(item) for item in statements), keyword)
 
     def test_project_declarations_shadow_vba_built_ins(self) -> None:
         # A procedure of the project named like a VBA function, statement,
