@@ -17,7 +17,7 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    target-branch: release/1.0.0
+    target-branch: release/1.1.0
     schedule:
       interval: weekly
       day: monday
@@ -39,7 +39,7 @@ updates:
           - "*"
   - package-ecosystem: pip
     directory: /.github
-    target-branch: release/1.0.0
+    target-branch: release/1.1.0
     schedule:
       interval: weekly
       day: monday
@@ -61,7 +61,7 @@ updates:
           - "*"
   - package-ecosystem: pip
     directory: /tools
-    target-branch: release/1.0.0
+    target-branch: release/1.1.0
     schedule:
       interval: weekly
       day: monday
