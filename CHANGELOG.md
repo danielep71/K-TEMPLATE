@@ -508,6 +508,15 @@ milestones and their pull requests.
   file it wrote, as not evidence for the commit, never as
   `Binding: VERIFIED`. [INSTALLATION.md](INSTALLATION.md#building-a-workbook-from-source)
   describes the option and its limits (#406).
+- Every release starts with a
+  [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) of the repository's
+  issues, pull requests, review discussions and notifications. It checks that
+  closed issues meet their acceptance criteria, that open issues and `blocked`
+  labels are current, that review threads are resolved only on evidence, and
+  that no text claims a change, test or review its evidence does not support.
+  Its report goes on the milestone closeout issue before the candidate is
+  frozen; a release invariant, the release checklist and the closeout
+  checklist require it (#438).
 
 ### Changed
 

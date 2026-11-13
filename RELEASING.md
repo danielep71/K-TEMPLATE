@@ -90,13 +90,23 @@ A version may be published only when:
    the [release certification](docs/release/RELEASE_CERTIFICATION.md);
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
-6. the annotated tag targets the candidate; and
-7. the checks after publication pass.
+6. the [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) was run before
+   the candidate was frozen, its report is on the milestone closeout issue,
+   and each of its findings is fixed, tracked in an issue or accepted as a
+   deviation;
+7. the annotated tag targets the candidate; and
+8. the checks after publication pass.
 
 If the source changes after steps 3 to 5, the evidence is stale and is
 produced again for the new candidate.
 
 ## 🪜 Preparing and publishing a version
+
+Start with the [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) of the
+repository's issues, pull requests, review discussions and notifications, and
+post its report on the milestone closeout issue. Fix its findings through task
+pull requests before step 2 freezes the candidate, or track each in an issue
+and record it as a deviation.
 
 ### 1. Finalize the changelog and `VERSION`
 
@@ -247,7 +257,7 @@ or list each invariant that was not met on the lines that follow it, one
 
 ```text
 Deviations:
-- Invariant 7: <what was not met, and why>.
+- Invariant 8: <what was not met, and why>.
 ```
 
 `Deviations:` with nothing after it fails. Copy results from the runs
@@ -391,6 +401,7 @@ Before attaching it, check that it opens and names version `X.Y.Z`.
 
 Keep with the release, in its certification issue and the release notes:
 
+- the maintenance audit report;
 - the candidate SHA and the integration pull request;
 - the **Repository integrity** run and the CodeQL assessment;
 - the Excel run, with the host it names;
@@ -425,14 +436,15 @@ Logs and artifacts expire, so copy the decisive lines.
 | # | Gate | Done |
 | ---: | --- | :---: |
 | 1 | I decided to prepare the version | ☐ |
-| 2 | Changelog section dated and `VERSION` created or updated | ☐ |
-| 3 | Release branch integrated into the default branch, and synced back | ☐ |
-| 4 | Candidate frozen: the integration merge commit's full SHA | ☐ |
-| 5 | Repository checks and **Repository integrity** pass on the candidate; CodeQL alerts assessed | ☐ |
-| 6 | Release certification recorded for the candidate | ☐ |
-| 7 | Distribution review recorded and closed | ☐ |
-| 8 | I decided to publish | ☐ |
-| 9 | Annotated tag on the candidate | ☐ |
-| 10 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
-| 11 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
-| 12 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |
+| 2 | Maintenance audit reported on the closeout issue; each finding fixed, tracked or accepted | ☐ |
+| 3 | Changelog section dated and `VERSION` created or updated | ☐ |
+| 4 | Release branch integrated into the default branch, and synced back | ☐ |
+| 5 | Candidate frozen: the integration merge commit's full SHA | ☐ |
+| 6 | Repository checks and **Repository integrity** pass on the candidate; CodeQL alerts assessed | ☐ |
+| 7 | Release certification recorded for the candidate | ☐ |
+| 8 | Distribution review recorded and closed | ☐ |
+| 9 | I decided to publish | ☐ |
+| 10 | Annotated tag on the candidate | ☐ |
+| 11 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
+| 12 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
+| 13 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |

@@ -5,6 +5,7 @@
 - Write my decisions and responsibilities in first person: “I”, “me”, and “my”.
 - Do not describe me in third person as “the maintainer” or “the owner”.
 - Address instructions for contributors and template users directly to the reader.
+- These rules also apply to issue and pull request text and comments written on my behalf: do not call me "the owner", "the user" or by name there; use direct, impersonal or first-person wording.
 
 ## Repository scope
 
