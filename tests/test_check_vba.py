@@ -1090,6 +1090,25 @@ Cleanup:
         Loop
         Err.Raise 5
 ''',
+            # The Exit Do after Exit Sub is never reached: the path leaves the
+            # procedure or loops forever, so nothing runs after the loop.
+            "unreached-exit-of-an-enclosing-bare-loop": '''        Do
+Cleanup:
+            If Flag Then
+                Exit Sub
+                Exit Do
+            End If
+        Loop
+        Err.Raise 5
+''',
+            # Documented false negative: an Exit Do reached only in a later pass.
+            "exit-before-the-target-in-an-enclosing-bare-loop": '''        Do
+            If Flag Then Exit Do
+Cleanup:
+            Debug.Print 0
+        Loop
+        Err.Raise 5
+''',
             # Once the path ends, a label another jump reaches is not followed.
             "targeted-label-after-the-path-ends-in-a-loop": '''        If Index = 2 Then GoTo Again
         Do

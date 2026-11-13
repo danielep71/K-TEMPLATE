@@ -270,7 +270,8 @@ What they cannot prove:
   it reports nothing; after a `GoSub`, that is the case unless the
   subroutine runs straight to its `Return` with no branch, jump, raise or
   `On Error` statement. It checks a raise in a loop body in the first pass
-  only, and never inside a subroutine;
+  only, and never inside a subroutine. After a bare `Do ... Loop` around the
+  `Resume` target, it follows only an `Exit Do` reached in the first pass;
 - the error check follows straight-line code only, and says nothing where
   it cannot prove a read stale:
   - a label and a branch or loop statement (`If`, `Select Case`, `Do`,

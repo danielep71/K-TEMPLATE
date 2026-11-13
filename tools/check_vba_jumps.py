@@ -51,7 +51,10 @@ without ``Call`` and named arguments, or the ``Error`` statement; a
   ``Else`` or ``Case`` of an enclosing block, the path skips to that block's
   end. At the end of an enclosing loop, the path continues after the loop
   as above; if the loop's body changes the handler, the state is unknown
-  there, and a raise before the target in a later pass is not checked.
+  there, and a raise before the target in a later pass is not checked. An
+  enclosing bare ``Do ... Loop`` continues only from an ``Exit Do`` the path
+  reached, so one reached only in a later pass, such as an ``Exit Do``
+  before the target, is not followed.
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
   ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
   end of the procedure; inside a block, that branch ends there and takes no
@@ -401,7 +404,9 @@ def after_loop(steps: list[Step], block: Block, close: int, state: str) -> str:
     ``state`` at the end of the body. Leaving through an ``Exit`` gives
     ``block.ends``; a loop that tests its condition also ends after the
     body, and one that tests it first may run no pass. A later pass that
-    may change the handler before an ``Exit`` makes the state unknown."""
+    may change the handler before an ``Exit`` makes the state unknown. An
+    enclosing bare ``Do ... Loop`` continues only from the exits the path
+    reached, never from one that is present but not reached."""
     may_skip = bool(PRETESTED_LOOP.match(steps[block.start].code))
     tested = may_skip or bool(POSTTESTED_CLOSE.match(steps[close].code))
     if not tested and not loop_has_exit(steps, block.start, close):
@@ -411,7 +416,7 @@ def after_loop(steps: list[Step], block: Block, close: int, state: str) -> str:
         # Another pass runs the body before the target too.
         if state != DEAD and changes_handler(body):
             return UNKNOWN
-        return merge([*block.ends, state])
+        return merge([*block.ends, *([state] if tested else [])])
     if merge(block.ends) != DEAD and changes_handler(body):
         return UNKNOWN
     return merge([*block.ends, *([state] if tested else []),
