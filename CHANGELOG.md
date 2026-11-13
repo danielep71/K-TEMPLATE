@@ -662,6 +662,10 @@ milestones and their pull requests.
   forms under `[project-public]`, as the
   [repository structure](docs/REPOSITORY_STRUCTURE.md#public-api-inventory)
   guide describes (#405).
+- The template repository is `danielep71/K-TEMPLATE`. The README title, its
+  badges and wiki links, the issue forms' contact links and the changelog's
+  link references use the new name; GitHub redirects links that use the old
+  one (#433).
 
 ### Fixed
 
@@ -798,5 +802,5 @@ milestones and their pull requests.
   worst error 0.0, `compile=ON_DEMAND`. The host behaviours `HB-02` to `HB-04`
   of the validation plan are measured on that host (#204, #211).
 
-[Unreleased]: https://github.com/danielep71/MyTemplate/compare/v1.0.0...HEAD
-[1.0.0]: https://github.com/danielep71/MyTemplate/releases/tag/v1.0.0
+[Unreleased]: https://github.com/danielep71/K-TEMPLATE/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/danielep71/K-TEMPLATE/releases/tag/v1.0.0

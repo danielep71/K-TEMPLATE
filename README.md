@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🧰 MyTemplate
+# 🧰 K-TEMPLATE
 
 ### The starting point for regulatory risk calculation workbooks in Excel VBA
 
@@ -13,9 +13,9 @@
 [![Python](https://img.shields.io/badge/Tooling-Python_3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](#-quality-gates)
 [![GitHub Actions](https://img.shields.io/badge/CI-GitHub_Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](#-quality-gates)
 [![License](https://img.shields.io/badge/License-MPL_2.0-2ea44f?style=for-the-badge)](#-license)
-<br>[![Clones, including CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/MyTemplate/traffic-history/data/badges/clones.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
-[![Unique visitors, last 14 days](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/MyTemplate/traffic-history/data/badges/visitors.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
-[![Daily unique visitors since tracking began](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/MyTemplate/traffic-history/data/badges/visits.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
+<br>[![Clones, including CI](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/K-TEMPLATE/traffic-history/data/badges/clones.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
+[![Unique visitors, last 14 days](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/K-TEMPLATE/traffic-history/data/badges/visitors.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
+[![Daily unique visitors since tracking began](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/danielep71/K-TEMPLATE/traffic-history/data/badges/visits.json&style=flat-square)](docs/repo_governance/TRAFFIC.md#badges)
 
 <br>
 
@@ -35,7 +35,7 @@
 &nbsp;·&nbsp;
 [Status](#-status)
 &nbsp;·&nbsp;
-[Template wiki](https://github.com/danielep71/MyTemplate/wiki)
+[Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki)
 
 ---
 
@@ -228,7 +228,7 @@ The full layout and its rules are in
 | [`SECURITY.md`](SECURITY.md) | Private vulnerability reporting, runtime risk surface and data handling |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Participant behaviour and conduct reporting |
 | [`CHANGELOG.md`](CHANGELOG.md) | Change history |
-| [Template wiki](https://github.com/danielep71/MyTemplate/wiki) | A guided tour of the template, page by page; the documents above govern where it differs |
+| [Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki) | A guided tour of the template, page by page; the documents above govern where it differs |
 
 ## 📌 Status
 
