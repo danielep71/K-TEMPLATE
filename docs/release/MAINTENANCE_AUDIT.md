@@ -110,9 +110,8 @@ repositories.
 - Remove or correct a reference that is irrelevant, incoherent or wrong.
 - Keep legitimate dependencies, source attribution, provenance, licence
   notices, comparisons and cross-repository links.
-- In text written on my behalf, replace third-person wording about me, such
-  as "the owner", "the user" or my name, with direct, impersonal or
-  first-person wording.
+- Correct text written on my behalf where it departs from the repository's
+  writing rules.
 - Keep authorship, responsibility and approval records. Never invent a
   statement or an approval in my name, and never alter a quotation or another
   contributor's words.
