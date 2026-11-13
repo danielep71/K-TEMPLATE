@@ -13,23 +13,24 @@ repository analytics, not CI: it builds and tests nothing.
 The workflow does nothing until the repository variable `TRAFFIC_HISTORY` is
 `enabled`; until then its scheduled runs are skipped. Enable it in this order:
 
-1. **Create the branch** from a clone of the default branch:
+1. **Create the branch** from a clone of the default branch. The commands
+   work alike in PowerShell and `sh`, and need Git 2.42 or later:
 
    ```sh
-   data="$(mktemp -d)/data"
-   python tools/traffic_history.py init --data "$data"
-   git switch --orphan traffic-history
-   mv "$data" data
-   git add data
-   git commit -m "chore: start the traffic history"
-   git push origin traffic-history
-   git switch -
+   git worktree add --orphan -b traffic-history ../traffic-history
+   python tools/traffic_history.py init --data ../traffic-history/data
+   git -C ../traffic-history add data
+   git -C ../traffic-history commit -m "chore: start the traffic history"
+   git -C ../traffic-history push origin traffic-history
+   git worktree remove ../traffic-history
    ```
 
-   `git switch --orphan` starts the branch with no files and no history in
-   common with the default branch. It is never merged and never used as a
-   task base. The setup baseline's **Protect traffic history** ruleset blocks
-   its deletion and force pushes.
+   `git worktree add --orphan` starts the branch in a separate folder beside
+   the clone, with no files and no history in common with the default branch;
+   the clone stays on its branch, and the last command removes the folder.
+   The branch is never merged and never used as a task base. The setup
+   baseline's **Protect traffic history** ruleset blocks its deletion and
+   force pushes.
 2. **Settings → Environments → New environment** `analytics`. Under
    *Deployment branches and tags*, select *Selected branches and tags* and
    allow the default branch only. Do this before adding the App's credentials:

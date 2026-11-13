@@ -91,6 +91,14 @@ Use only the categories an entry needs.
   template had its first pull request reviewed without one. If Codex asks
   for an environment instead of reviewing, an `@codex review` comment
   produces the review (#477).
+- `tools/initialize_repository.py` also removes the template's evidence,
+  which cites the template's own commits and issues: the rows of the
+  *Tested environment* table of `INSTALLATION.md`, and the *Issue* column of
+  the *Host behaviour* table of the validation plan, which becomes a dash.
+  The validation plan's `HB-04` result no longer names a commit (#485).
+- The traffic guide creates the `traffic-history` branch in a separate
+  worktree with commands that work alike in PowerShell and `sh`, instead of
+  `sh`-only commands with a temporary directory and a shell variable (#484).
 
 ### Fixed
 

@@ -113,7 +113,12 @@ GitHub copies files from a template, not its settings. In order:
    release is prepared) and sets the release rows of *Current status* in
    `RELEASING.md` to say that nothing is released yet, since both describe
    the template's releases, and replaces `<REGIME>` in the naming table of
-   `docs/VBA_HOUSE_STYLE.md`. You can then delete
+   `docs/VBA_HOUSE_STYLE.md`. With the changelog's entries it also removes
+   the template's evidence, which cites the template's own commits and
+   issues: the rows of the *Tested environment* table of `INSTALLATION.md`,
+   and the issue numbers of the *Host behaviour* table of
+   `docs/methodology/VALIDATION_PLAN.md`, which become a dash. You can then
+   delete
    `tools/initialize_repository.py` and `tests/test_initialize_repository.py`:
    nothing else uses them. Without the initializer, make the same edits by
    hand.
