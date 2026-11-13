@@ -141,7 +141,7 @@ repository's **Settings → Actions → General**, then rerun `--check`.
 ```sh
 python tools/setup_repository.py --repo OWNER/NEW-REPO --check \
   --report docs/repo_governance/SETTINGS_EVIDENCE.md \
-  --evidence docs/repo_governance/settings-evidence-{date}.json
+  --evidence 'docs/repo_governance/settings-evidence-{date}.json'
 ```
 
 A verified match returns **0**. `--report` writes the repository's **setup
@@ -155,8 +155,10 @@ Running apply again against matching settings makes no writes.
 
 `--evidence PATH` writes the same check as JSON, for a machine to read, whether or
 not you also pass `--report`; a `{date}` in the path becomes the UTC date of the
-check (`YYYY-MM-DD`). The record names the mode, repository, default branch and
-result, the configuration's path and SHA-256, and each managed value as configured
+check (`YYYY-MM-DD`). Keep such a path in single quotes, as above: PowerShell
+does not pass the braces of an unquoted `{date}` through. The record names the
+mode, repository, default branch and result, the configuration's path and
+SHA-256, and each managed value as configured
 and observed, with the source of each security feature and Actions setting, each
 managed ruleset with its differences and the rulesets that cover it, the unmanaged
 and inherited rulesets, the method and endpoint of each planned change, with the
