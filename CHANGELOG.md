@@ -438,8 +438,65 @@ milestones and their pull requests.
   as ambiguous on zero that is not directly preceded by `SetLastError 0`,
   whose whole result is not assigned to a local variable, or that is not
   directly followed by that capture. A repository with a `Declare` must
-  register its export. The house style, the structure guide and the setup
-  guide document the rules and the register; nothing was run in Excel (#398).
+  register its export. An entry may also record the export's ABI, its
+  `arguments` (each type, or `pointer`, and `byval`) and `returns` (a type,
+  `pointer` or `null`); the check then reports, in each environment, a
+  `Declare` whose parameter count, parameter types, `ByVal` or `ByRef`,
+  `Sub` or `Function`, or return type differs from it, with a `pointer`
+  expected as `LongPtr` under VBA7 and `Long` under VBA6 (#399). The house
+  style, the structure guide and the setup guide document the rules and the
+  register; nothing was run in Excel (#398).
+- `tools/check_vba_jumps.py` reports an `Err.Raise` or `Error` statement
+  reached after an unconditional `Resume <label>` while the procedure's own
+  `On Error GoTo <label>` handler is enabled, in each compilation environment:
+  the handler would trap the raise again, and a cleanup that raises the saved
+  error can loop and hang Excel. The check also requires the line number in
+  `If x Then 100`, an implicit `GoTo`, to be a label of the procedure. The
+  [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the handler with
+  `On Error GoTo 0` before raising the saved error again. The check is static;
+  nothing was run in Excel (#397).
+- A pull request that fixes a defect now shows its new or changed test
+  failing on the defective code, then passing on the fix, and records how in
+  the *Validated* section of the pull request template
+  ([negative controls](CONTRIBUTING.md#-negative-controls)).
+  `python tools/make_mutant.py FILE --find TEXT --replace TEXT` writes the
+  defective variant of a file reproducibly: a copy with the one occurrence of
+  the text replaced, under the ignored `test-results/mutants/`, with every
+  other byte, CRLF line endings and `Attribute VB_Name` kept, and the SHA-256
+  of the source and the mutant printed. It refuses a text that does not occur
+  exactly once, overlapping occurrences included, an output folder that Git
+  does not ignore, and a symbolic link at the mutant's path (#400).
+- The daily **Detect settings drift** workflow compares the live rulesets with
+  `docs/setup/repository-settings.json` using only the job's read-only token,
+  and fails on drift. It runs the new
+  `tools/setup_repository.py --check --token-scope workflow`, which compares
+  what that token can read: each ruleset without its bypass list, the
+  visibility, the general settings GitHub returns to it and, on a public
+  repository, private vulnerability reporting. Each value it cannot read is
+  listed as not checked, never as drift or a match; with no drift the result
+  is `PARTIAL` and the run passes. `--summary PATH` appends a Markdown summary
+  in every mode. The [settings reference](docs/repo_governance/SETTINGS.md#drift)
+  lists what the workflow checks and why (#403).
+- `tools/check_excel_run.py --equivalent-to SHA` lets one Excel run certify a
+  later commit that changes none of the run's inputs, such as a fix to a
+  workflow or a guide. The evidence and the binding are still checked against
+  `--commit`, the commit the workbook was built from. Then every run input
+  must have the same Git blob at both commits: the VBA components and form
+  resources, the files of the build configuration's directories, the
+  methodology guides, fixtures, expected results and accuracy contracts, the
+  build configuration, the layout template, the evidence policy, every
+  `.gitattributes` file at any depth and the build tools. A difference fails and names each
+  path; a match prints
+  `Equivalent: <SHA> (N run inputs identical to <commit>)`, and the report
+  names both commits. `INSTALLATION.md`,
+  `RELEASING.md` step 4, the release certification record and the pull
+  request guide and template say when such a run counts and that its record
+  names both commits (#402).
+- The `actionlint` check of **Repository integrity** first lints
+  `.github/actionlint/invalid-workflow.yml`, a workflow with a known error
+  that never runs, and fails unless actionlint rejects it with that finding.
+  Only then does it lint the workflows, so a broken or stubbed actionlint that
+  accepts everything can no longer pass the check (#404).
 
 ### Changed
 
@@ -712,6 +769,15 @@ milestones and their pull requests.
   accuracy contracts. The Dependabot `target-branch` test uses a longer name
   that `git ls-remote` returns for the branch, so it fails if the check stops
   comparing exact names (#423).
+- The Excel instance that `tools/devbuild/excel_run.py` starts no longer
+  outlives the run. The command records the process id of that instance,
+  from its window, and the process start time. After it quits Excel, it waits
+  up to 30 seconds for that process to exit and then ends it, but only while
+  the process with that id is named `EXCEL` and has the recorded start time,
+  so it never ends another Excel. It prints how Excel ended in an
+  `excel-quit:` line (`EXITED`, `STOPPED`, `SURVIVED` or `UNKNOWN`), which
+  the saved report also holds; `SECURITY.md` and the installation guide say
+  so (#401).
 
 ### Validation
 

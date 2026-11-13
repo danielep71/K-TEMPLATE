@@ -648,13 +648,135 @@ End Sub
                                         "GoTo target 'Lost'"),
     "one-line-procedure-missing-label": ("Private Sub First(): GoTo Lost: End Sub\n",
                                          "GoTo target 'Lost'"),
+    "implicit-line-number-jump-missing-target": ("Private Sub First(ByVal Flag As Boolean)\n"
+                                                 "        If Flag Then 100 Else 200\n"
+                                                 "100     Exit Sub\nEnd Sub\n",
+                                                 "GoTo target '200'"),
     "jump-after-member-call": ("Private Sub First()\n"
                                "        Application.Goto Reference:=\"R1C1\": GoTo Lost\nEnd Sub\n",
                                "GoTo target 'Lost'"),
 }
+# A handler that saves the error and resumes to the cleanup, which raises the
+# saved error again; RAISE marks the line before the raise.
+RERAISE = '''Private Sub First()
+        Dim SavedNumber As Long
+        On Error GoTo Handler
+        Debug.Print 1 / 0
+Cleanup:
+        Debug.Print "restore"
+        ' RAISE
+        If SavedNumber <> 0 Then Err.Raise SavedNumber, "TEST_Fixture.First"
+        Exit Sub
+Handler:
+        SavedNumber = Err.Number
+        Resume Cleanup
+End Sub
+'''
+RAISE = "        ' RAISE\n"
+TRAPPED = ("Err.Raise after Resume Cleanup is trapped again by handler 'Handler' of procedure "
+           "First; put On Error GoTo 0 before the raise")
+
+
+def reraise(before_raise: str = "", fixture: str = RERAISE) -> dict[str, str | bytes]:
+    """The re-raise fixture with ``before_raise`` lines inserted before the raise."""
+    return standalone(module(fixture.replace(RAISE, before_raise)))
+
+
+def enclosed(blocks: str) -> dict[str, str | bytes]:
+    """A procedure whose handler resumes to ``Cleanup:``, a label inside ``blocks``."""
+    return standalone(module(f'''Private Sub First(ByVal Flag As Boolean)
+        Dim Index As Long
+        On Error GoTo Handler
+        Debug.Print 1 / 0
+{blocks}        Exit Sub
+Handler:
+        Resume Cleanup
+End Sub
+'''))
+
+
+SAFE = "On Error GoTo 0: Err.Raise 5"
+# Valid cleanups after "Resume Cleanup": every raise runs with the handler
+# disabled, or is not trapped by a local handler. None may be reported.
+SAFE_CLEANUPS = {
+    "plain": f"Cleanup:\n        {SAFE}\n",
+    "separate-lines": "Cleanup:\n        On Error GoTo 0\n        Err.Raise 5\n",
+    "goto-minus-one-then-zero": "Cleanup:\n        On Error GoTo -1\n        On Error GoTo 0\n"
+                                "        Err.Raise 5\n",
+    "block-if": f"Cleanup:\n        If Flag Then\n            {SAFE}\n        End If\n",
+    "if-else": f"Cleanup:\n        If Flag Then\n            {SAFE}\n        Else\n"
+               "            Debug.Print 0\n        End If\n",
+    "if-elseif": f"Cleanup:\n        If Flag Then\n            Debug.Print 0\n"
+                 f"        ElseIf Index = 1 Then\n            {SAFE}\n        End If\n",
+    "else-colon": f"Cleanup:\n        If Flag Then\n            Debug.Print 0\n"
+                  f"        Else: {SAFE}\n        End If\n",
+    "one-line-if": f"Cleanup:\n        If Flag Then {SAFE}\n",
+    "one-line-if-else": f"Cleanup:\n        If Flag Then Debug.Print 0 Else {SAFE}\n",
+    "nested-one-line-if": f"Cleanup:\n        If Flag Then If Index = 1 Then {SAFE}\n",
+    "one-line-if-with-a-colon": f"Cleanup:\n        If Flag Then: {SAFE}\n",
+    "select-case": f"Cleanup:\n        Select Case Index\n        Case 1\n            {SAFE}\n"
+                   "        Case Else\n            Debug.Print 0\n        End Select\n",
+    "case-colon": f"Cleanup:\n        Select Case Index\n        Case 1: {SAFE}\n"
+                  "        End Select\n",
+    "for": f"Cleanup:\n        For Index = 1 To 2\n            {SAFE}\n        Next Index\n",
+    "for-each-combined-next": "Cleanup:\n        For Each Item In Items\n"
+                              f"            For Each Other In Item\n                {SAFE}\n"
+                              "        Next Other, Item\n",
+    "do-while": f"Cleanup:\n        Do While Flag\n            {SAFE}\n        Loop\n",
+    "do-until": f"Cleanup:\n        Do Until Flag\n            {SAFE}\n        Loop\n",
+    "loop-until": f"Cleanup:\n        Do\n            {SAFE}\n        Loop Until Flag\n",
+    "bare-loop": f"Cleanup:\n        Do\n            If Flag Then Exit Do\n        Loop\n"
+                 f"        {SAFE}\n",
+    "while-wend": f"Cleanup:\n        While Flag\n            {SAFE}\n        Wend\n",
+    "exit-for": f"Cleanup:\n        For Index = 1 To 2\n            If Flag Then Exit For\n"
+                f"        Next Index\n        {SAFE}\n",
+    "with": f"Cleanup:\n        With Application\n            {SAFE}\n        End With\n",
+    "straight-subroutine": f"Cleanup:\n        GoSub Restore\n        {SAFE}\n        Exit Sub\n"
+                           "Restore:\n        Debug.Print 0\n        Return\n",
+    "branching-subroutine": "Cleanup:\n        GoSub Disarm\n        Err.Raise 5\n        Exit Sub\n"
+                            "Disarm:\n        If Flag Then Exit Sub\n        On Error GoTo 0\n"
+                            "        Return\n",
+    "computed-gosub": "Cleanup:\n        On Index GoSub Disarm\n        Err.Raise 5\n"
+                      "        Exit Sub\nDisarm:\n        On Error GoTo 0\n        Return\n",
+    "computed-goto": f"Cleanup:\n        On Index GoTo Finish\n        {SAFE}\nFinish:\n",
+    "second-label": f"Cleanup:\n        Debug.Print 0\nRestore:\n        {SAFE}\n",
+    "label-with-code": f"Cleanup: {SAFE}\n",
+    "exit-before": "Cleanup:\n        If Flag Then Exit Sub\n        Stop\n"
+                   f"        {SAFE}\n",
+    "goto-skips": "Cleanup:\n        GoTo Finish\n        Err.Raise 5\nFinish:\n",
+    "conditional-compilation": f"Cleanup:\n#If VBA7 Then\n        {SAFE}\n#Else\n"
+                               f"        {SAFE}\n#End If\n",
+    "continued-line": "Cleanup:\n        On Error GoTo 0: Err.Raise 5, _\n"
+                      "            \"TEST_Fixture.First\"\n",
+    "named-arguments": "Cleanup:\n        On Error GoTo 0\n        VBA.Err.Raise Number:=5, "
+                       "Description:=\"Err.Raise\"\n",
+    "call-raise": "Cleanup:\n        On Error GoTo 0\n        Call Err.Raise(5)\n",
+    "error-statement": "Cleanup:\n        On Error GoTo 0\n        Error 5\n",
+    "resume-next": "Cleanup:\n        On Error Resume Next\n        Err.Raise 5\n",
+    "raise-in-text": "Cleanup:\n        Debug.Print \"Err.Raise 5\" ' Err.Raise 6\n",
+    "nested-blocks": "Cleanup:\n        Select Case Index\n        Case 1\n"
+                     "            For Index = 1 To 2\n                If Flag Then\n"
+                     f"                    {SAFE}\n                End If\n"
+                     "            Next Index\n        End Select\n",
+}
 
 
 class JumpTest(unittest.TestCase):
+    def test_safe_cleanups_are_not_reported(self) -> None:
+        for name, blocks in SAFE_CLEANUPS.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
+        with self.subTest(name="line-numbers"):
+            numbered = '''Private Sub First()
+        On Error GoTo 900
+        Debug.Print 1 / 0
+100     On Error GoTo 0: Err.Raise 5
+        Exit Sub
+900     Resume 100
+End Sub
+'''
+            self.assertEqual(run_check(check_vba_jumps.check, standalone(module(numbered))), [])
+
     def test_valid_fixtures_pass(self) -> None:
         self.assertEqual(run_check(check_vba_jumps.check, VALID), [])
         for name, body in JUMPS_VALID.items():
@@ -671,6 +793,473 @@ class JumpTest(unittest.TestCase):
         with repository(VALID) as root:
             _, components, procedures = check_vba_jumps.check(root)
         self.assertEqual((components, procedures), (7, 6))
+
+    def test_reraise_trapped_by_the_local_handler_is_reported(self) -> None:
+        every = " [vba6-win32, vba7-win32, vba7-win64]"
+        self.assertEqual(run_check(check_vba_jumps.check, reraise()),
+                         [f"tests/modules/TEST_Fixture.bas:10: {TRAPPED}{every}"])
+        block = RERAISE.replace(
+            "        If SavedNumber <> 0 Then Err.Raise SavedNumber, \"TEST_Fixture.First\"\n",
+            "        If SavedNumber <> 0 Then\n"
+            "            Err.Raise SavedNumber, \"TEST_Fixture.First\"\n"
+            "        End If\n")
+        cases = {
+            # Enabling the handler again after disabling it restores the loop.
+            "handler-enabled-again": "        On Error GoTo 0\n        On Error GoTo Handler\n",
+            # GoTo -1 ends the error-handling state but keeps the handler enabled.
+            "goto-minus-one": "        On Error GoTo -1\n",
+            # The exit in one branch leaves the other branch on the path.
+            "exit-in-one-branch": "        If SavedNumber = 0 Then\n            Exit Sub\n"
+                                  "        End If\n",
+            # A one-line If keeps its branch's state across its ":" statements.
+            "handler-enabled-in-a-one-line-if":
+                "        On Error GoTo 0\n"
+                "        If SavedNumber <> 0 Then On Error GoTo Handler: Err.Raise 5\n",
+            "handler-enabled-in-a-one-line-else":
+                "        On Error GoTo 0\n        If SavedNumber = 0 Then Debug.Print 0 "
+                "Else On Error GoTo Handler: Err.Raise 5\n",
+        }
+        for name, before in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual([item.split(": ", 1)[1] for item in
+                                  run_check(check_vba_jumps.check, reraise(before))],
+                                 [TRAPPED + every])
+        with self.subTest(name="raise-in-a-block-if"):
+            self.assertEqual([item.split(": ", 1)[1] for item in
+                              run_check(check_vba_jumps.check, reraise(fixture=block))],
+                             [TRAPPED + every])
+
+    def test_reraise_with_the_local_handler_disabled_passes(self) -> None:
+        handler_raises = RERAISE.replace("        Resume Cleanup\n",
+                                         "        Err.Raise Err.Number\n        Resume Cleanup\n")
+        cases = {
+            "goto-zero": reraise("        On Error GoTo 0\n"),
+            "goto-zero-in-the-raising-branch": reraise(fixture=RERAISE.replace(
+                "Then Err.Raise", "Then On Error GoTo 0: Err.Raise")),
+            "handler-enabled-in-the-other-one-line-branch": reraise(
+                "        On Error GoTo 0\n", RERAISE.replace(
+                    "If SavedNumber <> 0 Then Err.Raise",
+                    "If SavedNumber = 0 Then On Error GoTo Handler: Debug.Print 0 Else Err.Raise")),
+            "goto-zero-in-a-block-if": reraise(fixture=RERAISE.replace(
+                "        If SavedNumber <> 0 Then Err.Raise SavedNumber, \"TEST_Fixture.First\"\n",
+                "        If SavedNumber <> 0 Then\n            On Error GoTo 0\n"
+                "            Err.Raise SavedNumber, \"TEST_Fixture.First\"\n        End If\n")),
+            # While the handler runs, a raise goes to the caller, not back to the handler.
+            "raise-in-the-handler": reraise("        On Error GoTo 0\n", handler_raises),
+            "exit-before-the-raise": reraise("        Exit Sub\n"),
+            "no-local-handler": standalone(module('''Private Sub First()
+Cleanup:
+        Err.Raise 5, "TEST_Fixture.First"
+End Sub
+''')),
+        }
+        for name, files in cases.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, files), [])
+
+    def test_resume_target_inside_blocks_keeps_them(self) -> None:
+        reported = {
+            "raise-after-the-if": '''        If Flag Then
+Cleanup:
+            Debug.Print 0
+        Else
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
+            "raise-after-the-select": '''        Select Case Index
+        Case 1
+Cleanup:
+            Debug.Print 0
+        Case Else
+            On Error GoTo 0
+        End Select
+        Err.Raise 5
+''',
+            "raise-after-the-inner-if": '''        If Flag Then
+            If Index = 1 Then
+Cleanup:
+                Debug.Print 0
+            Else
+                On Error GoTo 0
+            End If
+            Err.Raise 5
+        Else
+            On Error GoTo 0
+        End If
+''',
+            "raise-after-the-loop": '''        For Index = 1 To 2
+Cleanup:
+            If Flag Then Exit For
+        Next Index
+        Err.Raise 5
+''',
+            "raise-after-a-combined-next": '''        If Flag Then
+            For Index = 1 To 2
+                For Inner = 1 To 2
+Cleanup:
+                    Debug.Print Inner
+                Next Inner, Index
+        Else
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
+        }
+        passing = {
+            "raise-in-the-else-branch": '''        If Flag Then
+Cleanup:
+            On Error GoTo 0
+        Else
+            On Error GoTo Handler: Err.Raise 5
+        End If
+''',
+            "raise-in-the-next-case": '''        Select Case Index
+        Case 1
+Cleanup:
+            On Error GoTo 0
+        Case 2
+            Err.Raise 5
+        End Select
+''',
+            "raise-in-the-outer-else-branch": '''        If Flag Then
+            If Index = 1 Then
+Cleanup:
+                On Error GoTo 0
+            Else
+                Err.Raise 5
+            End If
+        Else
+            Err.Raise 6
+        End If
+''',
+            # The next pass disables the handler before the target.
+            "loop-disables-the-handler": '''        For Index = 1 To 2
+            On Error GoTo 0
+Cleanup:
+            Debug.Print Index
+        Next Index
+        Err.Raise 5
+''',
+            "exit-the-loop-disabled": '''        Do While Index < 2
+Cleanup:
+            On Error GoTo 0
+            If Flag Then Exit Do
+        Loop
+        Err.Raise 5
+''',
+            # Next Inner, Index closes both loops, so the Else stays a sibling.
+            "raise-in-the-else-after-a-combined-next": '''        If Flag Then
+            For Index = 1 To 2
+                For Inner = 1 To 2
+Cleanup:
+                    On Error GoTo 0
+                Next Inner, Index
+        Else
+            On Error GoTo Handler: Err.Raise 5
+        End If
+''',
+        }
+        every = " [vba6-win32, vba7-win32, vba7-win64]"
+        for name, blocks in reported.items():
+            with self.subTest(name=name):
+                self.assertEqual([item.split(": ", 1)[1] for item in
+                                  run_check(check_vba_jumps.check, enclosed(blocks))],
+                                 [TRAPPED + every])
+        for name, blocks in passing.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
+
+    def test_reraise_rule_reads_each_construct(self) -> None:
+        reported = {
+            # The raise after "Then:" belongs to the one-line If.
+            "one-line-if-with-a-colon": ("Cleanup:\n        If Flag Then: Err.Raise 5\n",
+                                         "Err.Raise"),
+            "subroutine-without-on-error": ('''Cleanup:
+        GoSub Report
+        Err.Raise 5
+        Exit Sub
+Report:
+        Debug.Print 0
+        Return
+''', "Err.Raise"),
+            "error-statement": ("Cleanup:\n        Error 5\n", "Error"),
+            "qualified-raise": ("Cleanup:\n        VBA.Err.Raise Number:=5\n", "Err.Raise"),
+            "called-raise": ("Cleanup:\n        Call Err.Raise(5, \"TEST_Fixture.First\")\n",
+                             "Err.Raise"),
+            # A branch that propagates an error ends there and takes no part
+            # in the merge after End If.
+            "raise-after-a-branch-that-raises": ('''Cleanup:
+        If Flag Then
+            On Error GoTo 0: Err.Raise 5
+        End If
+        Err.Raise 6
+''', "Err.Raise"),
+            # Do ... Loop While runs its body at least once.
+            "raise-after-a-post-tested-loop": ('''Cleanup:
+        On Error GoTo 0
+        Do
+            On Error GoTo Handler
+        Loop While Index < 0
+        Err.Raise 5
+''', "Err.Raise"),
+            "raise-after-a-bare-loop-left-by-exit-do": ('''Cleanup:
+        Do
+            If Flag Then Exit Do
+        Loop
+        Err.Raise 5
+''', "Err.Raise"),
+            # The path ends at Exit Sub inside the enclosing loop, but the
+            # Exit Do it passed first still leaves the loop.
+            "raise-after-an-enclosing-loop-left-before-the-path-ends": ('''        Do
+Cleanup:
+            If Flag Then Exit Do
+            Exit Sub
+        Loop
+        Err.Raise 5
+''', "Err.Raise"),
+            # Nothing jumps to Unused, so the branch stays ended after Exit Sub.
+            "raise-after-an-untargeted-label-in-an-ended-branch": ('''Cleanup:
+        If Flag Then
+            Exit Sub
+Unused:
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''', "Err.Raise"),
+            # A line number kept for Erl is no jump target either.
+            "raise-after-an-erl-line-number-in-an-ended-branch": ('''Cleanup:
+        If Flag Then
+            Exit Sub
+100         On Error GoTo 0
+        End If
+        Err.Raise 5
+''', "Err.Raise"),
+            # Under On Error Resume Next a raise falls through.
+            "raise-after-a-raise-under-resume-next": (
+                "Cleanup:\n        On Error Resume Next: Err.Raise 5: "
+                "On Error GoTo Handler: Err.Raise 6\n", "Err.Raise"),
+            "raise-after-a-branch-with-an-error-statement": ('''Cleanup:
+        If Flag Then
+            On Error GoTo 0: Error 5
+        End If
+        Err.Raise 6
+''', "Err.Raise"),
+        }
+        passing = {
+            "one-line-if-with-a-colon-disabled":
+                "Cleanup:\n        If Flag Then: On Error GoTo 0: Err.Raise 5\n",
+            # "If ... Then:" opens no block, so the Else stays a sibling.
+            "one-line-if-with-a-colon-in-a-branch": '''        If Flag Then
+Cleanup:
+            On Error GoTo 0
+            If Index = 1 Then: Debug.Print 0
+        Else
+            On Error GoTo Handler: Err.Raise 5
+        End If
+''',
+            "subroutine-disables-the-handler": '''Cleanup:
+        GoSub Disarm
+        Err.Raise 5
+        Exit Sub
+Disarm:
+        On Error GoTo 0
+        Return
+''',
+            # Exit Do leaves the Do, not the For it stands in, with the handler off.
+            "exit-do-inside-a-for": '''Cleanup:
+        Do While Flag
+            On Error GoTo 0
+            For Index = 1 To 2
+                If Index = 2 Then Exit Do
+            Next Index
+            On Error GoTo Handler
+            Exit Sub
+        Loop
+        Err.Raise 5
+''',
+            "error-function": "Cleanup:\n        Debug.Print Error$(5), Error(5)\n",
+            # A bare Do ... Loop without Exit Do never reaches the raise after it.
+            "raise-after-a-bare-loop-without-exit-do": '''Cleanup:
+        Do
+            If Flag Then Exit Sub
+            On Error GoTo 0: Err.Raise 6
+        Loop
+        Err.Raise 5
+''',
+            "raise-after-an-enclosing-bare-loop-without-exit-do": '''        Do
+Cleanup:
+            Do
+                Exit Do
+            Loop
+            If Flag Then Exit Sub
+        Loop
+        Err.Raise 5
+''',
+            "raise-after-an-enclosing-loop-left-disabled": '''        Do
+Cleanup:
+            If Flag Then On Error GoTo 0: Exit Do
+            Exit Sub
+        Loop
+        Err.Raise 5
+''',
+            # The Exit Do after Exit Sub is never reached: the path leaves the
+            # procedure or loops forever, so nothing runs after the loop.
+            "unreached-exit-of-an-enclosing-bare-loop": '''        Do
+Cleanup:
+            If Flag Then
+                Exit Sub
+                Exit Do
+            End If
+        Loop
+        Err.Raise 5
+''',
+            # Documented false negative: an Exit Do reached only in a later pass.
+            "exit-before-the-target-in-an-enclosing-bare-loop": '''        Do
+            If Flag Then Exit Do
+Cleanup:
+            Debug.Print 0
+        Loop
+        Err.Raise 5
+''',
+            # Once the path ends, a label another jump reaches is not followed.
+            "targeted-label-after-the-path-ends-in-a-loop": '''        If Index = 2 Then GoTo Again
+        Do
+Cleanup:
+            Exit Sub
+Again:
+            On Error GoTo Handler
+            Err.Raise 5
+        Loop
+''',
+            # A Do While may run no pass, so the state before it also continues.
+            "raise-after-a-pre-tested-loop": '''Cleanup:
+        On Error GoTo 0
+        Do While Flag
+            On Error GoTo Handler
+        Loop
+        Err.Raise 5
+''',
+            # A jump may reach Disarm, so the state after End If is unknown.
+            "raise-after-a-targeted-label-in-an-ended-branch": '''        If Index = 2 Then GoTo Disarm
+Cleanup:
+        If Flag Then
+            Exit Sub
+Disarm:
+            On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
+            # "If ... Then 100" jumps to line 100.
+            "raise-after-an-implicitly-targeted-line-number": '''        If Index = 2 Then 100
+Cleanup:
+        If Flag Then
+            Exit Sub
+100         On Error GoTo 0
+        End If
+        Err.Raise 5
+''',
+            # "If Flag Then 100" jumps, so the raise after it on that line never runs.
+            "implicit-line-number-jump-ends-the-branch":
+                "Cleanup:\n        If Flag Then 100: Err.Raise 6\n        Exit Sub\n"
+                "100     Exit Sub\n",
+            "implicit-line-number-jumps-in-both-branches":
+                "Cleanup:\n        If Flag Then 100 Else 200\n        Err.Raise 6\n"
+                "100     Exit Sub\n200     Exit Sub\n",
+            "raise-after-an-implicit-jump-disabled":
+                "Cleanup:\n        If Flag Then 100\n        On Error GoTo 0\n        Err.Raise 6\n"
+                "100     Exit Sub\n",
+            # The subroutine branches before its Return, so the state is unknown.
+            "branching-subroutine-disables-the-handler": '''Cleanup:
+        GoSub Disarm
+        Err.Raise 5
+        Exit Sub
+Disarm:
+        If Flag Then Exit Sub
+        On Error GoTo 0
+        Return
+''',
+            "nested-subroutine-disables-the-handler": '''Cleanup:
+        GoSub Outer
+        Err.Raise 5
+        Exit Sub
+Outer:
+        GoSub Disable
+        Return
+Disable:
+        On Error GoTo 0
+        Return
+''',
+            "raise-after-a-raise-under-resume-next-disabled":
+                "Cleanup:\n        On Error Resume Next: Err.Raise 5: On Error GoTo 0: Err.Raise 6\n",
+        }
+        every = " [vba6-win32, vba7-win32, vba7-win64]"
+        for name, (blocks, raised) in reported.items():
+            with self.subTest(name=name):
+                self.assertEqual([item.split(": ", 1)[1] for item in
+                                  run_check(check_vba_jumps.check, enclosed(blocks))],
+                                 [TRAPPED.replace("Err.Raise", raised, 1) + every])
+        for name, blocks in passing.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, enclosed(blocks)), [])
+        with self.subTest(name="line-numbers"):
+            numbered = standalone(module('''Private Sub First()
+        On Error GoTo 900
+        Debug.Print 1 / 0
+100     Err.Raise 5
+        Exit Sub
+900     Resume 100
+End Sub
+'''))
+            self.assertEqual(run_check(check_vba_jumps.check, numbered),
+                             ["tests/modules/TEST_Fixture.bas:7: Err.Raise after Resume 100 is "
+                              "trapped again by handler '900' of procedure First; put On Error "
+                              "GoTo 0 before the raise" + every])
+
+    def test_reraise_is_checked_in_each_environment(self) -> None:
+        findings = run_check(check_vba_jumps.check,
+                             reraise("#If VBA7 Then\n        On Error GoTo 0\n#End If\n"))
+        self.assertEqual(findings,
+                         [f"tests/modules/TEST_Fixture.bas:13: {TRAPPED} [vba6-win32]"])
+
+    def test_conditional_resume_starts_no_path(self) -> None:
+        retry = '''Private Sub First()
+        Dim Attempts As Long
+Retry:
+        On Error GoTo Handler
+        If Attempts < 1 Then Err.Raise 5, "TEST_Fixture.First"
+        Exit Sub
+Handler:
+        Attempts = Attempts + 1
+        If Attempts < 3 Then Resume Retry
+        Err.Raise Err.Number, "TEST_Fixture.First"
+End Sub
+'''
+        block_retry = retry.replace("        If Attempts < 3 Then Resume Retry\n",
+                                    "        If Attempts < 3 Then\n            Resume Retry\n"
+                                    "        End If\n")
+        # Documented false negative: a cleanup reached only under a condition.
+        conditional_cleanup = RERAISE.replace(
+            "        Resume Cleanup\n",
+            "        If SavedNumber <> 0 Then\n            Resume Cleanup\n        End If\n")
+        for name, body in {"bounded-retry": retry, "bounded-retry-in-a-block-if": block_retry,
+                           "conditional-cleanup": conditional_cleanup}.items():
+            with self.subTest(name=name):
+                self.assertEqual(run_check(check_vba_jumps.check, standalone(module(body))), [])
+        with self.subTest(name="unconditional-retry"):
+            findings = run_check(check_vba_jumps.check, standalone(module(
+                retry.replace("If Attempts < 3 Then Resume Retry", "Resume Retry"))))
+            self.assertEqual([item.split(": ", 1)[1] for item in findings],
+                             [TRAPPED.replace("Cleanup", "Retry")
+                              + " [vba6-win32, vba7-win32, vba7-win64]"])
+
+    def test_resume_without_a_label_starts_no_path(self) -> None:
+        # Resume and Resume Next continue at the statement that failed, or
+        # after it, which the check cannot locate; only Resume <label> starts a path.
+        for resume in ("Resume", "Resume Next"):
+            with self.subTest(resume=resume):
+                files = reraise(fixture=RERAISE.replace("Resume Cleanup", resume))
+                self.assertEqual(run_check(check_vba_jumps.check, files), [])
 
 
 API_FACADE = '''Attribute VB_Name = "DEMO_Api"

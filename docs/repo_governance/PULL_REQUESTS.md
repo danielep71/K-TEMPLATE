@@ -61,8 +61,12 @@ describes, and checked with `tools/check_excel_run.py` against the commit, is
 the strongest evidence; cite its report.
 
 A push to VBA source after the run makes it stale, like a review. Record a new
-run, or state `NOT RUN` for the new head. A pull request that changes none of
-these files deletes the block.
+run, or state `NOT RUN` for the new head. A run on an earlier commit of the
+pull request still counts for the head when
+`tools/check_excel_run.py --equivalent-to` proves their
+[run inputs](../../INSTALLATION.md#a-run-for-another-commit) identical;
+record it as `run at <SHA>, equivalent`, with the report's `Equivalent:`
+line. A pull request that changes none of these files deletes the block.
 
 ## 🌿 Release branches
 
