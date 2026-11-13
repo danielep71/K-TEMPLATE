@@ -63,105 +63,7 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
-### Added
-
-- An eighth static check of exported VBA source, `tools/check_vba_errors.py`,
-  which **Repository integrity** runs as `vba-errors`. In each compilation
-  environment, it reports a read of `Err.Number`, `Err.Source` or
-  `Err.Description` that follows, on straight-line code, an `On Error`
-  statement or, in an error handler, a call or member access, so that a
-  handler cannot report or raise again an error that another statement has
-  cleared or replaced. The [house style](docs/VBA_HOUSE_STYLE.md#static-checks)
-  lists what it cannot see (#396).
-- **Repository integrity** runs a ninth static check of exported VBA,
-  `vba-declares` (`tools/check_vba_declares.py`), on the new register of
-  native declarations, `docs/native-declarations.json`, which is empty in the
-  template. In each compilation environment it reports, with file, line and
-  environment, a `Declare` whose export and library the register does not
-  list, a `Declare` of `GetLastError`, a `Declare Sub` registered as
-  ambiguous on zero, a read of `Err.LastDllError` other than
-  `<local> = Err.LastDllError` directly after a statement that is one native
-  call, such as a read after a call inside a single-line `If` or a condition,
-  or `.LastDllError` in a `With Err` block, and a call to an export registered
-  as ambiguous on zero that is not directly preceded by `SetLastError 0`,
-  whose whole result is not assigned to a local variable, or that is not
-  directly followed by that capture. A repository with a `Declare` must
-  register its export. The house style, the structure guide and the setup
-  guide document the rules and the register; nothing was run in Excel (#398).
-
-### Fixed
-
-- The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims
-  only what the checks enforce: the static checks enforce the dependency
-  direction for core, classes and examples, and the facade's and adapters'
-  direction is checked in review; only the standard modules in `src/modules/`
-  can hold supported API, so a class is never listed in the inventory; and
-  only an Office Open XML package is inspected for macros and personal
-  metadata, which the [distribution guide](docs/repo_governance/DISTRIBUTION.md)
-  now also says (#382).
-- The test-case checks now enforce what `TEST_CASES.md` and the validation
-  plan state. An invalid file-based case scopes a result only to a dataset of
-  its manifest. An invalid JSON fixture may break or omit its calculation
-  inputs, but a key outside the fixture keys fails. A code, ID, quantity or
-  rule must be the whole value with ASCII digits, so `"EUR\n"` and a rule
-  step in another script's digits fail, in `check_test_cases.py`,
-  `check_accuracy.py` and `check_independent.py`. A *Traceability* row may
-  name a procedure of a form under `src/`. `check_independent.py` fails on
-  any expected value citing an adapter's source that the adapter does not
-  print, not only an `independent` one. The setup guide's `DS-01` row now
-  says to remove both illustrative cases and their *Traceability* row, and
-  to replace `ACC-01`, in the same change (#384).
-- `tools/release.py verify` and the **Release** workflow accept a tag
-  message whose `Deviations:` line is followed by a `- ` or `* ` list on the
-  next lines, as well as by text such as `none` on the same line, and reject
-  `Deviations:` with nothing after it, with an error that names both forms.
-  `RELEASING.md` shows both forms, defines a released version as one whose
-  section is dated and a published one as one with a tag and a GitHub
-  Release, and says that `RELEASE_ATTESTATIONS` without GitHub Enterprise
-  Cloud fails the attestation and creates no draft. The changelog policy,
-  `SECURITY.md` and the setup and structure guides match (#385).
-- **Repository integrity** no longer reports a Dependabot `target-branch` as
-  missing in a single-branch or shallow clone: `dependabot-target-branches`
-  asks the `origin` remote for a branch that has no remote-tracking branch,
-  and is skipped, or fails under `--strict`, when `origin` cannot answer.
-  `tools/initialize_repository.py` asks the same way before it warns that
-  `--release-branch` is missing, and says so when `origin` cannot answer. The
-  check table in `CONTRIBUTING.md` shows the `changelog` check with
-  `--repository OWNER/REPOSITORY`, as CI runs it (#381, #394).
-- **Repository integrity** accepts the bytes that `.gitattributes`,
-  `.editorconfig` and the formatter keep. `git diff --check` reports no
-  white-space error in the regulatory source copies under
-  `docs/methodology/sources/`, nor trailing blanks in a `.frm` file, and
-  `tools/check_vba_source.py` skips a form's VBE header, which keeps the
-  blank the VBE writes at the end of its `Begin` line; the code after it is
-  still checked. Editors trim trailing white space in Markdown, which
-  `git diff --check` reports, and leave registry exports (`*.reg`) byte for
-  byte (#380).
-- `tools/devbuild/lo_smoke.py` reports a failed build of the development
-  workbook, such as one stopped by a form, as `lo-smoke: FAIL (build: ...)`
-  and exits 1, without a traceback. The Excel-run guides, `SECURITY.md` and
-  the tools' docstrings now match the build and evidence tools: Excel reads
-  the built project from source and compiles each module when it is first
-  used (`HB-05`); `tools/check_excel_run.py` also reads the workbook and
-  rebuilds the commit in a temporary Git worktree; `SECURITY.md` lists that
-  worktree, the second build and the `Visible` and `DisplayAlerts` settings
-  of the Excel instance `tools/devbuild/excel_run.py` starts; the evidence
-  policy and the harness guide name every tool that reads the policy, and a
-  changed reference also changes `REFERENCES` in
-  `tools/devbuild/vba_project.py` (#383).
-- Label, settings and traffic messages and guides now match what the tools
-  do (#386). Label synchronization reports a label as outside the catalogue,
-  the core plus the selected overlays, and advises adding it to the catalogue
-  or selecting its overlay; **Issue triage** names the same catalogue. An
-  apply with no steps reads the repository back, so its journal records a
-  fresh observation. The *Traffic alert* job decides from the history before
-  it looks up a milestone, so a run with no alert due needs none, and it
-  compares due dates with the collection date instead of the job's date;
-  `docs/repo_governance/TRAFFIC.md` lists the milestone among the enabling
-  steps. `docs/setup/REPOSITORY_SETUP.md` says that only an existing managed
-  ruleset is unknown without write access.
-
-## [1.0.0] - 2026-11-10
+## [1.0.0] - 2026-11-11
 
 Changes made before this changelog existed are described by the closed
 milestones and their pull requests.
@@ -364,9 +266,10 @@ milestones and their pull requests.
   the changelog, `VERSION`, the default branch, the tag message and
   **Repository integrity**. It builds a reproducible source bundle with its
   checksums, attests their build provenance, and drafts the GitHub Release.
-  A private repository attests only when the repository variable
-  `RELEASE_ATTESTATIONS` is `enabled`, with GitHub Enterprise Cloud; otherwise
-  the draft says that the bundle is not attested. A manual run rehearses a
+  A private repository attests only on GitHub Enterprise Cloud with
+  `RELEASE_ATTESTATIONS` set to `enabled`. Without the variable, the draft
+  says that the bundle is not attested; with it but without Enterprise Cloud,
+  the attestation fails and no draft is created. A manual run rehearses a
   ref without attesting or releasing. `tools/release.py` runs the steps
   locally: `verify` reports each failed check, a missing tag included, as a
   finding, and `notes` and `bundle` report a failure on a `FAIL` line
@@ -510,6 +413,33 @@ milestones and their pull requests.
   as JSON, and every drift report, live or on a fixture, is cross-checked
   against that plan on the same snapshot: the run fails and the evidence
   carries both plans under `cross_check` if they differ (#354, #355).
+- An eighth static check of exported VBA source, `tools/check_vba_errors.py`,
+  which **Repository integrity** runs as `vba-errors`. In each compilation
+  environment, it reports a read of `Err.Number`, `Err.Source` or
+  `Err.Description` that follows, on straight-line code, an `On Error`
+  statement or `Err.Clear`, also written `Call Err.Clear`, or, in an error
+  handler, a call or member access, so that a handler cannot report or raise
+  again an error that another statement has cleared or replaced. An Enum
+  member or constant, also qualified as in `RunStatus.rsFailed` or
+  `Module.LIMIT`, and a field of a variable of a user-defined `Type`, as in
+  `Saved.Number = Err.Number`, are values, not member accesses. The
+  [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
+  see (#396, #419, #422, #427, #429).
+- **Repository integrity** runs a ninth static check of exported VBA,
+  `vba-declares` (`tools/check_vba_declares.py`), on the new register of
+  native declarations, `docs/native-declarations.json`, which is empty in the
+  template. In each compilation environment it reports, with file, line and
+  environment, a `Declare` whose export and library the register does not
+  list, a `Declare` of `GetLastError`, a `Declare Sub` registered as
+  ambiguous on zero, a read of `Err.LastDllError` other than
+  `<local> = Err.LastDllError` directly after a statement that is one native
+  call, such as a read after a call inside a single-line `If` or a condition,
+  or `.LastDllError` in a `With Err` block, and a call to an export registered
+  as ambiguous on zero that is not directly preceded by `SetLastError 0`,
+  whose whole result is not assigned to a local variable, or that is not
+  directly followed by that capture. A repository with a `Declare` must
+  register its export. The house style, the structure guide and the setup
+  guide document the rules and the register; nothing was run in Excel (#398).
 
 ### Changed
 
@@ -691,6 +621,83 @@ milestones and their pull requests.
   of a tool use synthetic cases, contracts, modules and build configuration
   of their own, and the tests of the repository derive their expected values
   from its files. No test comment cites a template issue (#368, #371, #373).
+- The [repository structure](docs/REPOSITORY_STRUCTURE.md) guide now claims
+  only what the checks enforce: the static checks enforce the dependency
+  direction for core, classes and examples, and the facade's and adapters'
+  direction is checked in review; only the standard modules in `src/modules/`
+  can hold supported API, so a class is never listed in the inventory; and
+  only an Office Open XML package is inspected for macros and personal
+  metadata, which the [distribution guide](docs/repo_governance/DISTRIBUTION.md)
+  now also says (#382).
+- The test-case checks now enforce what `TEST_CASES.md` and the validation
+  plan state. An invalid file-based case scopes a result only to a dataset of
+  its manifest. An invalid JSON fixture may break or omit its calculation
+  inputs, but a key outside the fixture keys fails. A code, ID, quantity or
+  rule must be the whole value with ASCII digits, so `"EUR\n"` and a rule
+  step in another script's digits fail, in `check_test_cases.py`,
+  `check_accuracy.py` and `check_independent.py`. A *Traceability* row may
+  name a procedure of a form under `src/`. `check_independent.py` fails on
+  any expected value citing an adapter's source that the adapter does not
+  print, not only an `independent` one. The setup guide's `DS-01` row now
+  says to remove both illustrative cases and their *Traceability* row, and
+  to replace `ACC-01`, in the same change (#384).
+- `tools/release.py verify` and the **Release** workflow accept a tag
+  message whose `Deviations:` line is followed by a `- ` or `* ` list on the
+  next lines, as well as by text such as `none` on the same line, and reject
+  `Deviations:` with nothing after it, with an error that names both forms.
+  `RELEASING.md` shows both forms, defines a released version as one whose
+  section is dated and a published one as one with a tag and a GitHub
+  Release, and says that `RELEASE_ATTESTATIONS` without GitHub Enterprise
+  Cloud fails the attestation and creates no draft. The changelog policy,
+  `SECURITY.md` and the setup and structure guides match (#385).
+- **Repository integrity** no longer reports a Dependabot `target-branch` as
+  missing in a single-branch or shallow clone: `dependabot-target-branches`
+  asks the `origin` remote for a branch that has no remote-tracking branch,
+  and is skipped, or fails under `--strict`, when `origin` cannot answer.
+  `tools/initialize_repository.py` asks the same way before it warns that
+  `--release-branch` is missing, and says so when `origin` cannot answer. The
+  check table in `CONTRIBUTING.md` shows the `changelog` check with
+  `--repository OWNER/REPOSITORY`, as CI runs it (#381, #394).
+- **Repository integrity** accepts the bytes that `.gitattributes`,
+  `.editorconfig` and the formatter keep. `git diff --check` reports no
+  white-space error in the regulatory source copies under
+  `docs/methodology/sources/`, nor trailing blanks in a `.frm` file, and
+  `tools/check_vba_source.py` skips a form's VBE header, which keeps the
+  blank the VBE writes at the end of its `Begin` line; the code after it is
+  still checked. Editors trim trailing white space in Markdown, which
+  `git diff --check` reports, and leave registry exports (`*.reg`) byte for
+  byte (#380).
+- `tools/devbuild/lo_smoke.py` reports a failed build of the development
+  workbook, such as one stopped by a form, as `lo-smoke: FAIL (build: ...)`
+  and exits 1, without a traceback. The Excel-run guides, `SECURITY.md` and
+  the tools' docstrings now match the build and evidence tools: Excel reads
+  the built project from source and compiles each module when it is first
+  used (`HB-05`); `tools/check_excel_run.py` also reads the workbook and
+  rebuilds the commit in a temporary Git worktree; `SECURITY.md` lists that
+  worktree, the second build and the `Visible` and `DisplayAlerts` settings
+  of the Excel instance `tools/devbuild/excel_run.py` starts; the evidence
+  policy and the harness guide name every tool that reads the policy, and a
+  changed reference also changes `REFERENCES` in
+  `tools/devbuild/vba_project.py` (#383).
+- Label, settings and traffic messages and guides now match what the tools
+  do (#386). Label synchronization reports a label as outside the catalogue,
+  the core plus the selected overlays, and advises adding it to the catalogue
+  or selecting its overlay; **Issue triage** names the same catalogue. An
+  apply with no steps reads the repository back, so its journal records a
+  fresh observation. The *Traffic alert* job decides from the history before
+  it looks up a milestone, so a run with no alert due needs none, and it
+  compares due dates with the collection date instead of the job's date;
+  `docs/repo_governance/TRAFFIC.md` lists the milestone among the enabling
+  steps. `docs/setup/REPOSITORY_SETUP.md` says that only an existing managed
+  ruleset is unknown without write access.
+- The traffic alert tests in `tests/test_workflow_controls.py` skip when
+  `.github/workflows/traffic-history.yml` does not exist, so the traffic
+  removal that `docs/setup/REPOSITORY_SETUP.md` describes leaves them passing,
+  and the guide says so. `SECURITY.md` lists the temporary folder in which
+  `tools/check_excel_run.py` writes the commit's test cases to measure the
+  accuracy contracts. The Dependabot `target-branch` test uses a longer name
+  that `git ls-remote` returns for the branch, so it fails if the check stops
+  comparing exact names (#423).
 
 ### Validation
 
