@@ -81,6 +81,8 @@ Use only the categories an entry needs.
   (#470).
 - The setup guide and the README quote the `--evidence` path that holds
   `{date}`, so that the documented command also works in PowerShell (#471).
+- The journal of `tools/setup_repository.py --apply` also records the ID
+  that GitHub returns for each ruleset it creates or replaces (#479).
 
 ### Fixed
 

@@ -119,10 +119,12 @@ class FakeAPI:
         if method == 'POST':
             self.rules.append(dict(copy.deepcopy(payload), source_type='Repository',
                                    id=max((r['id'] for r in self.rules), default=0) + 1))
+            return copy.deepcopy(self.rules[-1])
         elif method == 'PUT':
             i = int(endpoint.rsplit('/', 1)[1])
             self.rules = [dict(copy.deepcopy(payload), id=i, source_type='Repository') if r['id'] == i else r
                           for r in self.rules]
+            return copy.deepcopy(next(r for r in self.rules if r['id'] == i))
         elif method == 'PATCH' and not self.ignore_patch:
             payload = copy.deepcopy(payload)
             analysis = payload.pop('security_and_analysis', None)
@@ -260,6 +262,11 @@ class SetupTests(unittest.TestCase):
         # Each ruleset write names its ruleset; the five POSTs share one endpoint.
         names = [ruleset['name'] for ruleset in setup.load_config(setup.CONFIG)['rulesets']]
         self.assertEqual([w.get('ruleset') for w in record['writes']], names + [None] * 3)
+        # Each created ruleset also records the ID GitHub answered with.
+        created = {rule['name']: rule['id'] for rule in self.api.rules}
+        self.assertEqual([w.get('ruleset_id') for w in record['writes']],
+                         [created[name] for name in names] + [None] * 3)
+        self.assertEqual(len(set(created.values())), 5)
         self.assertEqual(record['readback'], 'VERIFIED')
         self.api.writes.clear()
         # The same plan is stale once applied: the second apply approves the empty one.
@@ -724,8 +731,8 @@ class SetupTests(unittest.TestCase):
         self.args.update_existing = True
         self.assertEqual(self.run_setup(), 0)
         replaced = [w for w in self.journal()['writes'] if w['method'] == 'PUT' and '/rulesets/' in w['endpoint']]
-        self.assertEqual([(w['endpoint'], w['ruleset']) for w in replaced],
-                         [(f'{REPO}/rulesets/1', rule['name'])])
+        self.assertEqual([(w['endpoint'], w['ruleset'], w['ruleset_id']) for w in replaced],
+                         [(f'{REPO}/rulesets/1', rule['name'], 1)])
 
     def test_unrelated_rules_are_preserved(self) -> None:
         self.api.rules = [{'name': 'Other rule', 'id': 10, 'source_type': 'Repository'}]
@@ -1156,6 +1163,9 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(record['writes'][1]['method'], 'POST')
         self.assertEqual(record['writes'][1]['endpoint'], REPO + '/rulesets')
         self.assertEqual(record['writes'][1]['ruleset'], setup.load_config(setup.CONFIG)['rulesets'][1]['name'])
+        # The created ruleset keeps its ID; the failed one has none.
+        self.assertEqual(record['writes'][0]['ruleset_id'], self.api.rules[0]['id'])
+        self.assertNotIn('ruleset_id', record['writes'][1])
         self.assertIn('HTTP 500', record['writes'][1]['error'])
         self.assertNotIn('error', record['writes'][0])
         self.assertIsNone(record['readback'])
