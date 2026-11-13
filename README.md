@@ -157,8 +157,9 @@ GitHub copies files from a template, not its settings. In order:
    illustrative methodology, cases and contracts.
 7. Optionally, enable traffic collection
    ([traffic history](docs/repo_governance/TRAFFIC.md)).
-8. If Codex reviews your pull requests, create its environment for the new
-   repository ([pull request review](docs/repo_governance/PULL_REQUESTS.md)).
+8. If Codex reviews your pull requests, check that it reviews the new
+   repository's first one; no Codex environment is needed
+   ([pull request review](docs/repo_governance/PULL_REQUESTS.md)).
 
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
 [JSON configuration](docs/setup/repository-settings.json) describe the baseline.
