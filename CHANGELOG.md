@@ -455,6 +455,17 @@ milestones and their pull requests.
   [house style](docs/VBA_HOUSE_STYLE.md) now says to disable the handler with
   `On Error GoTo 0` before raising the saved error again. The check is static;
   nothing was run in Excel (#397).
+- A pull request that fixes a defect now shows its new or changed test
+  failing on the defective code, then passing on the fix, and records how in
+  the *Validated* section of the pull request template
+  ([negative controls](CONTRIBUTING.md#-negative-controls)).
+  `python tools/make_mutant.py FILE --find TEXT --replace TEXT` writes the
+  defective variant of a file reproducibly: a copy with the one occurrence of
+  the text replaced, under the ignored `test-results/mutants/`, with every
+  other byte, CRLF line endings and `Attribute VB_Name` kept, and the SHA-256
+  of the source and the mutant printed. It refuses a text that does not occur
+  exactly once, overlapping occurrences included, an output folder that Git
+  does not ignore, and a symbolic link at the mutant's path (#400).
 - The daily **Detect settings drift** workflow compares the live rulesets with
   `docs/setup/repository-settings.json` using only the job's read-only token,
   and fails on drift. It runs the new
@@ -724,6 +735,15 @@ milestones and their pull requests.
   accuracy contracts. The Dependabot `target-branch` test uses a longer name
   that `git ls-remote` returns for the branch, so it fails if the check stops
   comparing exact names (#423).
+- The Excel instance that `tools/devbuild/excel_run.py` starts no longer
+  outlives the run. The command records the process id of that instance,
+  from its window, and the process start time. After it quits Excel, it waits
+  up to 30 seconds for that process to exit and then ends it, but only while
+  the process with that id is named `EXCEL` and has the recorded start time,
+  so it never ends another Excel. It prints how Excel ended in an
+  `excel-quit:` line (`EXITED`, `STOPPED`, `SURVIVED` or `UNKNOWN`), which
+  the saved report also holds; `SECURITY.md` and the installation guide say
+  so (#401).
 
 ### Validation
 
