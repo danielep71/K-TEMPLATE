@@ -517,6 +517,12 @@ milestones and their pull requests.
   Its report goes on the milestone closeout issue before the candidate is
   frozen; a release invariant, the release checklist and the closeout
   checklist require it (#438).
+- `docs/assets/social-preview.png`, exported from its editable source
+  `social-preview.svg`, is the repository's social preview and the banner at
+  the top of the README. It is allowlisted in `.github/binary-allowlist.json`
+  with its SHA-256. The setup guide tells a generated repository to replace
+  or remove both, and to set its own **About** description, website, topics
+  and social preview, which GitHub does not copy from a template (#434).
 
 ### Changed
 

@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/assets/social-preview.png" alt="K-TEMPLATE: the starting point for regulatory risk calculation workbooks in Excel VBA, for SA-CCR, SFT, FRTB, LCR and NSFR" width="100%">
+
 # 🧰 K-TEMPLATE
 
 ### The starting point for regulatory risk calculation workbooks in Excel VBA
