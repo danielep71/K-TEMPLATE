@@ -115,16 +115,6 @@
       "files": [
         ".github/workflows/pr-milestones.yml"
       ]
-    },
-    {
-      "repository": "https://github.com/danielep71/VBA-EXCEL_UI",
-      "license": "MIT",
-      "revision": "45dc93c12bab0a13a116114496a9a62ab799fd34",
-      "revision_note": "The main branch as inspected when the files were adapted",
-      "files": [
-        "tools/format_vba.py",
-        "tests/test_format_vba.py"
-      ]
     }
   ]
 }
