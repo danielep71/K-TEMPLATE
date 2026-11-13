@@ -146,8 +146,8 @@ The LibreOffice smoke test runs the harness certification in a temporary
 profile and reports only failures LibreOffice is not known to cause. The
 decoder tests also check the builder against the workbook contract.
 
-The following file was adapted from danielep71/K-FRTB-SA
-(https://github.com/danielep71/K-FRTB-SA) under the MIT License:
+The following file was adapted from danielep71/K-FRTB-ASA
+(https://github.com/danielep71/K-FRTB-ASA) under the MIT License:
 
 .github/workflows/pr-milestones.yml
 
