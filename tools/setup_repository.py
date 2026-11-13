@@ -76,6 +76,9 @@ TOKEN_SCOPES = ('full', 'workflow')
 # Endpoints that the workflow scope never reads: they need Administration: read,
 # which no workflow permission grants.
 WORKFLOW_UNREAD = 'not read: needs Administration: read, which a workflow token cannot have'
+# The HTTP statuses with which GitHub refuses a token that may not read an
+# endpoint. Any other failure is a failed request.
+ACCESS_LIMITS = ('401', '403', '404')
 
 # GitHub API values are JSON; a call takes a method, an endpoint and an optional payload.
 # The aliases appear only in annotations, which are never evaluated, so Python 3.8
@@ -120,11 +123,17 @@ def api(method: str, endpoint: str, payload: Json = None) -> Json:
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 
-def read(call: Call, endpoint: str) -> tuple[Json, str | None]:
-    """GET an endpoint: its value, or None and the HTTP status of the failure."""
+def read(call: Call, endpoint: str, tolerated: tuple[str, ...] | None = None) -> tuple[Json, str | None]:
+    """GET an endpoint: its value, or None and the HTTP status of the failure.
+
+    With tolerated, only a failure with one of those statuses is returned; any
+    other, such as a server error or no answer, is raised.
+    """
     try:
         return call('GET', endpoint), None
     except ApiError as error:
+        if tolerated is not None and error.status not in tolerated:
+            raise
         return None, error.status
 
 
@@ -275,7 +284,10 @@ def security_states(call: Call, root: str, metadata: dict[str, Json], public: bo
     """Each security feature as observed: True, False or None when GitHub does not say."""
     states: dict[str, Row] = {}
     if public:
-        value, failure = read(call, root + '/private-vulnerability-reporting')
+        # The workflow scope reports only a refused read as not checked; a failed
+        # request is an API failure, never a value it may skip.
+        value, failure = read(call, root + '/private-vulnerability-reporting',
+                              ACCESS_LIMITS if scope == 'workflow' else None)
         states['private_vulnerability_reporting'] = (
             {'observed': bool((value or {}).get('enabled')), 'source': 'GET private-vulnerability-reporting enabled'}
             if failure is None else

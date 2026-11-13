@@ -55,6 +55,9 @@ class FakeAPI:
         self.reads: list[str] = []
         # Endpoints, relative to the repository, that answer 403.
         self.forbidden: set[str] = set()
+        # Endpoints, relative to the repository and without their query, that fail
+        # with the given HTTP status; REPO stands for the repository itself.
+        self.failing: dict[str, str] = {}
         self.green = True
         self.ignore_patch = False
         self.reporting = False
@@ -133,6 +136,8 @@ class FakeAPI:
         relative = endpoint.removeprefix(REPO + '/')
         if relative in self.forbidden:
             raise setup.ApiError('GET', endpoint, '403')
+        if relative.split('?', 1)[0] in self.failing:
+            raise setup.ApiError('GET', endpoint, self.failing[relative.split('?', 1)[0]])
         switches = {'private-vulnerability-reporting': 'reporting',
                     'vulnerability-alerts': 'alerts', 'automated-security-fixes': 'fixes'}
         if relative in switches:
@@ -547,6 +552,39 @@ class SetupTests(unittest.TestCase):
         self.assertIn('DIFF security private_vulnerability_reporting: observed false', output)
         self.assertIn('NOT CHECKED security secret_scanning: security_and_analysis.secret_scanning '
                       '(not reported without administrator access)', output)
+
+    def test_workflow_scope_reports_a_failed_request_as_an_api_failure(self) -> None:
+        self.api.repo['visibility'] = 'public'
+        self.configure()
+        self.api.use_workflow_token()
+        main_id = next(r['id'] for r in self.api.rules if r['name'] == 'Protect main')
+        real_run = setup.run
+        for endpoint, status in (('private-vulnerability-reporting', '500'),
+                                 ('private-vulnerability-reporting', '502'),
+                                 ('private-vulnerability-reporting', 'unknown'),
+                                 (REPO, '500'), ('rulesets', '500'), (f'rulesets/{main_id}', '503')):
+            with self.subTest(endpoint=endpoint, status=status):
+                self.api.failing = {endpoint: status}
+                stderr = io.StringIO()
+                argv = ['setup_repository.py', '--repo', 'example/project', '--check', '--token-scope', 'workflow']
+                with patch.object(sys, 'argv', argv), redirect_stdout(io.StringIO()) as stdout, \
+                        redirect_stderr(stderr), \
+                        patch.object(setup, 'run', lambda args: real_run(args, self.api, NOW)):
+                    code = setup.main()
+                # Exit 2, as any other API failure: never NOT CHECKED, PARTIAL or a pass.
+                self.assertEqual(code, 2)
+                self.assertIn(f'(HTTP {status})', stderr.getvalue())
+                self.assertNotIn('PARTIAL', stdout.getvalue())
+
+    def test_workflow_scope_keeps_a_refused_read_not_checked(self) -> None:
+        self.api.repo['visibility'] = 'public'
+        self.configure()
+        self.api.failing = {'private-vulnerability-reporting': '403'}
+        code, output, _ = self.run_workflow_check()
+        self.assertEqual(code, 0)
+        self.assertIn('NOT CHECKED security private_vulnerability_reporting: '
+                      'GET private-vulnerability-reporting (HTTP 403: unreadable)', output)
+        self.assertIn('PARTIAL', output)
 
     def test_workflow_scope_names_the_bypass_lists_of_covering_rulesets(self) -> None:
         self.configure()

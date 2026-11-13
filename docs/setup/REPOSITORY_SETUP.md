@@ -167,8 +167,11 @@ python tools/setup_repository.py --repo OWNER/NEW-REPO --check --token-scope wor
 the general settings GitHub returns to it and, on a public repository, private
 vulnerability reporting. It never calls the endpoints that need **Administration:
 read**. Each value it cannot read is printed as `NOT CHECKED` and is neither drift
-nor a match. Drift in what it reads returns **1**; otherwise it returns **0** with
-the result `PARTIAL` while something is not checked. It plans nothing, prints no
+nor a match: a value GitHub leaves out of its answer, or refuses with HTTP 401,
+403 or 404. Any other failed request, such as a server error, is an API failure
+that returns **2**. Drift in
+what it reads returns **1**; otherwise it returns **0** with the result `PARTIAL`
+while something is not checked. It plans nothing, prints no
 digest and takes neither `--report` nor `--evidence`: the setup record comes only
 from a check with an administrator's token. The
 [settings reference](../repo_governance/SETTINGS.md#drift) lists what each section

@@ -247,8 +247,11 @@ it under **Not checked**. When everything it reads matches, the result is
 `PARTIAL` and the run passes; the list names what only `--check` with an
 administrator's token verifies, as the [release closeout](../release/CLOSEOUT.md)
 and the [setup guide](../setup/REPOSITORY_SETUP.md#-verify-the-result) run it.
-An API failure, such as rulesets that the account's GitHub plan does not offer
-for the repository, fails the run with status 2. In a new repository the run fails until the baseline is applied.
+A value is not checked only when GitHub leaves it out of its answer, or refuses
+to read it with HTTP 401, 403 or 404. Any other failed request, such as a server
+error or no answer, is an API failure, as is a refused read of the repository or
+its rulesets, such as rulesets that the account's GitHub plan does not offer for the
+repository: it fails the run with status 2. In a new repository the run fails until the baseline is applied.
 
 Sources: [repository REST API][repo-api] (merge-related settings and
 `security_and_analysis`), [ruleset REST API][rules-api] (bypass list),
