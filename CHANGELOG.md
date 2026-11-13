@@ -425,6 +425,21 @@ milestones and their pull requests.
   `Saved.Number = Err.Number`, are values, not member accesses. The
   [house style](docs/VBA_HOUSE_STYLE.md#static-checks) lists what it cannot
   see (#396, #419, #422, #427, #429).
+- **Repository integrity** runs a ninth static check of exported VBA,
+  `vba-declares` (`tools/check_vba_declares.py`), on the new register of
+  native declarations, `docs/native-declarations.json`, which is empty in the
+  template. In each compilation environment it reports, with file, line and
+  environment, a `Declare` whose export and library the register does not
+  list, a `Declare` of `GetLastError`, a `Declare Sub` registered as
+  ambiguous on zero, a read of `Err.LastDllError` other than
+  `<local> = Err.LastDllError` directly after a statement that is one native
+  call, such as a read after a call inside a single-line `If` or a condition,
+  or `.LastDllError` in a `With Err` block, and a call to an export registered
+  as ambiguous on zero that is not directly preceded by `SetLastError 0`,
+  whose whole result is not assigned to a local variable, or that is not
+  directly followed by that capture. A repository with a `Declare` must
+  register its export. The house style, the structure guide and the setup
+  guide document the rules and the register; nothing was run in Excel (#398).
 - `tools/check_vba_jumps.py` reports an `Err.Raise` or `Error` statement
   reached after an unconditional `Resume <label>` while the procedure's own
   `On Error GoTo <label>` handler is enabled, in each compilation environment:

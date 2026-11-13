@@ -58,6 +58,35 @@ make a declaration correct. Use `LongPtr` for pointers and handles, and the
 widths the API defines for every other argument; never replace `Long` with
 `LongPtr` wholesale.
 
+Every `Declare` imports an export listed in the
+[register of native declarations](REPOSITORY_STRUCTURE.md#native-declarations),
+`docs/native-declarations.json`. Read a native error from `Err.LastDllError`,
+never from a declared `GetLastError`, and copy it to a local variable in the
+statement directly after the call: `Err.Clear`, any `On Error` statement and
+the next native call replace it. Make the call a statement of its own:
+`Name args`, `Call Name(args)` or `<variable> = Name(args)`, with the name
+alone or qualified by its own module's name; a call without arguments may
+leave out the parentheses. `<variable>` is a variable, not an array element
+or a member, whose assignment could run code. A call inside a condition, a
+single-line `If`, an expression or an argument is not followed by a capture,
+since the code that runs after it can replace the error first. Write the
+read as `Err.LastDllError`, never as `.LastDllError` in a `With Err` block,
+whose `With` statement already stands between the call and the read. A
+named label between the call and the read is a jump target, so it counts as
+a statement; a line number does not. When the register marks an export's
+zero result as ambiguous, clear the error with `SetLastError 0` directly
+before the call, and assign the result, with nothing added to it, to a local
+variable, so that a zero with no error reads as success:
+
+```vb
+SetLastError 0
+SlotValue = TlsGetValue(SlotIndex)
+DllError = Err.LastDllError
+```
+
+`SetLastError` is a `Declare` of its own, from `kernel32`, registered like
+any other export.
+
 ## Contracts, units and errors
 
 Each procedure's header states, where they apply: `PURPOSE`, `INPUTS`,
@@ -180,7 +209,7 @@ compiles nor checks the other rules of this guide.
 
 ## Static checks
 
-**Repository integrity** runs eight static checks on every tracked `.bas`,
+**Repository integrity** runs nine static checks on every tracked `.bas`,
 `.cls` and `.frm` file. Each also runs on its own, for example
 `python tools/check_vba_source.py`; with no VBA source, each passes and says
 it examined no component. The call check is advisory: **Repository
@@ -195,6 +224,7 @@ integrity** reports its findings as a warning, not a failure.
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |
 | `tools/check_vba_identifiers.py` | In each environment: every name a procedure assigns (`=`, `Let`, `Set`, `LSet`, `RSet`, `For`, `For Each`) is declared, by the procedure, the module, a form control or a standard module's public name, and `ReDim` declares as in VBA; every statement-level call (`Name args`, `Call Name(args)`) names a procedure or `Declare` of the module or a public one of a standard module, or a documented built-in; no procedure, parameter, variable, constant, Enum, Enum member, Type, `Declare` or `Event` is named like a VBA keyword such as `Empty`, `Date`, `Error` or `Name`; a statement it cannot read is a finding |
 | `tools/check_vba_errors.py` | In each environment, on the straight-line code of each procedure: no read of `Err.Number`, `Err.Source` or `Err.Description` after an `On Error` statement or `Err.Clear`, also written `Call Err.Clear`, which clears `Err`, or, in an error handler, after a call or member access (`Helper`, `x = Helper(1)`, `x = Helper` without parentheses, `Debug.Print`, `Application.StatusBar = False`, `New`) or an assignment to a property (`Status = x` with a `Property Let Status`), which may change it. A copy into a variable or into a field of a variable declared `As` a user-defined `Type` of the project (`Saved.Number = Err.Number`), a literal, a constant or an Enum member, also qualified (`RunStatus.rsFailed`, `Module.LIMIT`), a VBA function such as `CLng`, `CStr` or `Len`, also written `VBA.CLng`, and a VBA statement such as `ReDim`, `Erase`, `Open` or `Print #` change nothing. After `On Error Resume Next`, `Err` belongs to the last statement that runs anything, since any can fail, even `Number = 1`: a read checks that statement, and only a declaration, a comment, `With Err`, `End With` or a write of a property of `Err` whose value runs nothing (`Err.Number = 0`) comes between `On Error` or `Err.Clear` and a read reported as stale. A read inside the arguments of a call, as in `CLng(Err.Number)`, comes before the call, and a call or member access that the same statement evaluates before a read counts as one before it; assigning a property of `Err` is not a read, and `.Number` inside `With Err` reads `Err.Number` |
+| `tools/check_vba_declares.py` | In each environment: every `Declare` imports an export that `docs/native-declarations.json` lists with its library, matched by its `Alias`, or else its name, ignoring case; no `Declare` of `GetLastError`; `Err.LastDllError` is read only as `<local> = Err.LastDllError`, into a `Dim` or `Static` variable, in the statement directly after a statement that is one `Declare` call (`Name args`, `Call Name(args)` or `<variable> = Name(args)`, the name alone or qualified by its module's name), never after a call inside a condition, a single-line `If`, an expression or an argument, or one assigned to an array element or a member, and never as `.LastDllError` in a `With Err` block or through another qualifier; a call to an export registered as ambiguous on zero assigns its result, and nothing else, to a local variable, directly after `SetLastError 0` and directly before that capture, and no `Declare Sub` is registered as ambiguous on zero; the register has the documented shape |
 | `tools/check_vba_calls.py` (advisory) | In each environment, for every call that resolves to a procedure of the project, a statement call (`Name args`, `Call Name(args)`, `Module.Name args`) or a call with parentheses in an expression (`x = Helper(1)`): no more arguments than the procedure accepts and every required one passed, counting `Optional` parameters, a `ParamArray` and named arguments (`Name:=Value`); no named argument the procedure does not declare; no qualified call to a `Private` procedure of another module |
 
 What they cannot prove:
@@ -324,6 +354,15 @@ What they cannot prove:
   - after `On Error Resume Next`, it counts every statement that runs
     anything, even `Number = 1`, as one that can fail, and does not check
     which of several such statements a read was meant for;
+- the native declaration check reads the statements of a procedure in
+  order: it follows no jump, so a `GoTo` past the call is not seen, nor an
+  error replaced inside the call itself. It compares a `Declare` with the
+  register by export and library only, not by parameters or return type. A
+  `Declare` is private to its module, so it resolves a call to a `Declare`
+  of the calling module only, by its name alone or qualified by the
+  module's name. It cannot tell a variable from a `Property` of the same
+  class assigned without a qualifier, and it does not report a register
+  entry that no `Declare` uses;
 - the formatter and these checks enforce the mechanical rules only; review
   covers the rest of this guide.
 
