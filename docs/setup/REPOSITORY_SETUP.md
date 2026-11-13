@@ -18,7 +18,8 @@
 > [!IMPORTANT]
 > GitHub's **Use this template** copies files, not repository settings. Run this
 > setup for each new destination after its first integrity workflow succeeds.
-> The script does not run automatically and never creates or stores credentials.
+> No workflow applies the baseline: **Detect settings drift** only checks it,
+> with a read-only token. The script never creates or stores credentials.
 
 ## 🧭 Before you start
 
@@ -28,7 +29,7 @@
 | **Destination** | The new repository exists and contains the template files. |
 | **Template cleanup** | The template-only section of `AGENTS.md`, between its `template-only` markers, is deleted; the two `contact_links` URLs in `.github/ISSUE_TEMPLATE/config.yml` and the README traffic badges name the new repository, or the badges are removed; `target-branch` in `.github/dependabot.yml` names a branch of the new repository, or is removed; and every link reference of `CHANGELOG.md` points to the new repository. `Repository integrity` fails in a generated repository until all five are done. Replace the changelog's entries with an empty `[Unreleased]` section, and restore the introduction's "No version has been released" sentence if it is missing; delete `VERSION` if the template has one, since it exists once a template release is prepared; reset the *Current status* of `RELEASING.md` to no release; and replace `<REGIME>` in `docs/VBA_HOUSE_STYLE.md`. Once the changelog holds no dated release, `Repository integrity` fails while `VERSION` exists, the sentence is missing or *Current status* does not say that no version is released and that `VERSION` does not exist; it does not check the changelog's entries or `<REGIME>`. In a clean clone, `python tools/initialize_repository.py --repository OWNER/NEW-REPO --regime PREFIX` lists all these edits and makes them with `--apply`; see *Recommended handover* for its options. Without it, make them by hand. |
 | **Identity** | `gh auth status --hostname github.com` shows an account that can read the destination; `--apply` needs one with administrator access to it. Sign in with `gh auth login --hostname github.com`, or set `GH_TOKEN` to a fine-grained token. |
-| **Token permissions** | Preview and `--check` only read. A fine-grained token needs destination repository **Metadata: read**, and **Administration: read** for Dependabot alerts, Dependabot security updates and the five Actions settings. GitHub reports secret scanning and push protection only to administrators of the repository, and a ruleset's bypass list only to a token that can write the ruleset; without it, each managed ruleset that exists is unknown, and a missing one is reported as missing. A value the token cannot read is shown as unknown, with the endpoint and HTTP status, and counts as drift. `--apply` needs administrator access and a token with **Administration: write**, **Contents: read** and **Checks: read**. A workflow `GITHUB_TOKEN` cannot administer these rulesets. Never commit tokens. |
+| **Token permissions** | Preview and `--check` only read. A fine-grained token needs destination repository **Metadata: read**, and **Administration: read** for Dependabot alerts, Dependabot security updates and the five Actions settings. GitHub reports secret scanning and push protection only to administrators of the repository, and a ruleset's bypass list only to a token that can write the ruleset; without it, each managed ruleset that exists is unknown, and a missing one is reported as missing. A value the token cannot read is shown as unknown, with the endpoint and HTTP status, and counts as drift. `--apply` needs administrator access and a token with **Administration: write**, **Contents: read** and **Checks: read**. A workflow `GITHUB_TOKEN` cannot administer these rulesets; `--check --token-scope workflow` compares what it can read ([scheduled drift check](../repo_governance/SETTINGS.md#drift)). Never commit tokens. |
 | **Integrity check** | Actions is enabled and `Repository integrity` has succeeded on the **current default-branch HEAD**. |
 | **Workflow coverage** | The required job runs on every relevant PR without path filters. The supplied workflow runs on all branches, including a renamed default branch. |
 | **Availability** | The destination's plan and visibility support repository rulesets. |
@@ -151,6 +152,31 @@ same modes as `--report`. A public-only feature or Actions setting on another
 visibility is recorded as `not applied (public repositories only)` and does not
 count as drift.
 
+`--summary PATH` appends a short Markdown summary of the comparison to a file,
+such as `$GITHUB_STEP_SUMMARY`, in every mode.
+
+The **Detect settings drift** workflow runs the check daily with its own
+read-only token:
+
+```sh
+python tools/setup_repository.py --repo OWNER/NEW-REPO --check --token-scope workflow
+```
+
+`--token-scope workflow` compares only what a workflow `GITHUB_TOKEN` with
+`contents: read` can read: each ruleset without its bypass list, the visibility,
+the general settings GitHub returns to it and, on a public repository, private
+vulnerability reporting. It never calls the endpoints that need **Administration:
+read**. Each value it cannot read is printed as `NOT CHECKED` and is neither drift
+nor a match: a value GitHub leaves out of its answer, or refuses with HTTP 401,
+403 or 404. Any other failed request, such as a server error, is an API failure
+that returns **2**. Drift in
+what it reads returns **1**; otherwise it returns **0** with the result `PARTIAL`
+while something is not checked. It plans nothing, prints no
+digest and takes neither `--report` nor `--evidence`: the setup record comes only
+from a check with an administrator's token. The
+[settings reference](../repo_governance/SETTINGS.md#drift) lists what each section
+needs.
+
 Dependabot security updates count as on only when GitHub reports them enabled and
 not paused. GitHub pauses them when Dependabot pull requests go unanswered. Paused
 updates are drift: the plan prints a note, the record shows `on (paused)`, and an
@@ -242,6 +268,7 @@ inherited policies may impose additional restrictions.
 | `docs/repo_governance/SETTINGS.md` | **Keep and maintain** | Records the adopted baseline. The integrity workflow explicitly requires this file. |
 | `docs/setup/repository-settings.json` | **Keep** | Enables future drift checks and reapplication. The setup tests read this file. |
 | `tools/setup_repository.py` | **Keep** | Provides preview, apply and verification for future maintenance. |
+| `.github/workflows/settings-drift.yml` | **Keep** | Runs `setup_repository.py --check --token-scope workflow` daily with the read-only workflow token, and fails on drift in the rulesets and the other values that token can read; it lists the rest as not checked ([scheduled drift check](../repo_governance/SETTINGS.md#drift)). It fails until you apply the baseline. Remove it together with the setup tooling, as *Optional: retire the setup tooling* says. |
 | `tests/test_setup_repository.py` | **Keep while retaining setup tooling** | Imports the setup script and reads its JSON configuration. |
 | `docs/setup/REPOSITORY_SETUP.md` | **Keep or retire after handover** | Optional operational guide; remove links to it if you retire it. |
 | `.github/PULL_REQUEST_TEMPLATE.md` | **Keep and adapt** | Records linked issues, validation, final-head review and what was not validated. Add the project's own checks to *Validated*. |
@@ -253,19 +280,20 @@ inherited policies may impose additional restrictions.
 | `.github/workflows/codeql.yml` | **Keep** | Scans the Python, JavaScript and workflow code with CodeQL's security-extended queries on pushes and pull requests to `main` and `release/**`, and weekly; results appear under **Security → Code scanning**. Pull requests are analyzed without write permission: their SARIF is kept as a 30-day artifact and they show no code scanning annotations. Leave GitHub's default setup off, because it rejects results from this workflow. Free on a public repository; on a private one it needs GitHub Code Security and the repository variable `CODE_SCANNING` set to `enabled`, otherwise it skips the analysis. If the default branch is not `main`, rename it in the workflow's `push` and `pull_request` branch lists; **Repository integrity** fails while they omit it. |
 | `tools/check_repository.py`, `tests/test_check_repository.py`, `.github/actionlint/invalid-workflow.yml` | **Keep and evolve** | Runs every **Repository integrity** check, locally and in CI, and writes per-check logs, `report.json` (commit, dirty state, file hashes) and the job summary under `test-results/integrity/`; CI keeps them as a 30-day artifact. With `--ci`, which CI passes, it fails when the working tree differs from the commit. The `actionlint` check first lints `.github/actionlint/invalid-workflow.yml`, a workflow with a known error that never runs, and fails unless actionlint rejects it. Add project checks to its list. |
 | `tools/vba_lexer.py`, `tools/check_vba_*.py`, `tests/test_check_vba.py` | **Keep** | The nine static checks of exported VBA source, which **Repository integrity** runs, the call check as advisory. They read the facade prefix from the house style's naming table, so replace `<REGIME>` there. They pass while there is no VBA source. |
-| `docs/native-declarations.json`, `tools/check_vba_declares.py`, `tests/test_check_vba_declares.py` | **Keep and adapt** | The [register of native declarations](../REPOSITORY_STRUCTURE.md#native-declarations) and the static check that reads it. Add an entry for each export that a `Declare` imports, in the pull request that adds it; **Repository integrity** fails on a `Declare` the register does not list. The register is empty in the template, and the check passes while there is no VBA source. |
+| `docs/native-declarations.json`, `tools/check_vba_declares.py`, `tests/test_check_vba_declares.py` | **Keep and adapt** | The [register of native declarations](../REPOSITORY_STRUCTURE.md#native-declarations) and the static check that reads it. Add an entry for each export that a `Declare` imports, in the pull request that adds it, with its ABI in the optional `arguments` and `returns` keys; **Repository integrity** fails on a `Declare` the register does not list, or that differs from its export's ABI in a compilation environment. The register is empty in the template, and the check passes while there is no VBA source. |
 | `tests/modules/TEST_Harness.bas`, `tests/modules/TEST_Examples.bas`, `.github/excel-evidence-policy.json`, `tools/check_excel_run.py`, `tests/test_check_excel_run.py`, `tests/test_vba_harness.py` | **Keep** | The VBA test harness, its example suite, the evidence policy and the offline check of Excel-run evidence against it ([harness guide](../methodology/TEST_HARNESS.md#evidence-policy)). Add the project's suites beside the example suite, each with a certification entry point and an entry under `suites` in the evidence policy ([harness guide](../methodology/TEST_HARNESS.md#modes-and-certification)); keep the example suite, whose certification is the release evidence that the harness works on the host. |
 | `tests/modules/TEST_Relations.bas` | **Keep and adapt** | The illustrative [relation tests](../methodology/TEST_HARNESS.md#relation-tests), each with its corruption check, on a stand-in total. Replace `IllustrativeTotal` with a call to the core procedure of your calculation and the relations with those its calculation contract implies, keeping a corruption check in every case; `tests/test_vba_harness.py` keeps the counts and the checks consistent, and skips them once the module is gone. Delete the module, and its row in the harness guide's *Modules* table, if no relation applies. |
 | `tools/devbuild/`, `tests/test_devbuild.py`, `tests/test_excel_run.py` | **Keep and evolve** | Builds the workbook from source ([building a workbook from source](../../INSTALLATION.md#building-a-workbook-from-source)), binds an export to it, and records an Excel run with one command (`excel_run.py`). Replace the illustrative sheets and names of `tools/devbuild/workbook.json` together with the workbook contract; the tests keep them equal. |
 | `tools/check_workbook_protection.py`, `tests/test_check_workbook_protection.py`, `tests/workbook_template.py` | **Keep** | Compares the protection of `src/workbook/Template.xlsx` with its protection matrix ([workbook contract](../methodology/WORKBOOK_CONTRACT.md#protection)), in **Repository integrity**. It passes while neither exists. |
 | `tools/format_vba.py`, `tests/test_format_vba.py` | **Keep** | Brings exported VBA source into the house-style layout with `--write`; **Repository integrity** runs `--check`. It passes while there is no VBA source. |
+| `tools/make_mutant.py`, `tests/test_make_mutant.py` | **Keep** | Writes a mutant, a copy of a source file with one text replaced, under the ignored `test-results/mutants/` at the source's relative path, for the [negative control](../../CONTRIBUTING.md#-negative-controls) of a defect fix. It refuses unless the text occurs exactly once, keeps every other byte, CRLF line endings and `Attribute VB_Name` included, and prints the changed lines and the SHA-256 of the source and of the mutant. It never writes over a source file or into a folder that Git does not ignore. |
 | `tools/render_docs.py`, `tests/test_render_docs.py` | **Keep and evolve** | Renders the documentation blocks between `BEGIN generated` and `END generated` markers, such as the list of **Repository integrity** checks and the example suite's expected results; **Repository integrity** fails while one is stale. Add a renderer for each fact the project's code already knows, and run `--write` after changing it. |
 | `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links, anchors and HTTPS in **Repository integrity**, external links weekly, with optional expiring exceptions in `.github/link-exceptions.json` ([maintain the baseline](#-maintain-the-baseline)). |
 | `tools/check_doc_commands.py`, `tests/test_check_doc_commands.py` | **Keep** | Checks, in **Repository integrity**, that each `python tools/...` command and repository `python -m` command in the tracked Markdown runs a tracked script, and that its subcommands and options exist in the script's `argparse` parser, read from its source without running it. A parser it cannot read is a failure, not a pass. Commands of a **Remove once run** tool are skipped once its file is deleted. Keep each tool's parser literal so it stays readable. |
 | `docs/repo_governance/README.md` | **Keep and adapt** | The index of the governance guides and the repository controls. Update its links when you add, retire or move a guide. |
 | `docs/repo_governance/PULL_REQUESTS.md` | **Keep and adapt** | Final-head review procedure that the pull request template refers to. Adapt it if the project uses another automated reviewer. |
 | `.github/workflows/repository-integrity.yml` | **Keep and evolve** | Supplies the required `Repository integrity` check. Add project-specific checks as the project grows. |
-| `tests/test_workflow_controls.py` | **Keep and evolve** | Governance checks of the workflows and Dependabot, read with the pinned configuration parser: pinned Actions and credential-free checkouts, timeouts, explicit permissions and the jobs listed in `WRITE_PERMISSIONS`, the unconditional required check, concurrency, hash-locked installs, shared toolchain versions, Dependabot coverage, the guards of the label, CodeQL, Scorecard, traffic and milestone workflows, and the milestone workflow's script, which clears milestones from pull requests only. Update it in the same change as the workflow it checks. The tests of the traffic alert script skip once `.github/workflows/traffic-history.yml` is removed. |
+| `tests/test_workflow_controls.py` | **Keep and evolve** | Governance checks of the workflows and Dependabot, read with the pinned configuration parser: pinned Actions and credential-free checkouts, timeouts, explicit permissions and the jobs listed in `WRITE_PERMISSIONS`, the unconditional required check, concurrency, hash-locked installs, shared toolchain versions, Dependabot coverage, the guards of the label, CodeQL, Scorecard, settings drift, traffic and milestone workflows, and the milestone workflow's script, which clears milestones from pull requests only. Update it in the same change as the workflow it checks. The tests of the traffic alert script skip once `.github/workflows/traffic-history.yml` is removed. |
 | GitHub **Template repository** setting | **Review separately** | Choose whether the new project should itself be reusable as a template; the setup script does not change this flag. |
 
 ### Optional: retire the setup tooling
@@ -298,7 +326,12 @@ utilities. Keep them in the source template so future repositories receive them.
    tests/test_setup_repository.py
    docs/setup/repository-settings.json
    docs/setup/REPOSITORY_SETUP.md
+   .github/workflows/settings-drift.yml
    ```
+
+   In the same change, remove
+   `test_settings_drift_checks_on_a_schedule_with_the_read_only_token` from
+   `tests/test_workflow_controls.py`.
 
 5. Update `README.md`, `docs/repo_governance/README.md`,
    `docs/repo_governance/SETTINGS.md` and `CONTRIBUTING.md`: remove links and
@@ -326,8 +359,8 @@ project validation depends on the new project. There is no automatic deletion st
 
 | Exit code | Meaning | Next action |
 | --- | --- | --- |
-| **0** | Successful preview, or verified match in apply/check mode | Read the mode-specific message: preview success does not mean settings were applied. |
-| **1** | Drift found by `--check`, an unknown value included | Preview the differences and decide whether to reapply, or grant the access the unknown value needs. |
+| **0** | Successful preview, verified match in apply/check mode, or no drift in what `--token-scope workflow` read | Read the mode-specific message: preview success does not mean settings were applied, and `PARTIAL` means that the values listed as `NOT CHECKED` were not compared. |
+| **1** | Drift found by `--check`, an unknown value included; with `--token-scope workflow`, drift in a value it read | Preview the differences and decide whether to reapply, or grant the access the unknown value needs. |
 | **2** | Invalid configuration, a plan whose digest is not the approved one, an existing journal path, refused or failed apply prerequisite, unavailable feature, API failure or read-back mismatch, an Actions setting to set by hand included | Resolve the reported problem, then preview and retry. |
 
 API operations are **not transactional**. If a later request fails, earlier changes

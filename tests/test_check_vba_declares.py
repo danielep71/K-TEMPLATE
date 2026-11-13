@@ -315,10 +315,32 @@ REGISTER_INVALID: dict[str, tuple[str, str]] = {
     "missing-key": (register([{"export": "TlsGetValue", "library": "kernel32"}]),
                     "zero_is_ambiguous is missing"),
     "unknown-key": (register([{**ENTRIES[0], "ordinal": 3}]), "unknown key 'ordinal'"),
-    "reserved-arguments": (register([{**ENTRIES[0], "arguments": ["Long"]}]),
-                           "arguments is reserved for the export's signature"),
-    "reserved-returns": (register([{**ENTRIES[0], "returns": "pointer"}]),
-                         "returns is reserved for the export's signature"),
+    "arguments-not-a-list": (register([{**ENTRIES[0], "arguments": "Long"}]),
+                             "declarations[0]: arguments is not a list"),
+    "argument-not-an-object": (register([{**ENTRIES[0], "arguments": ["Long"]}]),
+                               "arguments[0] does not have exactly the keys byval and type"),
+    "argument-without-byval": (register([{**ENTRIES[0], "arguments": [{"type": "Long"}]}]),
+                               "arguments[0] does not have exactly the keys byval and type"),
+    "argument-with-an-unknown-key": (
+        register([{**ENTRIES[0], "arguments": [{"type": "Long", "byval": True, "size": 4}]}]),
+        "arguments[0] does not have exactly the keys byval and type"),
+    "argument-with-an-invalid-type": (
+        register([{**ENTRIES[0], "arguments": [{"type": "Long Integer", "byval": True}]}]),
+        "arguments[0].type is not a VBA type or pointer"),
+    "argument-registered-as-longptr": (
+        register([{**ENTRIES[0], "arguments": [{"type": "LongPtr", "byval": True}]}]),
+        "arguments[0].type is LongPtr; write pointer for a pointer-sized value"),
+    "argument-with-an-integer-byval": (
+        register([{**ENTRIES[0], "arguments": [{"type": "Long", "byval": 1}]}]),
+        "arguments[0].byval is not true or false"),
+    "returns-not-a-type": (register([{**ENTRIES[0], "returns": 4}]),
+                           "returns is not a VBA type, pointer or null"),
+    "returns-registered-as-longptr": (
+        register([{**ENTRIES[0], "returns": "LongPtr"}]),
+        "returns is LongPtr; write pointer for a pointer-sized value"),
+    "ambiguous-zero-without-a-return": (
+        register([{**ENTRIES[0], "returns": None}]),
+        "zero_is_ambiguous is true for an export that returns nothing"),
     "bad-export": (register([{**ENTRIES[0], "export": "Tls GetValue"}]),
                    "export is not an export name"),
     "bad-library": (register([{**ENTRIES[0], "library": " kernel32"}]),
@@ -332,6 +354,64 @@ REGISTER_INVALID: dict[str, tuple[str, str]] = {
     "get-last-error-entry": (
         register([{"export": "GetLastError", "library": "kernel32", "zero_is_ambiguous": False}]),
         "GetLastError is never declared, so it has no entry"),
+}
+
+
+# The ABI of each export of BASE: a pointer-sized value is "pointer".
+ABI: list[dict[str, Any]] = [
+    {**ENTRIES[0], "arguments": [{"type": "Long", "byval": True}], "returns": "pointer"},
+    {**ENTRIES[1], "arguments": [{"type": "pointer", "byval": True},
+                                 {"type": "pointer", "byval": True}], "returns": "Long"},
+    {**ENTRIES[2], "arguments": [{"type": "Long", "byval": True}], "returns": None},
+]
+VBA7_SET = "(ByVal lpName As LongPtr, ByVal lpValue As LongPtr) As Long"
+LEGACY_SET = "(ByVal lpName As Long, ByVal lpValue As Long) As Long"
+VBA7_TLS = "(ByVal dwTlsIndex As Long) As LongPtr"
+SET_ERROR = "(ByVal dwErrCode As Long)"
+
+# (source, register, the text each finding contains, the environments that report it).
+ABI_INVALID: dict[str, tuple[str, str, str, tuple[str, ...]]] = {
+    "long-handle-under-vba7": (
+        changed(VBA7_SET, VBA7_SET.replace("lpName As LongPtr", "lpName As Long")), register(ABI),
+        "Declare SetEnvironmentVariableW (SetEnvironmentVariableW): parameter 1 (lpName) is "
+        "Long; the register expects LongPtr (pointer)", VBA7),
+    "longptr-in-the-legacy-branch": (
+        changed(LEGACY_SET, LEGACY_SET.replace("lpValue As Long", "lpValue As LongPtr")),
+        register(ABI), "parameter 2 (lpValue) is LongPtr; the register expects Long (pointer)",
+        LEGACY),
+    "wrong-return-type": (
+        changed(VBA7_TLS, "(ByVal dwTlsIndex As Long) As Long"), register(ABI),
+        "Declare NativeTlsGetValue (TlsGetValue) returns Long; the register expects LongPtr "
+        "(pointer)", VBA7),
+    "wrong-argument-type": (
+        changed(VBA7_TLS, "(ByVal dwTlsIndex As Integer) As LongPtr"), register(ABI),
+        "parameter 1 (dwTlsIndex) is Integer; the register expects Long", VBA7),
+    "missing-byval": (
+        changed(SET_ERROR, "(dwErrCode As Long)"), register(ABI),
+        "Declare NativeSetLastError (SetLastError): parameter 1 (dwErrCode) is passed ByRef; "
+        "the register expects ByVal", VBA7),
+    "byref-registered-as-byval": (
+        changed(SET_ERROR, "(ByRef dwErrCode As Long)"),
+        register(ABI), "is passed ByRef; the register expects ByVal", VBA7),
+    "wrong-argument-count": (
+        changed(LEGACY_SET, "(ByVal lpName As Long) As Long"), register(ABI),
+        "Declare SetEnvironmentVariableW (SetEnvironmentVariableW) has 1 parameter(s); the "
+        "register expects 2", LEGACY),
+    "function-registered-as-a-sub": (
+        changed("Private Declare PtrSafe Sub NativeSetLastError Lib \"kernel32\" Alias "
+                "\"SetLastError\" _\n    (ByVal dwErrCode As Long)",
+                "Private Declare PtrSafe Function NativeSetLastError Lib \"kernel32\" Alias "
+                "\"SetLastError\" _\n    (ByVal dwErrCode As Long) As Long"),
+        register(ABI), "Declare NativeSetLastError (SetLastError) is a Function returning Long; "
+        "the register expects a Sub (returns null)", VBA7),
+    "sub-registered-as-a-function": (
+        BASE, register([*ABI[:2], {**ABI[2], "returns": "Long"}]),
+        "Declare NativeSetLastError (SetLastError) is a Sub; the register expects a Function "
+        "returning Long", ALL),
+    "signature-that-cannot-be-read": (
+        changed(LEGACY_SET, "(ByVal lpName As Long, ByVal lpValue As Long) As String * 2"),
+        register(ABI), "Declare SetEnvironmentVariableW (SetEnvironmentVariableW): cannot read "
+        "its parameters or return type", LEGACY),
 }
 
 
@@ -470,6 +550,43 @@ class DeclareTest(unittest.TestCase):
             found = [str(item) for item in check_vba_declares.check(root)[0]]
         self.assertIn("docs/native-declarations.json: is missing; restore it with an empty "
                       "declarations list", found)
+
+    def test_declares_matching_their_abi_pass_in_every_branch(self) -> None:
+        self.assertEqual(findings(BASE, register(ABI)), [])
+        # A type suffix gives a type; no As and no suffix is a Variant.
+        suffixed = changed(VBA7_TLS, "(ByVal dwTlsIndex&) As LongPtr")
+        self.assertEqual(findings(suffixed, register(ABI)), [])
+        variant = [{**ABI[0], "arguments": [{"type": "Variant", "byval": False}]}, *ABI[1:]]
+        self.assertEqual(findings(changed(VBA7_TLS, "(dwTlsIndex) As LongPtr").replace(
+            "(ByVal dwTlsIndex As Long) As Long", "(dwTlsIndex) As Long"), register(variant)), [])
+
+    def test_declares_that_differ_from_their_abi_are_reported(self) -> None:
+        for name, (source, register_text, text, expected) in ABI_INVALID.items():
+            with self.subTest(name=name):
+                self.assertReported(findings(source, register_text), text, expected)
+
+    def test_documented_register_example_is_valid(self) -> None:
+        guide = (ROOT / "docs/REPOSITORY_STRUCTURE.md").read_text(encoding="utf-8")
+        section = guide[guide.index("## Native declarations"):]
+        example = re.search(r"```json\n(.*?)```", section, re.S)
+        assert example is not None
+        files = {check_vba_declares.REGISTER: example.group(1)}
+        with repository(files) as root:
+            entries, problems = check_vba_declares.read_register(root)
+        self.assertEqual((len(entries), problems), (2, []))
+        self.assertEqual(next(iter(entries.values())).returns, "pointer")
+
+    def test_an_entry_without_abi_is_not_compared(self) -> None:
+        for name, (source, _, _, _) in ABI_INVALID.items():
+            with self.subTest(name=name):
+                self.assertEqual(findings(source, register()), [])
+        # Only what an entry records is compared: here the return type alone.
+        returns_only = [{**ENTRIES[0], "returns": "pointer"}, *ENTRIES[1:]]
+        source = ABI_INVALID["wrong-return-type"][0]
+        self.assertReported(findings(source, register(returns_only)),
+                            "returns Long; the register expects LongPtr (pointer)", VBA7)
+        self.assertEqual(findings(ABI_INVALID["wrong-argument-type"][0],
+                                  register(returns_only)), [])
 
     def test_invalid_registers_are_reported(self) -> None:
         for name, (text, expected) in REGISTER_INVALID.items():
