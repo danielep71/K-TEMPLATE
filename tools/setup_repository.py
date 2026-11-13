@@ -638,6 +638,18 @@ def plan_digest(repo: str, config_sha256: str, report: dict[str, Json], steps: P
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
 
 
+def step_record(method: str, endpoint: str, payload: Json) -> dict[str, Json]:
+    """A write as the records show it: method and endpoint, never the payload.
+
+    A ruleset write also names its ruleset, so that the journal and the evidence
+    tell apart writes that share the endpoint ``repos/OWNER/REPO/rulesets``.
+    """
+    record: dict[str, Json] = {'method': method, 'endpoint': endpoint}
+    if endpoint.split('/')[3:4] == ['rulesets'] and isinstance(payload, dict) and payload.get('name'):
+        record['ruleset'] = payload['name']
+    return record
+
+
 def plan(config: dict[str, Json], report: dict[str, Json], repo: str) -> Plan:
     """The writes that would make the repository match. Visibility and Actions are never written.
 
@@ -835,7 +847,7 @@ def evidence_record(config_path: Path, config_sha256: str, repo: str, state: dic
         'rulesets': report['rulesets'],
         'unmanaged_rulesets': report['unmanaged_rulesets'],
         'inherited_rulesets': report['inherited_rulesets'],
-        'planned_changes': [{'method': method, 'endpoint': endpoint} for method, endpoint, _ in steps],
+        'planned_changes': [step_record(*step) for step in steps],
         'plan_sha256': plan_sha256,
         'scope': 'Only the settings that the configuration manages are recorded; '
                  'everything else is outside this record.',
@@ -980,8 +992,7 @@ def apply(call: Call, args: argparse.Namespace, config: dict[str, Json], state: 
         'repository': state['metadata'].get('full_name', args.repo),
         'configuration_sha256': config_sha256,
         'started_at': started.strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'writes': [{'method': method, 'endpoint': endpoint, 'status': 'pending'}
-                   for method, endpoint, _ in steps],
+        'writes': [{**step_record(*step), 'status': 'pending'} for step in steps],
         'readback': None,
     }
     write_json_atomically(args.journal, journal)
