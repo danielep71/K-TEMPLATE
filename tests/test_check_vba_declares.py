@@ -427,11 +427,26 @@ class DeclareTest(unittest.TestCase):
             self.assertTrue(any(item in finding for finding in found), (item, found))
         self.assertEqual(set().union(*map(environments, found)), set(expected), found)
 
-    def test_repository_register_is_valid_and_empty(self) -> None:
-        data = json.loads((ROOT / check_vba_declares.REGISTER).read_text(encoding="utf-8"))
-        self.assertEqual(data, {"schema_version": 1, "declarations": []})
-        found, _, _, registered = check_vba_declares.check(ROOT)
-        self.assertEqual((found, registered), ([], 0))
+    def assertRegisterPasses(self, root: Path) -> None:
+        """The register at root is valid and the repository passes, with any number of entries."""
+        data = json.loads((root / check_vba_declares.REGISTER).read_text(encoding="utf-8"))
+        self.assertEqual(data["schema_version"], 1)
+        self.assertIsInstance(data["declarations"], list)
+        found, _, _, registered = check_vba_declares.check(root)
+        self.assertEqual(([str(item) for item in found], registered),
+                         ([], len(data["declarations"])))
+
+    def test_repository_register_is_valid(self) -> None:
+        # Empty in the template; a generated repository adds an entry for each
+        # export a Declare imports, so the test must not require it to stay empty.
+        self.assertRegisterPasses(ROOT)
+
+    def test_register_check_accepts_a_registered_declare(self) -> None:
+        with repository({MODULE: BASE, check_vba_declares.REGISTER: register()}) as root:
+            self.assertRegisterPasses(root)
+        with repository({MODULE: BASE, check_vba_declares.REGISTER: register([])}) as root:
+            with self.assertRaises(AssertionError):
+                self.assertRegisterPasses(root)
 
     def test_correct_capture_passes_in_every_branch(self) -> None:
         self.assertEqual(findings(), [])
