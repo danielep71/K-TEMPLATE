@@ -6,8 +6,9 @@ separate, minimal implementation of the same specifications, so a writer
 defect fails here without Excel. They also check that
 tools/devbuild/build_workbook.py builds the sheets, code names, defined names
 and stamp of tools/devbuild/workbook.json, that this configuration matches
-docs/methodology/WORKBOOK_CONTRACT.md, and that a rebuild is byte-identical,
-from blank sheets and from a synthetic layout template. The builds of a
+docs/methodology/WORKBOOK_CONTRACT.md, that a rebuild is byte-identical,
+from blank sheets and from a synthetic layout template, and that --override
+replaces exactly the modules it names and marks the stamp. The builds of a
 project's own modules and of the template use the template's synthetic build
 configuration (tests/workbook_template.py), not this repository's sheets.
 """
@@ -15,6 +16,7 @@ configuration (tests/workbook_template.py), not this repository's sheets.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import json
 import random
@@ -547,6 +549,145 @@ class ProjectSource(unittest.TestCase):
                 self.assertRaisesRegex(build_workbook.BuildError,
                                        r"shINPUTS\.cls \(code name shInputs\) differs"):
             build_workbook.build(root, "production", Path(temporary) / "W.xlsm")
+
+
+DEMO_OVERRIDE = (b'Attribute VB_Name = "CORE_Demo"\r\nOption Explicit\r\n'
+                 b"Private Const MUTANT As Long = 1\r\n")
+
+
+class OverrideBuild(unittest.TestCase):
+    """Builds with --override: a folder's modules replace those of the same VB_Name."""
+
+    files = ProjectSource.files
+
+    def build(self, root: Path, overrides: dict[str, bytes], configuration: str = "production"
+              ) -> tuple[build_workbook.Build, Path]:
+        """A build of ``root`` with the files ``overrides`` in test-results/mutants/."""
+        folder = root / "test-results/mutants"
+        shutil.rmtree(folder, ignore_errors=True)
+        for name, data in overrides.items():
+            (folder / name).parent.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_bytes(data)
+        target = root / "test-results/W.xlsm"
+        target.unlink(missing_ok=True)
+        return build_workbook.build(root, configuration, target, override=folder), target
+
+    def test_each_file_replaces_the_module_its_vb_name_names(self) -> None:
+        sheet = SHEET_SOURCE.replace(b"End Sub", b"    Debug.Print 1\r\nEnd Sub")
+        overrides = {"src/core/CORE_Demo.bas": DEMO_OVERRIDE,
+                     "classes/CPair.cls": CLASS_SOURCE + b"Private mValue As Long\r\n",
+                     "shInputs.cls": sheet, "report.txt": b"not a module"}
+        with git_tree(self.files) as root:
+            plain = root / "test-results/plain.xlsm"
+            build_workbook.build(root, "production", plain)
+            result, target = self.build(root, overrides)
+            with zipfile.ZipFile(target) as package:
+                cfb = CompoundFile(package.read("xl/vbaProject.bin"))
+            with zipfile.ZipFile(plain) as package:
+                before = CompoundFile(package.read("xl/vbaProject.bin"))
+            stamp = check_excel_run.read_stamp(target, "build_commit")
+            folder = root / "test-results/mutants"
+        self.assertTrue(result.clean)
+        self.assertEqual([(item.name, item.path.relative_to(folder).as_posix(), item.sha256)
+                          for item in result.overrides],
+                         [("CPair", "classes/CPair.cls",
+                           hashlib.sha256(overrides["classes/CPair.cls"]).hexdigest()),
+                          ("shInputs", "shInputs.cls", hashlib.sha256(sheet).hexdigest()),
+                          ("CORE_Demo", "src/core/CORE_Demo.bas",
+                           hashlib.sha256(DEMO_OVERRIDE).hexdigest())])
+        # The same modules, of the same kinds, with the replaced ones' new source.
+        self.assertEqual(cfb.read("PROJECT"), before.read("PROJECT"))
+        self.assertIn("Private Const MUTANT", decompress(cfb.read("VBA/CORE_Demo")).decode())
+        self.assertIn("Private mValue", decompress(cfb.read("VBA/CPair")).decode())
+        self.assertNotIn("VERSION 1.0 CLASS", decompress(cfb.read("VBA/CPair")).decode())
+        self.assertIn("Debug.Print 1", decompress(cfb.read("VBA/shInputs")).decode())
+        self.assertEqual(decompress(cfb.read("VBA/ThisWorkbook")),
+                         decompress(before.read("VBA/ThisWorkbook")))
+        self.assertEqual(stamp, result.commit + " (built with overrides from test-results/"
+                         "mutants: " + ", ".join(f"{item.name} SHA-256 {item.sha256}"
+                                                 for item in result.overrides)
+                         + ": NOT evidence-grade)")
+        self.assertIn(build_workbook.OVERRIDDEN, stamp or "")
+
+    def test_a_file_that_replaces_no_module_exactly_stops_the_build(self) -> None:
+        cases = {
+            "matches no module of the production configuration": {
+                "CORE_Other.bas": DEMO_OVERRIDE.replace(b"CORE_Demo", b"CORE_Other")},
+            # Test modules are not built in production, so they cannot be replaced there.
+            "TEST_Demo matches no module": {
+                "TEST_Demo.bas": DEMO_OVERRIDE.replace(b"CORE_Demo", b"TEST_Demo")},
+            "both name the module core_demo": {
+                "a/CORE_Demo.bas": DEMO_OVERRIDE,
+                "b/core_demo.bas": DEMO_OVERRIDE.replace(b"CORE_Demo", b"core_demo")},
+            "differs from the module CORE_Demo in case": {
+                "CORE_Demo.bas": DEMO_OVERRIDE.replace(b"CORE_Demo", b"core_demo")},
+            "needs exactly one Attribute VB_Name": {"CORE_Demo.bas": b"Option Explicit\r\n"},
+            "needs exactly one Attribute VB_Name = ": {
+                "CORE_Demo.bas": DEMO_OVERRIDE + b'Attribute VB_Name = "CORE_Demo"\r\n'},
+            "forms are not built": {"CORE_Demo.bas": DEMO_OVERRIDE,
+                                    "frmA.frm": b'Attribute VB_Name = "frmA"\r\n'},
+            "CPair is a class module, which only a .cls file replaces": {
+                "CPair.bas": b'Attribute VB_Name = "CPair"\r\nOption Explicit\r\n'},
+            "CORE_Demo is a standard module, which only a .bas file replaces": {
+                "CORE_Demo.cls": DEMO_OVERRIDE},
+            "non-ASCII byte 0xE9": {"CORE_Demo.bas": DEMO_OVERRIDE + b"' caf\xe9\r\n"},
+            "byte-order mark": {"CORE_Demo.bas": b"\xef\xbb\xbf" + DEMO_OVERRIDE},
+            "carriage return without a line feed": {
+                "CORE_Demo.bas": DEMO_OVERRIDE.replace(b"\r\nOption", b"\rOption")},
+            "does not start with its Attribute VB_Name line": {
+                "CORE_Demo.bas": b"' note\r\n" + DEMO_OVERRIDE},
+            "holds no .bas or .cls file": {"notes.txt": b"x"},
+        }
+        with git_tree(self.files) as root:
+            for expected, overrides in cases.items():
+                with self.subTest(expected=expected):
+                    with self.assertRaisesRegex(build_workbook.BuildError, expected):
+                        self.build(root, overrides)
+                    self.assertFalse((root / "test-results/W.xlsm").exists())
+            with self.assertRaisesRegex(build_workbook.BuildError, "not a folder"):
+                build_workbook.build(root, "production", root / "W.xlsm",
+                                     override=root / "absent")
+
+    def test_a_test_module_is_replaced_in_development(self) -> None:
+        files = {**self.files, "tests/modules/TEST_Demo.bas":
+                 b'Attribute VB_Name = "TEST_Demo"\r\nOption Explicit\r\n'}
+        override = b'Attribute VB_Name = "TEST_Demo"\r\nOption Explicit\r\n\r\n'
+        with git_tree(files) as root:
+            result, target = self.build(root, {"TEST_Demo.bas": override}, "development")
+            with zipfile.ZipFile(target) as package:
+                cfb = CompoundFile(package.read("xl/vbaProject.bin"))
+        self.assertEqual([item.name for item in result.overrides], ["TEST_Demo"])
+        self.assertEqual(decompress(cfb.read("VBA/TEST_Demo")), override)
+
+    def test_without_the_option_the_build_is_unchanged(self) -> None:
+        with git_tree(self.files) as root:
+            first, second = root / "test-results/first.xlsm", root / "test-results/second.xlsm"
+            plain = build_workbook.build(root, "production", first)
+            explicit = build_workbook.build(root, "production", second, override=None)
+            self.assertEqual(first.read_bytes(), second.read_bytes())
+            self.assertEqual(check_excel_run.read_stamp(first, "build_commit"), plain.commit)
+        self.assertEqual((plain.overrides, plain.override_folder), ((), ""))
+        self.assertEqual(plain, explicit)
+
+    def test_main_prints_each_replacement_with_its_sha256(self) -> None:
+        with git_tree(self.files) as root, contextlib.redirect_stdout(io.StringIO()) as output:
+            folder = root / "test-results/mutants"
+            folder.mkdir(parents=True)
+            (folder / "CORE_Demo.bas").write_bytes(DEMO_OVERRIDE)
+            code = build_workbook.main([str(root / "test-results/W.xlsm"), "--root", str(root),
+                                        "--configuration", "production", "--override",
+                                        str(folder)])
+            commit = build_workbook.git(root, "rev-parse", "HEAD")
+        self.assertEqual(code, 0)
+        text = output.getvalue()
+        self.assertIn(f"overrides from test-results/mutants: NOT evidence for commit {commit}",
+                      text)
+        self.assertIn(f"replaced CORE_Demo with {folder / 'CORE_Demo.bas'}, SHA-256 "
+                      f"{hashlib.sha256(DEMO_OVERRIDE).hexdigest()}", text)
+        with git_tree(self.files) as root, contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(build_workbook.main([str(root / "W.xlsm"), "--root", str(root),
+                                                  "--override", str(root / "absent")]), 1)
+        self.assertIn("not a folder", output.getvalue())
 
 
 class TemplateBuild(unittest.TestCase):

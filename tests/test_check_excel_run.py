@@ -372,6 +372,28 @@ class RebuildTest(unittest.TestCase):
         self.assertTrue(any("compile=FAIL, expected PASS or ON_DEMAND" in item
                             for item in failed.findings), failed.findings)
 
+    def test_a_workbook_built_with_overrides_never_certifies(self) -> None:
+        # Even an override identical to the commit's module marks the build.
+        folder = Path(self.temporary.name) / "overrides"
+        folder.mkdir()
+        harness = self.root / POLICY.harness
+        (folder / harness.name).write_bytes(harness.read_bytes())
+        workbook = Path(self.temporary.name) / "Workbook-overridden.xlsm"
+        built = build_workbook.build(self.root, "development", workbook, override=folder)
+        stamp = build_workbook.commit_stamp(built)
+
+        def overridden_results(folder: Path) -> None:
+            write_results(folder, results_document(stamp, self.root))
+        result = self.checked(workbook, overridden_results)
+        self.assertEqual(result.binding, "FAIL")
+        expected = f"built with overrides, so not evidence for {self.commit}"
+        self.assertIn(f"workbook {workbook.name}: {expected}", " ".join(result.findings))
+        self.assertIn(f"{POLICY.results}: written by a workbook {expected}",
+                      " ".join(result.findings))
+        report = check_excel_run.report(self.commit, result)
+        self.assertNotIn("Binding: VERIFIED", report)
+        self.assertIn("excel-run: FAIL", report)
+
     def test_without_an_export_or_a_workbook_the_sources_are_missing(self) -> None:
         with evidence(self.automated) as folder:
             result = check_excel_run.check(self.root, self.commit, folder)
@@ -436,6 +458,27 @@ class BindingTest(unittest.TestCase):
                 self.assertEqual(result.binding, "FAIL")
                 self.assertTrue(any("build stamp" in item and text in item
                                     for item in result.findings), result.findings)
+
+    def test_an_overridden_workbook_never_binds(self) -> None:
+        override = build_workbook.Override("TEST_Harness", Path("mutants/TEST_Harness.bas"),
+                                           "0" * 64)
+        build = build_workbook.Build(COMMIT, "2026-11-02T10:00:00+01:00", True, "development",
+                                     (), overrides=(override,), override_folder="mutants")
+        data = build_workbook.package(build_workbook.load_layout(SOURCE), build, b"project")
+        def bad_manifest(folder: Path, _: Path) -> None:
+            (folder / POLICY.manifest).write_text('{"format": "other"}', "utf-8")
+        # Every binding path with an export reads the stamp: with a manifest,
+        # without one, and with one that is not valid.
+        for name, options in (("manifest", {}), ("no manifest", {"manifest": False}),
+                              ("invalid manifest", {"change": bad_manifest})):
+            with self.subTest(path=name):
+                result = self.bound(data=data, **options)
+                self.assertEqual(result.binding, "FAIL")
+                found = [item for item in result.findings
+                         if f"built with overrides, so not evidence for {COMMIT}" in item
+                         and "TEST_Harness SHA-256 " + "0" * 64 in item]
+                self.assertEqual(len(found), 1, result.findings)
+                self.assertIn("excel-run: FAIL", check_excel_run.report(COMMIT, result))
 
     def test_the_stamp_is_read_from_shared_strings_after_excel_saves(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -984,6 +1027,13 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(len(result.findings), 1, result.findings)
         self.assertIn(f"{POLICY.results}: {folder / POLICY.results}: not valid UTF-8 JSON",
                       result.findings[0])
+
+    def test_results_of_an_overridden_build_are_named(self) -> None:
+        stamp = f"{self.commit}{build_workbook.OVERRIDDEN}mutants: CORE_A SHA-256 " \
+            f"{'0' * 64}: NOT evidence-grade)"
+        found = self.changed(lambda document: document.update(commit=stamp))
+        self.assertIn(f"{POLICY.results}: written by a workbook built with overrides, so not "
+                      f"evidence for {self.commit}", " ".join(found))
 
     def test_a_marked_or_missing_stamp_fails(self) -> None:
         for commit in (self.commit + "+local-changes", ""):

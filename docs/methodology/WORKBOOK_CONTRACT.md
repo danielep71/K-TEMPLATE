@@ -182,7 +182,8 @@ The build writes, from one commit:
   input areas and the print areas;
 - the build stamp on the reference sheet: the commit, its committer time
   (not the clock, so that a rebuild is byte-identical) and the configuration.
-  A working tree with changes is stamped as not evidence-grade;
+  A working tree with changes, or a build whose `--override` replaces
+  modules, is stamped as not evidence-grade;
 - the VBA components of that commit, as the
   [installation guide](../../INSTALLATION.md) lists them.
 

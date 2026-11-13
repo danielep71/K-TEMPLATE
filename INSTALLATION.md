@@ -130,8 +130,8 @@ ignores, with:
   ([build](docs/methodology/WORKBOOK_CONTRACT.md#build)). Without it, the
   sheets are blank;
 - the build stamp on the reference sheet: the commit, its committer time and
-  the configuration. A tracked change, or an untracked file in a source
-  directory, adds *NOT evidence-grade* to the commit;
+  the configuration. A tracked change, an untracked file in a source
+  directory, or `--override` (below) adds *NOT evidence-grade* to the commit;
 - a VBA project written from source. The production configuration takes the
   standard and class modules of `src/`. The development configuration adds
   `tests/modules/` and `examples/modules/`. Each sheet's document module
@@ -145,6 +145,41 @@ the same commit and working tree are byte-identical. The build stops on a form,
 which needs a designer the builder does not write; import forms by hand
 (step 4). It also stops on a module too dense to fit the VBA compression
 format; import that module by hand.
+
+**Replacing modules for a negative control.** To show that a test fails
+without a VBA fix, you need a workbook that differs from the commit by exactly
+the modules under test, built the same way. Put each replacement module, as
+the VBE exports it, in a folder that Git ignores, such as
+`test-results/mutants/`, and build with `--override`:
+
+```sh
+python tools/devbuild/build_workbook.py --override test-results/mutants
+```
+
+- Each `.bas` or `.cls` file in the folder or its subfolders replaces the
+  module of the configuration with the same `Attribute VB_Name`. A `.bas`
+  replaces a standard module, and a `.cls` a class or document module. Other
+  files are ignored.
+- The build stops and writes nothing when a file names no module of the
+  configuration, when two files name the same module (VBA names ignore case),
+  when a name differs in case from its module, and on a `.frm`. It also stops
+  on a file without exactly one `Attribute VB_Name` line, one that does not
+  start with that line after a class's header, one with a byte outside ASCII,
+  and one with a carriage return without a line feed. An override never adds
+  or drops a module.
+- The build prints each replaced module with its file and SHA-256. The
+  stamp's commit records the folder, relative to the checkout when it lies
+  inside it, and each replaced module with its SHA-256, and says
+  *NOT evidence-grade*.
+
+A workbook built this way is never evidence for its commit.
+`tools/check_excel_run.py` reads the stamp of the workbook you give it with
+`--workbook`, and the commit in each results file of the run. When either
+records overrides, it reports the run as built with overrides and not
+evidence for the commit, never as `Binding: VERIFIED` or `excel-run: PASS`.
+Release evidence needs `Binding: VERIFIED`, so it never comes from such a
+workbook. The replacement files are not in Git: keep them with the run's
+notes if you need to repeat it.
 
 1. Unblock the file if it was copied from another machine, open it, enable
    macros, and check **Tools → References**.
