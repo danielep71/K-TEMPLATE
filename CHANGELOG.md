@@ -675,6 +675,10 @@ milestones and their pull requests.
   badges and wiki links, the issue forms' contact links and the changelog's
   link references use the new name; GitHub redirects links that use the old
   one (#433).
+- `tools/format_vba.py` and `tests/test_format_vba.py` are licensed under the
+  Mozilla Public License 2.0 of the root `LICENSE`, like the repository's own
+  files. The third-party notice and the provenance register no longer list
+  them (#440).
 
 ### Fixed
 
