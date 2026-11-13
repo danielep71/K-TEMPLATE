@@ -12,6 +12,13 @@ cannot drift while another stays correct:
 - every ``Declare`` names an export of the register: its ``Alias`` if it has
   one, else its own name, compared ignoring case, from the library the
   register gives for it;
+- a ``Declare`` whose export has an ABI in the register, its ``arguments``
+  or its ``returns``, matches it: the number of parameters, each one's type
+  and ``ByVal`` or ``ByRef`` (``ByRef`` when neither is written), ``Sub`` for
+  a ``returns`` of null, else ``Function`` and its type. A ``pointer`` is
+  ``LongPtr`` where VBA7 is true and ``Long`` before it; every other type
+  matches exactly, ignoring case. A type suffix gives a type, and a name
+  without one or ``As`` is a ``Variant``;
 - ``GetLastError`` is never declared: it does not see the error that VBA has
   already copied into ``Err.LastDllError``; and a ``Declare Sub``, which
   returns nothing, is never registered as ambiguous on zero;
@@ -37,9 +44,8 @@ public one in a standard module, and VBA one in a class), so a call resolves
 to a ``Declare`` of the calling module, by its name alone or qualified by the
 module's name, the component's file name. The check reads statements in
 order, not control flow: a jump into the middle of a sequence, and an error
-replaced inside the call itself, are not seen. It does not compare a
-``Declare``'s parameters or return type with the export's signature.
-docs/VBA_HOUSE_STYLE.md, Static checks, lists its limits.
+replaced inside the call itself, are not seen. docs/VBA_HOUSE_STYLE.md,
+Static checks, lists its limits.
 """
 
 from __future__ import annotations
@@ -52,7 +58,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from check_vba_conditionals import reachable_sources
+from check_vba_conditionals import ENVIRONMENTS, reachable_sources
 from check_vba_identifiers import (
     END_PROC,
     NAME,
@@ -61,6 +67,7 @@ from check_vba_identifiers import (
     SUFFIX,
     closing_parenthesis,
     declared_names,
+    top_level_split,
 )
 from vba_lexer import (
     Finding,
@@ -75,13 +82,26 @@ ROOT = Path(__file__).resolve().parents[1]
 REGISTER = "docs/native-declarations.json"
 REGISTER_KEYS = frozenset({"schema_version", "declarations"})
 ENTRY_KEYS = frozenset({"export", "library", "zero_is_ambiguous"})
-# Kept for the signature of each export, which the check does not read yet:
-# an entry that holds one fails, so that no signature is recorded unchecked.
-RESERVED_KEYS = frozenset({"arguments", "returns"})
+# The export's signature, its ABI: optional, and checked when present.
+ABI_KEYS = frozenset({"arguments", "returns"})
+ARGUMENT_KEYS = frozenset({"type", "byval"})
+# A VBA type, possibly an array, or "pointer" for a pointer-sized value:
+# LongPtr under VBA7 and Long before it.
+POINTER = "pointer"
+ABI_TYPE = re.compile(rf"{NAME}(?:\(\))?")
+# The type a suffix gives a name, as in GetText$.
+SUFFIX_TYPES = {"%": "Integer", "&": "Long", "!": "Single", "#": "Double", "@": "Currency",
+                "$": "String", "^": "LongLong"}
+PARAMETER = re.compile(rf"^\s*(?:Optional\s+)?(?:(?P<passing>ByVal|ByRef)\s+)?"
+                       rf"(?:ParamArray\s+)?(?P<name>{NAME})(?P<suffix>[%&!#@$^])?"
+                       rf"(?P<array>\s*\(\s*\))?(?:\s+As\s+(?P<type>{NAME}))?\s*(?:=.*)?$",
+                       re.I)
+RETURNS = re.compile(rf"^\s*(?:As\s+(?P<type>{NAME})(?P<array>\s*\(\s*\))?)?\s*$", re.I)
 # An exported name, or an ordinal such as #12.
 EXPORT = re.compile(r"[A-Za-z_][A-Za-z0-9_@$?]*|#[0-9]+")
 DECLARE = re.compile(rf"^\s*(?:(?:Public|Private|Global)\s+)?Declare\s+(?:PtrSafe\s+)?"
-                     rf"(?P<kind>Sub|Function)\s+(?P<name>{NAME}){SUFFIX}", re.I)
+                     rf"(?P<kind>Sub|Function)\s+(?P<name>{NAME})"
+                     r"(?P<suffix>[%&!#@$^](?![A-Za-z_]))?", re.I)
 # CDecl, which only Office for Mac reads, may stand before Lib.
 LIBRARY = re.compile(r'(?:\s+CDecl)?\s+Lib\s+"(?P<library>[^"]*)"'
                      r'(?:\s+Alias\s+"(?P<alias>[^"]*)")?', re.I)
@@ -104,12 +124,28 @@ EXPLICIT_CALL = re.compile(r"^\s*Call\s+", re.I)
 
 
 @dataclass(frozen=True)
+class Argument:
+    """One parameter of an export: its type, or "pointer", and how it is passed."""
+
+    type: str
+    byval: bool
+
+
+# The value of an entry's returns when the register does not record it.
+NOT_RECORDED = "<not recorded>"
+
+
+@dataclass(frozen=True)
 class Entry:
     """One export of the register."""
 
     export: str
     library: str
     zero_is_ambiguous: bool
+    # None when the register records no arguments for the export.
+    arguments: tuple[Argument, ...] | None = None
+    # A type, "pointer", None for a Sub, or NOT_RECORDED.
+    returns: str | None = NOT_RECORDED
 
 
 def export_key(export: str, library: str) -> tuple[str, str]:
@@ -138,7 +174,11 @@ def read_register(root: Path) -> tuple[dict[tuple[str, str], Entry], list[Findin
         where = f"{REGISTER}: declarations[{index}]"
         problems = entry_problems(item)
         if not problems:
-            entry = Entry(item["export"], item["library"], item["zero_is_ambiguous"])
+            arguments = item.get("arguments")
+            entry = Entry(item["export"], item["library"], item["zero_is_ambiguous"],
+                          None if arguments is None else
+                          tuple(Argument(value["type"], value["byval"]) for value in arguments),
+                          item.get("returns", NOT_RECORDED))
             key = export_key(entry.export, entry.library)
             if key in entries:
                 problems.append(f"{entry.export} from {entry.library} is listed twice")
@@ -154,10 +194,7 @@ def entry_problems(item: object) -> list[str]:
     """What is wrong with one entry of the declarations list."""
     if not isinstance(item, dict):
         return ["is not an object"]
-    problems = [f"{key} is reserved for the export's signature, which the check does not "
-                "read yet; remove it" for key in sorted(item.keys() & RESERVED_KEYS)]
-    problems += [f"unknown key {key!r}" for key in sorted(item.keys() - ENTRY_KEYS -
-                                                           RESERVED_KEYS)]
+    problems = [f"unknown key {key!r}" for key in sorted(item.keys() - ENTRY_KEYS - ABI_KEYS)]
     problems += [f"{key} is missing" for key in sorted(ENTRY_KEYS - item.keys())]
     if problems:
         return problems
@@ -169,18 +206,65 @@ def entry_problems(item: object) -> list[str]:
         problems.append("library is not a library name, such as kernel32")
     if not isinstance(item["zero_is_ambiguous"], bool):
         problems.append("zero_is_ambiguous is not true or false")
+    elif item["zero_is_ambiguous"] and "returns" in item and item["returns"] is None:
+        problems.append("zero_is_ambiguous is true for an export that returns nothing")
+    return problems + abi_problems(item)
+
+
+def type_problem(value: object, what: str) -> str | None:
+    """What is wrong with a type of the ABI, or None."""
+    if not isinstance(value, str) or not ABI_TYPE.fullmatch(value):
+        return f"{what} is not a VBA type or {POINTER}"
+    if value.casefold().startswith("longptr"):
+        return f"{what} is {value}; write {POINTER} for a pointer-sized value"
+    return None
+
+
+def abi_problems(item: dict[str, object]) -> list[str]:
+    """What is wrong with the arguments and returns of one entry."""
+    problems: list[str] = []
+    arguments = item.get("arguments")
+    if "arguments" in item and not isinstance(arguments, list):
+        problems.append("arguments is not a list")
+    for index, value in enumerate(arguments if isinstance(arguments, list) else []):
+        where = f"arguments[{index}]"
+        if not isinstance(value, dict) or value.keys() != ARGUMENT_KEYS:
+            problems.append(f"{where} does not have exactly the keys byval and type")
+            continue
+        problem = type_problem(value["type"], f"{where}.type")
+        if problem:
+            problems.append(problem)
+        if not isinstance(value["byval"], bool):
+            problems.append(f"{where}.byval is not true or false")
+    if item.get("returns") is not None:
+        problem = type_problem(item["returns"], "returns")
+        if problem:
+            problems.append(problem.replace(f" or {POINTER}", f", {POINTER} or null"))
     return problems
 
 
 @dataclass(frozen=True)
+class Parameter:
+    """One parameter of a Declare, as written."""
+
+    name: str
+    type: str
+    byval: bool
+
+
+@dataclass(frozen=True)
 class Declared:
-    """One Declare statement: its VBA name and the export it imports."""
+    """One Declare statement: its VBA name, the export it imports and its
+    signature, whose parameters are None when they cannot be read."""
 
     line: int
     name: str
     export: str
     library: str
     sub: bool
+    parameters: tuple[Parameter, ...] | None = None
+    # The Function's type; None for a Sub.
+    returns: str | None = None
 
 
 @dataclass
@@ -217,9 +301,43 @@ def declaration(path: str, lines: list[str], start: int, end: int,
                                                             f"Declare {head.group('name')}"))
                 continue
             alias = names.group("alias")
+            sub = head.group("kind").casefold() == "sub"
+            parameters, returns = signature(statement[names.end():], head.group("suffix"))
             module.declared[head.group("name").casefold()] = Declared(
                 start, head.group("name"), head.group("name") if alias is None else alias,
-                names.group("library"), head.group("kind").casefold() == "sub")
+                names.group("library"), sub, parameters, None if sub else returns)
+
+
+def written_type(declared: str | None, suffix: str | None, array: str | None) -> str:
+    """The type a declaration gives: As, else a type suffix, else Variant."""
+    name = declared or SUFFIX_TYPES.get(suffix or "", "Variant")
+    return name + ("()" if array else "")
+
+
+def signature(rest: str, suffix: str | None) -> tuple[tuple[Parameter, ...] | None, str | None]:
+    """The parameters and the return type written after a Declare's Lib and
+    Alias clauses; None for the parameters when they cannot be read."""
+    rest = rest.strip()
+    inner = ""
+    if rest.startswith("("):
+        end = closing_parenthesis(rest, 0)
+        if end is None:
+            return None, None
+        inner, rest = rest[1:end], rest[end + 1:]
+    returned = RETURNS.match(rest)
+    if returned is None:
+        return None, None
+    parameters = []
+    for item in top_level_split(inner) if inner.strip() else []:
+        match = PARAMETER.match(item)
+        if match is None:
+            return None, None
+        parameters.append(Parameter(
+            match.group("name"),
+            written_type(match.group("type"), match.group("suffix"), match.group("array")),
+            (match.group("passing") or "ByRef").casefold() == "byval"))
+    return tuple(parameters), written_type(returned.group("type"), suffix,
+                                           returned.group("array"))
 
 
 def scan(path: str, source: str) -> Module:
@@ -427,8 +545,62 @@ def procedure_findings(path: str, procedure: Procedure, module: Module,
                             for problem in ambiguous_problems(procedure, index, item, module))
 
 
-def analyze_source(path: str, source: str, register: dict[tuple[str, str], Entry]
-                   ) -> list[Finding]:
+def expected_type(value: str, environment: str) -> str:
+    """The VBA type a type of the ABI stands for in one environment."""
+    if value.casefold() != POINTER:
+        return value
+    return "LongPtr" if ENVIRONMENTS[environment]["VBA7"] else "Long"
+
+
+def shown(value: str, environment: str) -> str:
+    """A type of the ABI as a message shows it."""
+    resolved = expected_type(value, environment)
+    return f"{resolved} ({POINTER})" if resolved != value else value
+
+
+def return_findings(item: Declared, entry: Entry, environment: str, label: str) -> list[str]:
+    """How a Declare's Sub or Function and return type differ from the ABI."""
+    if entry.returns == NOT_RECORDED:
+        return []
+    if entry.returns is None:
+        return [] if item.sub else [f"{label} is a Function returning {item.returns}; the "
+                                    "register expects a Sub (returns null)"]
+    expected = shown(entry.returns, environment)
+    if item.sub:
+        return [f"{label} is a Sub; the register expects a Function returning {expected}"]
+    if (item.returns or "").casefold() != expected_type(entry.returns, environment).casefold():
+        return [f"{label} returns {item.returns}; the register expects {expected}"]
+    return []
+
+
+def abi_findings(item: Declared, entry: Entry, environment: str) -> list[str]:
+    """How a Declare differs from its export's registered ABI in one environment."""
+    if entry.arguments is None and entry.returns == NOT_RECORDED:
+        return []
+    label = f"Declare {item.name} ({item.export})"
+    if item.parameters is None:
+        return [f"{label}: cannot read its parameters or return type to compare them with "
+                f"the ABI in {REGISTER}"]
+    problems = return_findings(item, entry, environment, label)
+    if entry.arguments is None:
+        return problems
+    if len(item.parameters) != len(entry.arguments):
+        return problems + [f"{label} has {len(item.parameters)} parameter(s); the register "
+                           f"expects {len(entry.arguments)}"]
+    for number, (parameter, argument) in enumerate(zip(item.parameters, entry.arguments,
+                                                       strict=True), start=1):
+        where = f"{label}: parameter {number} ({parameter.name})"
+        if parameter.type.casefold() != expected_type(argument.type, environment).casefold():
+            problems.append(f"{where} is {parameter.type}; the register expects "
+                            f"{shown(argument.type, environment)}")
+        if parameter.byval != argument.byval:
+            problems.append(f"{where} is passed {'ByVal' if parameter.byval else 'ByRef'}; "
+                            f"the register expects {'ByVal' if argument.byval else 'ByRef'}")
+    return problems
+
+
+def analyze_source(path: str, source: str, register: dict[tuple[str, str], Entry],
+                   environment: str) -> list[Finding]:
     """The findings of one environment's source."""
     module = scan(path, source)
     findings = list(module.findings)
@@ -442,6 +614,9 @@ def analyze_source(path: str, source: str, register: dict[tuple[str, str], Entry
             findings.append(Finding(path, item.line, f"Declare {item.name} is a Sub, which "
                                                      f"returns nothing, but {REGISTER} marks "
                                                      f"{item.export} as ambiguous on zero"))
+        if entry is not None:
+            findings.extend(Finding(path, item.line, problem)
+                            for problem in abi_findings(item, entry, environment))
         if entry is None:
             findings.append(Finding(path, item.line, f"Declare {item.name} imports "
                                                      f"{item.export} from {item.library}, "
@@ -461,7 +636,7 @@ def analyze(path: str, text: str, register: dict[tuple[str, str], Entry]
     declares: set[int] = set()
     for environment, source in sources.items():
         declares |= {item.line for item in scan(path, source).declared.values()}
-        for finding in analyze_source(path, source, register):
+        for finding in analyze_source(path, source, register, environment):
             names = environments.setdefault(finding, [])
             if environment not in names:
                 names.append(environment)
