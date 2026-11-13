@@ -996,6 +996,15 @@ Report:
         Loop
         Err.Raise 5
 ''', "Err.Raise"),
+            # The path ends at Exit Sub inside the enclosing loop, but the
+            # Exit Do it passed first still leaves the loop.
+            "raise-after-an-enclosing-loop-left-before-the-path-ends": ('''        Do
+Cleanup:
+            If Flag Then Exit Do
+            Exit Sub
+        Loop
+        Err.Raise 5
+''', "Err.Raise"),
             # Nothing jumps to Unused, so the branch stays ended after Exit Sub.
             "raise-after-an-untargeted-label-in-an-ended-branch": ('''Cleanup:
         If Flag Then
@@ -1073,6 +1082,23 @@ Cleanup:
             If Flag Then Exit Sub
         Loop
         Err.Raise 5
+''',
+            "raise-after-an-enclosing-loop-left-disabled": '''        Do
+Cleanup:
+            If Flag Then On Error GoTo 0: Exit Do
+            Exit Sub
+        Loop
+        Err.Raise 5
+''',
+            # Once the path ends, a label another jump reaches is not followed.
+            "targeted-label-after-the-path-ends-in-a-loop": '''        If Index = 2 Then GoTo Again
+        Do
+Cleanup:
+            Exit Sub
+Again:
+            On Error GoTo Handler
+            Err.Raise 5
+        Loop
 ''',
             # A Do While may run no pass, so the state before it also continues.
             "raise-after-a-pre-tested-loop": '''Cleanup:

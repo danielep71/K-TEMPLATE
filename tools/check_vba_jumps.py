@@ -55,7 +55,9 @@ without ``Call`` and named arguments, or the ``Error`` statement; a
 - The path ends at an ``Exit Sub``, ``Exit Function``, ``Exit Property``,
   ``End``, ``GoTo``, ``Resume`` or ``Return`` outside any block, and at the
   end of the procedure; inside a block, that branch ends there and takes no
-  part in the merge. A raise ends the path in the same way when the handler
+  part in the merge. If the path ends inside an enclosing loop, an
+  ``Exit Do`` or ``Exit For`` it passed before still continues after that
+  loop; nothing else does. A raise ends the path in the same way when the handler
   is disabled or a local handler is enabled. Under ``On Error Resume Next``
   the raise falls through, and in an unknown state it falls through too, so
   that the branch keeps its unknown state in the merge and cannot produce a
@@ -522,6 +524,20 @@ def jump_targets(steps: list[Step]) -> set[str]:
     return {target.casefold() for step in steps for _, target in statement_jumps(step.code)}
 
 
+def skipped(code: str, depth: int, blocks: list[Block]) -> int | None:
+    """The depth of nested blocks after ``code`` while the path skips the
+    other branches of the innermost enclosing block, or None once its end
+    closes that block."""
+    if BLOCK_IF.match(code) or SELECT.match(code) or LOOP_OPEN.match(code):
+        return depth + 1
+    if BLOCK_END.match(code) or LOOP_CLOSE.match(code):
+        if depth == 0:
+            blocks.pop()
+            return None
+        return depth - 1
+    return depth
+
+
 def trapped_raises(steps: list[Step], start: int, handler: str
                    ) -> list[tuple[int, str, str]]:
     """``(line, handler, raise)`` for each ``Err.Raise`` or ``Error``
@@ -534,28 +550,26 @@ def trapped_raises(steps: list[Step], start: int, handler: str
     # While the path skips the other branches of an enclosing block: the
     # depth of the blocks nested in them.
     skipping: int | None = None
+    # Whether the path ended inside an enclosing block; only the Exit Do or
+    # Exit For it collected for an enclosing loop can carry it on.
+    ended = False
     for index in range(start, len(steps)):
         step = steps[index]
         if skipping is not None:
-            if BLOCK_IF.match(step.code) or SELECT.match(step.code) \
-                    or LOOP_OPEN.match(step.code):
-                skipping += 1
-            elif BLOCK_END.match(step.code) or LOOP_CLOSE.match(step.code):
-                if skipping == 0:
-                    blocks.pop()
-                    skipping = None
-                else:
-                    skipping -= 1
+            skipping = skipped(step.code, skipping, blocks)
             continue
         outer = outer_statement(steps, index, state, blocks)
         if outer is not None:
             state, skip = outer
             skipping = 0 if skip else None
+            ended = ended and state == DEAD
+            if ended and not any(block.outer for block in blocks):
+                break
             continue
         if step.label is not None:
             # Another jump may reach a label in a branch this path left; a
             # label nothing jumps to, such as a line number for Erl, cannot.
-            if state == DEAD and step.label.casefold() in targeted:
+            if state == DEAD and not ended and step.label.casefold() in targeted:
                 state = UNKNOWN
             continue
         after = block_statement(steps, index, state, blocks)
@@ -575,8 +589,9 @@ def trapped_raises(steps: list[Step], start: int, handler: str
             # above, to the local handler. Under On Error Resume Next it
             # falls through; in an unknown state too, since ending that
             # branch would let the other branches alone decide the merge.
-            if not blocks or blocks[-1].outer:
+            if not blocks:
                 break
+            ended = blocks[-1].outer
             state = DEAD
         else:
             state = handler_after(step.code, state)
