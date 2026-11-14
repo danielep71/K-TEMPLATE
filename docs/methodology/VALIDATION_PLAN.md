@@ -125,11 +125,15 @@ other than `PASS` only as evidence of that outcome.
 A frozen [accuracy contract](TEST_CASES.md#accuracy-contracts) whose results
 pass on an Excel run of the candidate shows that, on that host, the worst
 error of the calculation over its calibration and holdout cases stays within
-the threshold. The holdout cases played no part in setting the threshold,
+the threshold. The threshold is the guarantee a release may publish. A
+target, when the contract declares one, is only reported: a worst error
+above it but within the threshold passes, marked `target missed`, and shows
+that the calculation is less accurate than aimed for, not that the guarantee
+fails. The holdout cases played no part in setting the threshold,
 and their values are `published` or `independent`. It proves nothing outside
 those cases, regime and host. A draft contract, and any contract on
 `illustrative` values, validates nothing. Record each contract's worst errors
-with the evidence.
+with the evidence, with its threshold and target.
 
 <a id="host-behaviour"></a>
 
