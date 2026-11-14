@@ -395,6 +395,29 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertEqual(step['env'], {'GH_TOKEN': '${{ github.token }}'})
         self.assertNotIn('${{', step['run'])
 
+    def test_closing_keywords_read_the_pull_request_from_the_event_file(self):
+        document = workflows()['closing-keywords.yml']
+        self.assertEqual(document['on'], {'pull_request': {
+            'types': ['opened', 'synchronize', 'reopened', 'edited']}})
+        self.assertIn('github.event.pull_request.number', document['concurrency']['group'])
+        self.assertEqual(document['permissions'], {'contents': 'read'})
+        self.assertEqual(list(document['jobs']), ['check'])
+        job = document['jobs']['check']
+        # Read-only, and no condition: every pull request reports a result.
+        self.assertEqual(job['permissions'],
+                         {'contents': 'read', 'issues': 'read', 'pull-requests': 'read'})
+        self.assertNotIn('if', job)
+        checkout = next(step for step in job['steps']
+                        if str(step.get('uses', '')).startswith('actions/checkout@'))
+        self.assertEqual(checkout['with']['fetch-depth'], 0)
+        step = next(step for step in job['steps']
+                    if 'check_closing_keywords.py' in (step.get('run') or ''))
+        self.assertEqual(step['env'], {'GITHUB_TOKEN': '${{ secrets.GITHUB_TOKEN }}'})
+        self.assertNotIn('continue-on-error', step)
+        # The title and body are untrusted: the tool reads them from the event file.
+        self.assertNotIn('${{', step['run'])
+        self.assertIn('--event "$GITHUB_EVENT_PATH"', step['run'])
+
     def test_settings_drift_checks_on_a_schedule_with_the_read_only_token(self):
         document = workflows()['settings-drift.yml']
         self.assertEqual(set(document['on']), {'schedule', 'workflow_dispatch'})

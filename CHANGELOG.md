@@ -63,8 +63,25 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- The **Closing keywords** workflow runs `tools/check_closing_keywords.py` on
+  each pull request. Into a release branch, it fails on any closing keyword,
+  such as `Resolves #N`, in a commit, the title or the body. Into the default
+  branch from a release branch, it fails on a keyword that names an open
+  issue, unless the body lists the issue on a `Reopen after merge: #N` line;
+  each finding names the commit, the keyword as written and the issue. It
+  reads issue states with the workflow token and is not a required check
+  (#497).
+
 ### Changed
 
+- While a release branch is active, commit messages, squash messages and task
+  pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
+  guide and the pull request template now say: a closing keyword in a commit
+  merged into a release branch closes its issue at the integration, whatever
+  its state. `Resolves #N` stays for a pull request into the default branch
+  while no release branch is active (#497).
 - *Start a new repository* in the README says that **Use this template**
   copies the template's default branch, not a release tag, and asks to record
   the template commit a new repository came from; the setup guide's

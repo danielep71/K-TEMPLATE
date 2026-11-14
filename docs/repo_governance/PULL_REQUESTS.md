@@ -78,18 +78,46 @@ apply.
 
 | Pull request | Base ← head | Issue links | Merge method |
 | --- | --- | --- | --- |
-| Task | release branch ← task branch created from it | `Resolves #N` | merge commit or squash |
+| Task | release branch ← task branch created from it | `Refs #N` | merge commit or squash |
 | Integration | default branch ← release branch | `Refs #` for the issues and pull requests it carries | merge commit |
 | Sync | release branch ← default branch | `Refs #` for the integration pull request | merge commit |
 
-- GitHub closes an issue from a keyword only when the pull request merges into
-  the default branch. After a task pull request merges into the release branch,
-  close its issue by hand with the *Resolution* that
+- GitHub closes an issue when a closing keyword that names it reaches the
+  default branch: in the title or body of a pull request that merges there, or
+  in the message of any commit that the merge brings there. The keywords are
+  `close`, `fix` and `resolve`, with their `-s` and `-d` forms, in any letter
+  case. The integration brings every commit of the release branch, so a
+  keyword in any of them closes its issue then, even one whose acceptance
+  criteria still wait for evidence. While a release branch is active, use only
+  `Refs #N` in commit messages, squash messages, and the titles and bodies of
+  task pull requests. `Resolves #N` stays for a pull request into the default
+  branch while no release branch is active, for an issue that it completes.
+- After a task pull request merges into the release branch, close its issue by
+  hand with the *Resolution* that
   [ISSUE_LABELS.md](ISSUE_LABELS.md#-closing-issues) requires, and move it to
   the milestone of that release branch's version.
 - An integration pull request uses `Refs #`, never a closing keyword: a keyword
   there would close every named issue, including one whose acceptance criteria
   still wait for evidence.
+- The **Closing keywords** workflow runs `tools/check_closing_keywords.py` on
+  each pull request. Each finding names the commit, the keyword as written and
+  the issue. Into a release branch, any keyword in a
+  commit between the base and the head, in the title or in the body fails; a
+  sync pull request has only its title and body read, because its commits are
+  already on the default branch. Into the default branch from a release branch,
+  a keyword that names an open issue fails, and one that names a closed issue
+  or a pull request is a note. Any other pull request is reported as not
+  checked. It is not a required check: check that it passes before merging.
+- A merged commit cannot be changed. When an integration carries a commit
+  keyword that names an open issue, list the issue in the integration pull
+  request's body on a line of its own, `Reopen after merge: #N`, or
+  `Reopen after merge: #N, #M` for several. The check then reports it as a
+  note; reopen each listed issue right after the merge. A keyword in the title
+  or body is fixed by editing them instead.
+- To check a task branch before opening its pull request, run
+  `python tools/check_closing_keywords.py --repository OWNER/REPOSITORY --mode release --base origin/release/1.2.0 --head HEAD`.
+  With `--mode integration`, the check reads issue states through the API with
+  the token in `GITHUB_TOKEN`, or from a file passed with `--input`.
 - Open the sync pull request right after each integration. It brings the
   integration's merge commit back, changes no file, and lets the next task
   branch start from the same history as the default branch.
