@@ -41,7 +41,7 @@
 <text x="964.3" y="234.0" font-family="Georgia, 'DejaVu Serif', 'Times New Roman', serif" font-style="italic" font-size="21" fill="#E8F3FF">PFE</text>
 <text x="1236" y="74" text-anchor="end" font-family="Georgia, 'DejaVu Serif', 'Times New Roman', serif" font-style="italic" font-size="27" fill="#E6EEF9">EL = PD · LGD · EAD<tspan fill="#7F93B5" dx="18">·</tspan><tspan dx="18">EAD = α · (RC + PFE)</tspan></text>
 <text x="1236" y="114" text-anchor="end" font-family="Georgia, 'DejaVu Serif', 'Times New Roman', serif" font-style="italic" font-size="23" fill="#C9D6EC">ES = E[L | L ≥ VaR]<tspan fill="#7F93B5" dx="18">·</tspan><tspan dx="18">ORC = BIC · ILM</tspan></text>
-<text x="1236" y="150" text-anchor="end" font-family="Georgia, 'DejaVu Serif', 'Times New Roman', serif" font-style="italic" font-size="23" fill="#C9D6EC">ΔEVE = EVE₀ − EVE₁<tspan fill="#7F93B5" dx="18">·</tspan><tspan dx="18">LCR = HQLA ÷ outflows ≥ 100%</tspan></text>
+<text x="1236" y="150" text-anchor="end" font-family="Georgia, 'DejaVu Serif', 'Times New Roman', serif" font-style="italic" font-size="23" fill="#C9D6EC">ΔEVE = EVE₀ − EVE₁<tspan fill="#7F93B5" dx="18">·</tspan><tspan dx="18">LCR = HQLA ÷ net outflows ≥ 100%</tspan></text>
 <rect x="815.0" y="574.8" width="12.5" height="25.2" rx="2" fill="url(#gbv)" opacity="0.55"/>
 <rect x="834.5" y="555.6" width="12.5" height="44.4" rx="2" fill="url(#gbv)" opacity="0.57"/>
 <rect x="853.9" y="533.9" width="12.5" height="66.1" rx="2" fill="url(#gbv)" opacity="0.59"/>
