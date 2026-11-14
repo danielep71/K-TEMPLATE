@@ -85,7 +85,8 @@ apply.
 - GitHub closes an issue from a keyword only when the pull request merges into
   the default branch. After a task pull request merges into the release branch,
   close its issue by hand with the *Resolution* that
-  [ISSUE_LABELS.md](ISSUE_LABELS.md#-closing-issues) requires.
+  [ISSUE_LABELS.md](ISSUE_LABELS.md#-closing-issues) requires, and move it to
+  the milestone of that release branch's version.
 - An integration pull request uses `Refs #`, never a closing keyword: a keyword
   there would close every named issue, including one whose acceptance criteria
   still wait for evidence.
