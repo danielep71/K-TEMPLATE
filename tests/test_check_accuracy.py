@@ -143,12 +143,15 @@ class RegistryTest(unittest.TestCase):
             "metric is not absolute or relative": {"metric": "squared"},
             "threshold is not a finite number of at least 0": {"threshold": -1},
             "status is not draft or frozen": {"status": "final"},
+            # An array or an object cannot be hashed: a finding, not a traceback.
+            "metric is not absolute or relative ": {"metric": ["absolute"]},
+            "status is not draft or frozen ": {"status": {}},
             "a frozen contract names the decision": {"decision": None},
             "holdout_cases is not a list of case IDs": {"holdout_cases": "demo-holdout-1"},
         }
         for text, change in cases.items():
             with self.subTest(text=text):
-                self.assertFinding(findings(registry({**FROZEN, **change})), text)
+                self.assertFinding(findings(registry({**FROZEN, **change})), text.strip())
         self.assertFinding(findings(registry({**ILLUSTRATIVE, "decision": "#2"})),
                            "a draft contract has no decision")
         self.assertFinding(findings(registry(FROZEN, FROZEN)), "id appears twice")
@@ -201,7 +204,7 @@ class RegistryTest(unittest.TestCase):
         ]
         for change, text in cases:
             with self.subTest(text=text):
-                self.assertFinding(findings(registry({**FROZEN, **change})), text)
+                self.assertFinding(findings(registry({**FROZEN, **change})), text.strip())
 
     def test_cases_must_fit_the_contract(self) -> None:
         cases: dict[str, dict[str, Any]] = {
@@ -218,7 +221,7 @@ class RegistryTest(unittest.TestCase):
         }
         for text, change in cases.items():
             with self.subTest(text=text):
-                self.assertFinding(findings(registry({**FROZEN, **change})), text)
+                self.assertFinding(findings(registry({**FROZEN, **change})), text.strip())
 
     def test_a_repeated_case_does_not_count_twice(self) -> None:
         repeated = {**FROZEN, "holdout_cases": ["demo-holdout-1"] * 3}
@@ -682,6 +685,12 @@ class InvariantRegistryTest(unittest.TestCase):
             ({**SUM, "total": None}, "total is not a lower snake case name or a finite number"),
             ({**BOUNDS, "kind": "range"}, "is not an object whose kind is bounds, monotone or "
                                           "sum"),
+            # An array or an object cannot be hashed: a finding, not a traceback.
+            ({**BOUNDS, "kind": []}, "is not an object whose kind is bounds, monotone or sum"),
+            ({**BOUNDS, "kind": {}}, "is not an object whose kind is bounds, monotone or sum"),
+            ({**MONOTONE, "direction": ["non-decreasing"]},
+             "direction is not non-decreasing or non-increasing"),
+            ({**MONOTONE, "direction": {}}, "direction is not non-decreasing or non-increasing"),
             ({**BOUNDS, "direction": "non-decreasing"}, "keys of a bounds invariant are not"),
             ({key: value for key, value in SUM.items() if key != "basis"},
              "keys of a sum invariant are not"),

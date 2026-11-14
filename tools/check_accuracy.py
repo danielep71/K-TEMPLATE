@@ -65,7 +65,7 @@ import math
 import re
 import subprocess
 import sys
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -235,6 +235,12 @@ def case_outputs(root: Path, case: str, report: Report) -> tuple[str | None, lis
     return calculation if isinstance(calculation, str) else None, outputs
 
 
+def one_of(value: object, choices: Collection[str]) -> bool:
+    """Whether a JSON value is one of the texts in ``choices``; an array or an object,
+    which cannot be hashed, is not one of them, and is a finding rather than an error."""
+    return isinstance(value, str) and value in choices
+
+
 def target_problems(data: Mapping[str, Any]) -> list[str]:
     """What is wrong with a contract's optional target, which is only reported: a
     target looser than the threshold, which blocks, would aim for nothing."""
@@ -262,14 +268,14 @@ def contract_problems(data: Mapping[str, Any]) -> list[str]:
         problems.append("quantities is not a non-empty list of lower snake case names")
     elif len(set(quantities)) != len(quantities):
         problems.append("quantities lists a name twice")
-    if data.get("metric") not in METRICS:
+    if not one_of(data.get("metric"), METRICS):
         problems.append("metric is not absolute or relative")
     if not is_number(data.get("threshold")) or data["threshold"] < 0:
         problems.append("threshold is not a finite number of at least 0")
     problems += target_problems(data)
     if not isinstance(data.get("provenance"), str) or not data["provenance"].strip():
         problems.append("provenance is not a text")
-    if data.get("status") not in STATUSES:
+    if not one_of(data.get("status"), STATUSES):
         problems.append("status is not draft or frozen")
     decision = data.get("decision")
     if data.get("status") == "frozen" and (not isinstance(decision, str) or not decision.strip()):
@@ -358,7 +364,7 @@ def invariant_problems(data: Mapping[str, Any]) -> list[str]:
         problems += bound_problems(data)
     elif kind == "monotone":
         problems += scope_problems(data.get("scope"))
-        if data.get("direction") not in DIRECTIONS:
+        if not one_of(data.get("direction"), DIRECTIONS):
             problems.append("direction is not non-decreasing or non-increasing")
         problems += sequence_problems(data.get("sequence"))
     elif kind == "sum":
@@ -404,7 +410,7 @@ def read_invariants(items: list[Any], report: Report, where: str) -> list[Invari
         name = item.get("id") if isinstance(item, dict) else None
         at = f"{where}: invariants[{index}]" + (f" {name}" if isinstance(name, str) else "")
         kind = item.get("kind") if isinstance(item, dict) else None
-        if kind not in INVARIANT_KEYS:
+        if not isinstance(kind, str) or kind not in INVARIANT_KEYS:
             report.add(at, "is not an object whose kind is bounds, monotone or sum")
             continue
         assert isinstance(item, dict)
