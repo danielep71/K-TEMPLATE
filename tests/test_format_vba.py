@@ -79,6 +79,26 @@ class RuleTest(unittest.TestCase):
                            ["Private Sub Run()", "    Debug.Print _",
                             "        Done:", "End Sub"])
 
+    def test_a_continued_comment_is_never_split_or_moved(self) -> None:
+        # A comment that ends with " _" continues onto the next line: no blank
+        # line may end it early, or its text would become code.
+        for end in ("End Sub", "End Function", "End Property"):
+            with self.subTest(end=end):
+                self.assertFormats([f"{end} ' explanation _", "    Debug.Print 1",
+                                    "Private Sub Two()", "End Sub"],
+                                   [f"{end} ' explanation _", "    Debug.Print 1", "", "",
+                                    "Private Sub Two()", "End Sub"])
+        # Comment text that looks like a label or an End statement stays put,
+        # after a space or a tab before the underscore.
+        for continued in ("    ' note _", "    ' note\t_", "    Debug.Print 1 ' note _"):
+            for text in ("        Done:", "        End Sub"):
+                with self.subTest(continued=continued, text=text):
+                    lines = ["Private Sub Run()", continued, text, "End Sub"]
+                    self.assertFormats(lines, lines)
+        # A blank line ends the continuation; the two blank lines then follow it.
+        self.assertFormats(["End Sub ' a _", "    more", "", "Private Sub Two()", "End Sub"],
+                           ["End Sub ' a _", "    more", "", "", "Private Sub Two()", "End Sub"])
+
     def test_two_blank_lines_between_procedures(self) -> None:
         self.assertFormats(["Private Sub One()", "End Sub", "'Header of Two",
                             "Private Sub Two()", "End Sub"],
@@ -205,6 +225,18 @@ class MainTest(unittest.TestCase):
             for path in files:
                 self.assertEqual(path.read_bytes().decode("latin-1"),
                                  module("Private Sub Run()", "End Sub"))
+
+    def test_folder_paths(self) -> None:
+        files = {"elsewhere/a/CORE_Probe.bas": module("  Private Sub Run()", "End Sub"),
+                 "elsewhere/b/notes.txt": "  not VBA\r\n"}
+        code, printed, root = self.run_main(files, "--write", "elsewhere")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("formatted: elsewhere/a/CORE_Probe.bas", printed)
+        self.assertEqual((root / "elsewhere/b/notes.txt").read_bytes(), b"  not VBA\r\n")
+        with contextlib.redirect_stderr(io.StringIO()) as errors:
+            code, _, _ = self.run_main({}, "--check", "missing")
+        self.assertEqual(code, 2)
+        self.assertIn("missing is not a file or folder", errors.getvalue())
 
     def test_explicit_paths(self) -> None:
         files = {"elsewhere/CORE_Probe.bas": module("  Private Sub Run()", "End Sub")}

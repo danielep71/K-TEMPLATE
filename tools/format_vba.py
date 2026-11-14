@@ -13,14 +13,18 @@ style states (*Source representation*):
 
 It never changes a string literal: every rule works on indentation, on the
 end of a line, or on whole lines it recognises outside literals, and a
-comment starts only at an apostrophe outside a literal. The header that the
+comment starts only at an apostrophe outside a literal. A line that ends with
+a space or tab and an underscore continues on the next one, a comment
+included: the lines that continue it are never moved, and no blank line is
+inserted before them. The header that the
 VBE writes (VERSION, BEGIN ... END, Object and Attribute lines) is kept byte
 for byte.
 
 --check reports each file that differs from its formatted form; --write
-rewrites it. Without paths it formats the .bas, .cls and .frm files under the
-source directories of docs/REPOSITORY_STRUCTURE.md, and passes when there is
-none. It neither compiles nor runs VBA.
+rewrites it. A path may name a module or a folder, whose .bas, .cls and .frm
+files are formatted. Without paths it formats those files under the source
+directories of docs/REPOSITORY_STRUCTURE.md, and passes when there is none.
+It neither compiles nor runs VBA.
 """
 
 from __future__ import annotations
@@ -42,6 +46,9 @@ PROCEDURE = re.compile(r"^(?:(?:Public|Private|Friend)\s+)?(?:Static\s+)?"
 PROCEDURE_END = re.compile(r"^End\s+(?:Sub|Function|Property)\b", re.I)
 LABEL = re.compile(r"^[A-Za-z_]\w*:$")
 HEADER_LINE = re.compile(r"^(?:VERSION\s|Object\s*=|Attribute\s)", re.I)
+# A space or tab and an underscore at the end of a line continue it, in code
+# and in a comment alike.
+CONTINUED = re.compile(r"[ \t]_$")
 
 
 def split_code_comment(line: str) -> tuple[str, str]:
@@ -93,18 +100,21 @@ def format_body(lines: Sequence[str]) -> list[str]:
     for raw in lines:
         line = expand_indentation(raw.rstrip())
         if not line:
+            # A blank line ends a continued statement or comment.
+            continued = False
             if not pending_end:
                 out.append(line)
             continue
-        if pending_end:
-            # Two blank lines between a procedure's End and what follows it.
+        if pending_end and not continued:
+            # Two blank lines between a procedure's End and what follows it,
+            # once the End statement and any comment it continues are over.
             out.extend(["", ""])
             pending_end = False
         if not continued and outer_level(line):
             line = line.lstrip()
             pending_end = bool(PROCEDURE_END.match(split_code_comment(line)[0].strip()))
         out.append(line)
-        continued = split_code_comment(line)[0].rstrip().endswith(" _")
+        continued = bool(CONTINUED.search(line))
     while out and not out[-1]:
         out.pop()
     return out
@@ -120,11 +130,27 @@ def format_text(text: str) -> str:
     return "".join(f"{line}\r\n" for line in [*lines[:split], *body])
 
 
+def modules_under(folder: Path) -> list[Path]:
+    return [path for path in sorted(folder.rglob("*"))
+            if path.is_file() and path.suffix.lower() in EXTENSIONS]
+
+
 def source_files(root: Path) -> list[Path]:
-    files = [path for directory in SOURCE_DIRECTORIES
-             for path in sorted((root / directory).rglob("*"))
-             if path.is_file() and path.suffix.lower() in EXTENSIONS]
+    files = [path for directory in SOURCE_DIRECTORIES for path in modules_under(root / directory)]
     return sorted(set(files))
+
+
+def named_files(paths: Sequence[Path]) -> list[Path]:
+    """The modules that the named paths stand for: a file as itself, a folder's modules."""
+    files: list[Path] = []
+    for path in paths:
+        if path.is_dir():
+            files.extend(modules_under(path))
+        elif path.is_file():
+            files.append(path)
+        else:
+            raise FileNotFoundError(path)
+    return files
 
 
 def shown(path: Path, root: Path) -> str:
@@ -150,8 +176,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                         help="files to format (default: the VBA source directories)")
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    paths = [path if path.is_absolute() else root / path for path in args.paths] or \
-        source_files(root)
+    named = [path if path.is_absolute() else root / path for path in args.paths]
+    try:
+        paths = named_files(named) if named else source_files(root)
+    except FileNotFoundError as missing:
+        print(f"vba-format: ERROR: {shown(Path(str(missing)), root)} is not a file or folder",
+              file=sys.stderr)
+        return 2
     if not paths:
         print("vba-format: PASS (no VBA source found)")
         return 0

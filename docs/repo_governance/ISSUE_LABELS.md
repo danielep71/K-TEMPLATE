@@ -10,7 +10,7 @@ This repository defines 20 issue labels, each with a name, description, and colo
 | --- | --- |
 | Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Refuses to delete a label in use. Verifies the exact live result. |
 | Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. Each report is cross-checked against the reconciler's plan on the same snapshot: the script writes the live labels it read to a temporary file, runs `labels-sync.mjs --mode plan` on it, and fails (status `fail`) if the two plans differ; the evidence then carries both plans under `cross_check`. |
-| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, target end date or dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; invalid labels; and inconsistent blocked status. |
+| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, target end date or dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; open issues whose dependency sections form a cycle; invalid labels; and inconsistent blocked status. |
 | Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. It reads each pull request again after the change and fails if the milestone is still set; its job summary lists each pull request and the milestone removed. If GitHub gives a pull-request run a read-only token, the run warns instead of failing, and the next daily or manual scan removes the milestone. It never checks out pull-request code. |
 | Dependabot (`.github/dependabot.yml`) | Opens weekly grouped pull requests for the SHA-pinned GitHub Actions, the hash-locked configuration parser, and the hash-locked Python quality tools, labelled `ci` and `P3` and assigned to me. Nothing merges automatically. |
 
@@ -86,6 +86,8 @@ When both are present, that line takes precedence over the form field, so edit t
 - a pull request named there is a known reference, never a prerequisite: to wait for one, name the issue it resolves;
 - write `None` when nothing blocks the work.
 
+Open issues whose dependency sections name each other in a cycle, such as #1 waiting for #2 and #2 for #1, can never be unblocked by finishing work: **Issue triage** reports each issue of the cycle until one dependency is removed or replaced with an `External condition:` line.
+
 A blocked issue, for example:
 
 ```markdown
@@ -100,9 +102,11 @@ A blocked issue, for example:
 
 Close an issue as completed only when linked evidence meets its acceptance criteria, and check an acceptance box only when that evidence demonstrates it. When the issue is closed, add a **Resolution** section to its body with:
 
-- links to the change (pull request and commit);
-- the checks actually run, with their results;
-- what was not validated, and any accepted limitation.
+- the change: the pull request and the merge commit;
+- the checks actually run, with their results, including the Excel run and its case and assertion counts when the change touched VBA source, a workbook layout or a test case that runs in Excel ([Excel run](PULL_REQUESTS.md#-excel-run));
+- what was not validated, any deviation from the proposed fix, and any accepted limitation.
+
+An issue closed after its change merged into a release branch `release/X.Y.Z` goes into milestone `vX.Y.Z`, the version that contains it, whatever milestone it was planned in; say so in the Resolution when you move it.
 
 Close for another reason (duplicate, not planned, or superseded) only with an explicit explanation; the `duplicate`, `invalid`, and `wontfix` rows above say which label applies. Record material scope or policy decisions in the issue, pull request, or commit description.
 

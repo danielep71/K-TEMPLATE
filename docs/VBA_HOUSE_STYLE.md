@@ -199,7 +199,7 @@ each failed restoration, and a primary and cleanup failure together.
 
 `python tools/format_vba.py --write` applies the mechanical part of these
 rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
-`examples/modules/`:
+`examples/modules/`, or to the modules and folders you name:
 
 - CRLF line endings and one final line ending;
 - no trailing white space, and four spaces for each indentation tab;
@@ -208,7 +208,10 @@ rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
 - two blank lines after each procedure's `End` statement.
 
 It never changes a string literal, and it keeps the `VERSION`, `BEGIN`, `END`,
-`Object` and `Attribute` lines that the VBE writes. **Repository integrity**
+`Object` and `Attribute` lines that the VBE writes. A line that ends with a
+space or tab and `_` continues on the next one, in a comment as in code: the
+lines that continue it stay where they are, and the blank lines after an
+`End` statement follow the end of what it continues. **Repository integrity**
 runs it with `--check`. Re-import a module it rewrote into the VBE before
 committing, so that the workbook and the source stay the same. It neither
 compiles nor checks the other rules of this guide.

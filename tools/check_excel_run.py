@@ -104,6 +104,20 @@ names it. This check is not a run input: run it from a checkout of the
 commit to certify. The workbook's stamp and the results still name the
 commit it was built from, so the report names both commits.
 
+With --carried-to, a run is carried to a commit that changes only comments or
+layout in VBA components: the evidence is checked against --commit as with
+--equivalent-to, and every run input must have the same Git blob at both
+commits, except a VBA component (.bas, .cls, .frm) present at both that holds
+the same code, as tools/vba_code_identity.py compares it: comments, line
+continuations, blank lines, white space between tokens and the letter case of
+code may differ, nothing else. A form's .frx stays byte for byte, and a
+component added, removed or renamed is a finding. A component that uses [ or
+] outside a string literal is never carried. The report labels the result
+"Carried from <run commit>" with the components carried. The label is derived
+on every check and never written anywhere: carried evidence is not evidence
+of the exact commit, and a release accepts only a run of the candidate or one
+--equivalent-to proves identical.
+
 It proves only that this evidence is consistent with the commit. It does not
 run Excel, and a PASS validates a calculation only as far as the commit's
 accuracy contracts and their reference values do.
@@ -133,6 +147,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_accuracy  # noqa: E402
 import check_vba_conditionals  # noqa: E402
+import vba_code_identity  # noqa: E402
 import vba_lexer  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "devbuild"))
@@ -398,6 +413,8 @@ class Evidence:
     accuracy: list[str] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     equivalence: str = ""
+    # With --carried-to: the report's "Carried from" line, derived on each check.
+    carried: str = ""
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -1276,10 +1293,30 @@ def run_input_paths(directories: set[str], paths: set[str]) -> set[str]:
             or any(path.startswith(f"{home}/") for home in homes)}
 
 
-def check_equivalence(root: Path, commit: str, target: str, evidence: Evidence) -> None:
+def carry_component(root: Path, commit: str, target: str, path: str,
+                    evidence: Evidence) -> bool:
+    """Whether the VBA component ``path``, at both commits, holds the same code at
+    ``target`` as at ``commit``; a finding names the first change otherwise."""
+    try:
+        names = vba_code_identity.carried(root, path, commit, target)
+    except vba_code_identity.CarryRefused as error:
+        evidence.findings.append(f"run input {path}: {error}, so the run is not carried to "
+                                 f"{target[:12]}")
+        return False
+    if names:
+        evidence.notes.append(f"{path}: {len(names)} identifier(s) re-cased between "
+                              f"{commit[:12]} and {target[:12]}, as the VBE re-cases a name "
+                              f"(HB-01): {', '.join(names)}")
+    return True
+
+
+def check_equivalence(root: Path, commit: str, target: str, evidence: Evidence,
+                      carry: bool = False) -> None:
     """Every run input has the same Git blob at ``commit``, the commit the workbook
     was built from, and at ``target``, the commit to certify; a finding names each
-    one that differs or exists at only one of them."""
+    one that differs or exists at only one of them. With ``carry``, a VBA
+    component at both commits may differ in comments and layout only
+    (--carried-to); a form's .frx and every other run input may not."""
     try:
         directories = configured_directories(root, commit) | \
             configured_directories(root, target)
@@ -1290,21 +1327,45 @@ def check_equivalence(root: Path, commit: str, target: str, evidence: Evidence) 
         return
     inputs = run_input_paths(directories, set(built) | set(other))
     changed = sorted(path for path in inputs if built.get(path) != other.get(path))
+    carried: list[str] = []
+    refused = 0
     for path in changed:
+        if carry and path in built and path in other and path.lower().endswith(VBA_SUFFIXES):
+            if carry_component(root, commit, target, path, evidence):
+                carried.append(path)
+            else:
+                refused += 1
+            continue
+        refused += 1
         where = (f"only at {commit[:12]}, not at {target[:12]}" if path not in other else
                  f"only at {target[:12]}, not at {commit[:12]}" if path not in built else
                  f"differs between {commit[:12]} and {target[:12]}")
-        evidence.findings.append(f"run input {path}: {where}, so the run does not certify "
-                                 f"{target[:12]}")
-    if not changed:
+        verdict = f"is not carried to {target[:12]}" if carry else \
+            f"does not certify {target[:12]}"
+        evidence.findings.append(f"run input {path}: {where}, so the run {verdict}")
+    if refused:
+        return
+    if not carry:
         evidence.equivalence = f"{target} ({len(inputs)} run inputs identical to {commit})"
+        return
+    same = len(inputs) - len(carried)
+    listed = (f"{', '.join(carried)} differ only in comments or layout; the other {same} run "
+              "inputs are identical" if carried else
+              f"no VBA component changed; all {same} run inputs are identical")
+    evidence.carried = (f"Carried from {commit[:12]}: {listed}. Carried evidence never "
+                        "certifies a release")
 
 
 def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
-          require_binding: bool = False, equivalent_to: str | None = None) -> Evidence:
+          require_binding: bool = False, equivalent_to: str | None = None,
+          carried_to: str | None = None) -> Evidence:
     evidence = Evidence()
+    if equivalent_to is not None and carried_to is not None:
+        raise ValueError("--equivalent-to and --carried-to exclude each other")
     if equivalent_to is not None:
         check_equivalence(root, commit, equivalent_to, evidence)
+    if carried_to is not None:
+        check_equivalence(root, commit, carried_to, evidence, carry=True)
     try:
         policy = policy_at(root, commit)
     except PolicyError as error:
@@ -1357,6 +1418,8 @@ def check(root: Path, commit: str, folder: Path, workbook: Path | None = None,
 
 
 def report(commit: str, evidence: Evidence, equivalent_to: str | None = None) -> str:
+    """The report; ``equivalent_to`` is the commit to certify with --equivalent-to or
+    --carried-to, whichever was given."""
     environment = "; ".join(f"{key}={evidence.environment.get(key, '')}"
                             for key in ENVIRONMENT_FIELDS)
     lines = [f"Candidate commit: {equivalent_to or commit}"]
@@ -1381,6 +1444,8 @@ def report(commit: str, evidence: Evidence, equivalent_to: str | None = None) ->
     lines.append(f"Binding: {evidence.binding}{notes}")
     if evidence.equivalence:
         lines.append(f"Equivalent: {evidence.equivalence}")
+    if evidence.carried:
+        lines.append(evidence.carried)
     lines += [f"FAIL: {finding}" for finding in evidence.findings]
     status = "FAIL" if evidence.findings else "PASS"
     lines.append(f"excel-run: {status} (evidence checked against the commit; Excel is not run "
@@ -1401,17 +1466,24 @@ def main(argv: Sequence[str] | None = None) -> int:
                              "rebuild of the commit")
     parser.add_argument("--require-binding", action="store_true",
                         help="fail unless the binding is VERIFIED (release evidence)")
-    parser.add_argument("--equivalent-to", metavar="SHA",
-                        help="the full SHA of a commit to certify with this run: every run "
-                             "input must have the same Git blob there as at --commit")
+    other = parser.add_mutually_exclusive_group()
+    other.add_argument("--equivalent-to", metavar="SHA",
+                       help="the full SHA of a commit to certify with this run: every run "
+                            "input must have the same Git blob there as at --commit")
+    other.add_argument("--carried-to", metavar="SHA",
+                       help="the full SHA of a commit to carry this run to: as "
+                            "--equivalent-to, except that a VBA component may differ in "
+                            "comments and layout only; never release evidence")
     parser.add_argument("--root", type=Path, default=ROOT)
     args = parser.parse_args(argv)
     root = args.root.resolve()
-    if args.equivalent_to is not None and not check_accuracy.SHA.fullmatch(args.equivalent_to):
-        print(f"FAIL: --equivalent-to {args.equivalent_to}: not a full lower-case commit SHA")
-        return 1
+    for option, value in (("--equivalent-to", args.equivalent_to),
+                          ("--carried-to", args.carried_to)):
+        if value is not None and not check_accuracy.SHA.fullmatch(value):
+            print(f"FAIL: {option} {value}: not a full lower-case commit SHA")
+            return 1
     resolved = []
-    for name in (args.commit, args.equivalent_to):
+    for name in (args.commit, args.equivalent_to or args.carried_to):
         if name is None:
             continue
         try:
@@ -1421,7 +1493,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"FAIL: commit {name} not found: {error}")
             return 1
     commit, target = resolved[0], (resolved[1] if len(resolved) > 1 else None)
-    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding, target)
+    carried_to = target if args.carried_to is not None else None
+    evidence = check(root, commit, args.evidence, args.workbook, args.require_binding,
+                     target if carried_to is None else None, carried_to)
     print(report(commit, evidence, target))
     return 1 if evidence.findings else 0
 

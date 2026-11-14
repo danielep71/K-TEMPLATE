@@ -13,9 +13,14 @@ name: Release
 # The verification is fail-closed: an annotated vX.Y.Z tag equal to the
 # newest changelog release and to VERSION, on the default branch, whose
 # message names the candidate and its deviations, on a commit where
-# Repository integrity succeeded (tools/release.py). The Excel certification
-# and the distribution review stay records in their issues; the tag message
-# cites them.
+# Repository integrity succeeded (tools/release.py). When the commit holds a
+# VBA component, the message must also declare its Excel run, with the
+# "Excel evidence: <digest> (run <sha>)." line that tools/release.py evidence
+# prints, or an invariant 4 deviation. Only the line's form is checked here:
+# the evidence never leaves the machine of the run, where release.py verify
+# checks it against the line before the tag is pushed (RELEASING.md, steps 4
+# and 6). The Excel certification and the distribution review stay records in
+# their issues; the tag message cites them.
 #
 # Attestations are free on a public repository. A private one needs GitHub
 # Enterprise Cloud for them; there, set the repository variable

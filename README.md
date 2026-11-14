@@ -202,6 +202,7 @@ flowchart LR
 | **Sync issue labels** · **Detect issue-label drift** | Catalogue changes · daily | The live labels against `.github/labels.json`, never deleting one in use |
 | **Detect settings drift** | Daily | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
 | **Issue triage** | Issue and milestone events | Assignee, one priority, an open milestone, a target end date and a dependency section on every open issue |
+| **Closing keywords** | Pull request events | The closing keywords a pull request would carry to the default branch: none into a release branch, none for an open issue in an integration |
 | **Keep milestones issue-only** | Pull request events and daily | Removes any milestone set on a pull request, and lists each removal |
 | **Release** | A pushed `vX.Y.Z` tag | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |
 | **Traffic history** | Daily, optional | Collects clones and visitors for the badges above |

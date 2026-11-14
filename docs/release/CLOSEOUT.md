@@ -51,7 +51,7 @@ and the Excel checks of an attached workbook stay manual
 
 | # | Criterion | Evidence | Done |
 | ---: | --- | --- | :---: |
-| 1 | Every issue of the milestone is closed with a Resolution, or moved with a reason | Evidence index | ☐ |
+| 1 | Every issue of the milestone is closed with a Resolution, or moved with a reason; every issue closed through `release/X.Y.Z` is in this milestone | Evidence index | ☐ |
 | 2 | The documented setup reproduces from a fresh checkout of the candidate | Candidate record | ☐ |
 | 3 | Repository integrity is green on the candidate | Run link | ☐ |
 | 4 | Live labels match the catalogue, and Issue triage passes | Live label drift and Issue triage run links | ☐ |

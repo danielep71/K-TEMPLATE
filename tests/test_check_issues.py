@@ -157,6 +157,53 @@ class DependencyTests(unittest.TestCase):
                 f"- https://github.com/{REPOSITORY}/issues/1\n")
         self.assertEqual(rules([issue(2, "P3", BLOCKED_LABEL, body=body), issue(1)]), [])
 
+    def test_a_dependency_cycle_is_reported_on_each_member(self) -> None:
+        cycle = [issue(1, "P3", BLOCKED_LABEL, body=blocked_by(2)),
+                 issue(2, "P3", BLOCKED_LABEL, body=blocked_by(3)),
+                 issue(3, "P3", BLOCKED_LABEL, body=blocked_by(1))]
+        self.assertEqual(rules(cycle), [(1, "dependency-cycle"), (2, "dependency-cycle"),
+                                        (3, "dependency-cycle")])
+        findings = check_issues.audit(cycle, {1: "open", 2: "open", 3: "open"}, REPOSITORY,
+                                      assignee="triage-person")
+        self.assertIn("is in a dependency cycle: #1, #2, #3", findings[0].message)
+        pair = [issue(4, "P3", BLOCKED_LABEL, body=blocked_by(5)),
+                issue(5, "P3", BLOCKED_LABEL, body=blocked_by(4))]
+        self.assertEqual(rules(pair), [(4, "dependency-cycle"), (5, "dependency-cycle")])
+
+    def test_chains_and_issues_pointing_into_a_cycle_are_not_cycles(self) -> None:
+        chain = [issue(1, "P3", BLOCKED_LABEL, body=blocked_by(2)),
+                 issue(2, "P3", BLOCKED_LABEL, body=blocked_by(3)), issue(3)]
+        self.assertEqual(rules(chain), [])
+        into = [issue(1, "P3", BLOCKED_LABEL, body=blocked_by(2)),
+                issue(2, "P3", BLOCKED_LABEL, body=blocked_by(3)),
+                issue(3, "P3", BLOCKED_LABEL, body=blocked_by(2)),
+                issue(6, "P3", BLOCKED_LABEL, body=blocked_by(7)),
+                issue(7, "P3", BLOCKED_LABEL, body=blocked_by(6))]
+        self.assertEqual(rules(into), [(2, "dependency-cycle"), (3, "dependency-cycle"),
+                                       (6, "dependency-cycle"), (7, "dependency-cycle")])
+
+    def test_closed_issues_pull_requests_and_text_outside_the_section_break_a_cycle(self) -> None:
+        through_closed = [issue(1, body=blocked_by(2)),
+                          issue(2, state="closed", body=blocked_by(1))]
+        self.assertEqual(rules(through_closed), [])
+        through_pull = [issue(1, "P3", BLOCKED_LABEL, body=blocked_by(2)),
+                        issue(2, "P3", BLOCKED_LABEL, body=blocked_by(9))]
+        self.assertEqual(rules(through_pull, {1: "open", 2: "open"}, frozenset({9})),
+                         [(2, "blocked")])
+        # blocked_by() names #99 under Tracking, outside the section.
+        outside = [issue(1, "P3", BLOCKED_LABEL, body=blocked_by(99)), issue(99)]
+        self.assertEqual(rules(outside), [])
+        # A self-reference is not a cycle.
+        self.assertEqual(rules([issue(1, body=blocked_by(1))]), [])
+
+    def test_a_long_chain_does_not_exceed_the_recursion_limit(self) -> None:
+        count = 2500
+        chain = [issue(n, "P3", BLOCKED_LABEL, body=blocked_by(n + 1)) for n in range(1, count)]
+        chain.append(issue(count, "P3", BLOCKED_LABEL, body=blocked_by(1)))
+        found = rules(chain)
+        self.assertEqual(len(found), count)
+        self.assertEqual(found[0], (1, "dependency-cycle"))
+
     def test_missing_section_and_unknown_reference(self) -> None:
         self.assertEqual(rules([issue(1, body="## Objective\n\nx\n")]), [(1, "dependencies")])
         self.assertEqual(rules([issue(2, "P3", BLOCKED_LABEL, body=blocked_by(7))]),
@@ -294,6 +341,29 @@ class MainTests(unittest.TestCase):
             self.assertEqual(report["status"], "fail")
             self.assertEqual([f["rule"] for f in report["findings"]], ["milestone"])
             self.assertIn("open issues audited: 1", stdout.getvalue())
+
+    def test_input_mode_reports_a_dependency_cycle(self) -> None:
+        def item(number: int, prerequisite: int) -> dict[str, object]:
+            return {"number": number, "state": "open",
+                    "labels": [{"name": "P3"}, {"name": BLOCKED_LABEL}],
+                    "assignees": [{"login": "triage-person"}],
+                    "milestone": {"title": "v0.1.0", "state": "open",
+                                  "due_on": "2026-11-30T00:00:00Z"},
+                    "body": PLANNING.format("2026-11-04") + blocked_by(prerequisite)}
+
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "issues.json"
+            source.write_text(json.dumps([item(1, 2), item(2, 1)]), encoding="utf-8")
+            output = Path(directory) / "report.json"
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    unittest.mock.patch.object(check_issues, "configured_assignee",
+                                               return_value="triage-person"):
+                code = check_issues.main(["--root", str(ROOT), "--input", str(source),
+                                          "--output", str(output), "--repo-name", REPOSITORY])
+            self.assertEqual(code, 1)
+            report = json.loads(output.read_text(encoding="utf-8"))
+            self.assertEqual([(f["number"], f["rule"]) for f in report["findings"]],
+                             [(1, "dependency-cycle"), (2, "dependency-cycle")])
 
     def test_live_mode_reads_every_page_and_refuses_partial_lists(self) -> None:
         def item(number: int) -> dict[str, object]:

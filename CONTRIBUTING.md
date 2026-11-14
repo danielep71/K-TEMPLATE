@@ -44,10 +44,19 @@ closed, with a *Resolution* section.
   `docs:`, `ci:` or `chore:`.
 - The body says why, and what was validated: the checks you ran, and what was
   not run, such as an Excel run.
-- The last line references the issue, `Refs #N` or `Resolves #N`.
+- The last line references the issue with `Refs #N`.
+- A closing keyword, such as `Resolves #N`, `Fixes #N` or `Closes #N`, belongs
+  only in a pull request into the default branch, or a commit that lands there,
+  while no release branch is active, and only for an issue that it completes.
+  GitHub closes an issue when a commit whose message names it with a keyword
+  reaches the default branch. A commit merged into a release branch reaches it
+  at the integration, whatever the state of the issue by then, and it cannot be
+  changed after the merge. The
+  [release branches](docs/repo_governance/PULL_REQUESTS.md#-release-branches)
+  section explains how the **Closing keywords** workflow checks this.
 
 A squashed pull request becomes one commit, and its message follows the same
-rule.
+rules: its title and body become the message, so they use `Refs #N` too.
 
 ## 📏 Rules of evidence
 

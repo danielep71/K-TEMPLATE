@@ -186,6 +186,83 @@ def dependency_findings(issue: Issue, states: Mapping[int, str], repository: str
     return findings
 
 
+def strongly_connected(graph: Mapping[int, Sequence[int]]) -> list[list[int]]:
+    """The strongly connected components of a directed graph, by Tarjan's method.
+
+    Iterative, so that a long chain of dependencies cannot exceed the recursion
+    limit; nodes and edges are visited in ascending order, so the result is
+    deterministic.
+    """
+    index: dict[int, int] = {}
+    low: dict[int, int] = {}
+    stack: list[int] = []
+    on_stack: set[int] = set()
+    components: list[list[int]] = []
+    for start in sorted(graph):
+        if start in index:
+            continue
+        work: list[tuple[int, int]] = [(start, 0)]
+        while work:
+            node, position = work.pop()
+            if position == 0:
+                index[node] = low[node] = len(index)
+                stack.append(node)
+                on_stack.add(node)
+            successors = graph.get(node, ())
+            for offset, successor in enumerate(successors[position:], start=position):
+                if successor not in index:
+                    work.append((node, offset + 1))
+                    work.append((successor, 0))
+                    break
+                if successor in on_stack:
+                    low[node] = min(low[node], index[successor])
+            else:
+                if low[node] == index[node]:
+                    component = []
+                    while True:
+                        member = stack.pop()
+                        on_stack.discard(member)
+                        component.append(member)
+                        if member == node:
+                            break
+                    components.append(sorted(component))
+                if work:
+                    parent = work[-1][0]
+                    low[parent] = min(low[parent], low[node])
+    return components
+
+
+def cycle_findings(issues: Sequence[Issue], states: Mapping[int, str],
+                   repository: str) -> list[Finding]:
+    """A finding for each open issue in a cycle of open issues' dependency sections.
+
+    An edge runs from an open issue to each open issue its dependency section
+    names, as for the ``blocked`` rule; closed issues, pull requests, missing
+    numbers, external conditions and references outside the section form none.
+    Such a cycle can never be unblocked by finishing work.
+    """
+    graph: dict[int, list[int]] = {}
+    for issue in issues:
+        if issue.state != "open":
+            continue
+        section = dependency_section(issue.body)
+        named = references(section, repository, issue.number) if section is not None else set()
+        graph[issue.number] = sorted(n for n in named if states.get(n) == "open")
+    open_numbers = set(graph)
+    graph = {node: [n for n in edges if n in open_numbers] for node, edges in graph.items()}
+    findings = []
+    for component in strongly_connected(graph):
+        if len(component) < 2:
+            continue
+        listed = ", ".join(f"#{n}" for n in component)
+        findings += [Finding(number, "dependency-cycle",
+                             f"is in a dependency cycle: {listed}; remove one of the "
+                             "dependencies, or name what each waits for on an "
+                             "External condition: line")
+                     for number in component]
+    return sorted(findings, key=lambda finding: finding.number)
+
+
 def audit(issues: Sequence[Issue], states: Mapping[int, str], repository: str,
           catalogue: set[str] | None = None, pulls: Collection[int] = (),
           *, assignee: str) -> list[Finding]:
@@ -203,7 +280,7 @@ def audit(issues: Sequence[Issue], states: Mapping[int, str], repository: str,
                                  "which is not in the catalogue that .github/labels.json "
                                  "resolves (core and selected overlays)")
                          for label in issue.labels if label not in catalogue]
-    return findings
+    return findings + cycle_findings(issues, states, repository)
 
 
 def catalogue_labels(root: Path) -> set[str]:

@@ -95,10 +95,12 @@ def strip_code(raw: str, *, blank_strings: bool = False) -> str:
     outside [...] (where it quotes a sheet name, as in ['Sheet 1'!A1]), or
     from Rem where a statement starts (at the line start, after a numeric line
     label such as ``100``, or after a ``:`` separator, not after a ``:=``
-    named argument). With ``blank_strings`` the content of string literals
-    and of [...] expressions becomes spaces, so that keywords quoted in a
-    string or a sheet name are not read as code; the brackets stay, and
-    columns are preserved either way."""
+    named argument). Inside [...], as in [A1:Rem], a colon is a range
+    operator and Rem a name: neither starts a statement there. With
+    ``blank_strings`` the content of string literals and of [...] expressions
+    becomes spaces, so that keywords quoted in a string or a sheet name are
+    not read as code; the brackets stay, and columns are preserved either
+    way."""
     label = LINE_NUMBER.match(raw)
     index = label.end() if label else 0
     result: list[str] = [raw[:index]]
@@ -114,8 +116,8 @@ def strip_code(raw: str, *, blank_strings: bool = False) -> str:
                 continue
             in_string = not in_string
             result.append(" " if blank_strings else char)
-        elif not in_string and ((char == "'" and not brackets)
-                                or (statement_start and REM.match(raw, index))):
+        elif not in_string and not brackets and (
+                char == "'" or (statement_start and REM.match(raw, index))):
             break
         else:
             hidden = in_string or (brackets and char not in "[]")
@@ -124,7 +126,8 @@ def strip_code(raw: str, *, blank_strings: bool = False) -> str:
             brackets += 1
         elif not in_string and char == "]" and brackets:
             brackets -= 1
-        if not in_string and char == ":" and raw[index + 1:index + 2] != "=":
+        if not in_string and not brackets and char == ":" \
+                and raw[index + 1:index + 2] != "=":
             statement_start = True
         elif not char.isspace():
             statement_start = False

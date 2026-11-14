@@ -3,7 +3,7 @@
 
 Subcommands, all read-only apart from the files that bundle writes:
 
-- verify TAG --default-branch BRANCH
+- verify TAG --default-branch BRANCH [--excel-evidence DIR --workbook FILE]
   Fails unless:
   - TAG is vX.Y.Z and annotated;
   - X.Y.Z is the newest dated release of CHANGELOG.md and the content of
@@ -11,7 +11,35 @@ Subcommands, all read-only apart from the files that bundle writes:
   - the tag's commit is on origin/BRANCH;
   - the tag message names that commit on a "Candidate <sha>." line and has
     a "Deviations:" line followed by text on the same line, such as "none",
-    or by a list on the next lines, as RELEASING.md requires.
+    or by a list on the next lines, as RELEASING.md requires;
+  - when the tag's commit holds a VBA component (a .bas, .cls or .frm file
+    anywhere in its tree, as tools/check_excel_run.py compares them), the
+    message declares its Excel run on one line
+    "Excel evidence: <digest> (run <run sha>)." or lists an
+    "- Invariant 4: <text>" item under "Deviations:". "Deviations: none."
+    does not waive the run. A line that starts "Excel evidence:" in any
+    other form fails, with or without a VBA component.
+  Without --excel-evidence, as in the Release workflow, the declaration is
+  checked for its form only: the evidence never leaves the machine it was
+  recorded on. With --excel-evidence and --workbook, on that machine before
+  the tag is pushed, the message must declare the evidence, and the gate of
+  the evidence subcommand must pass for the tag's commit and the declared run
+  commit, with the declared digest.
+- evidence COMMIT --excel-evidence DIR --workbook FILE [--run-commit SHA]
+  The Excel evidence gate, run before tagging. It runs the checks of
+  tools/check_excel_run.py with --require-binding on the evidence folder DIR
+  and the workbook FILE, in process: against COMMIT, or against SHA, the
+  commit the workbook was built from, with --equivalent-to COMMIT, so that
+  every run input must have the same Git blob at both commits. It fails on
+  any finding, on a binding other than VERIFIED, on a run of another commit
+  without the Equivalent result, and on carried evidence, which it never
+  asks for. On success it prints the evidence digest and the line to put in
+  the tag message. The digest is the SHA-256 of a listing, one line
+  "<sha256 of the file>  evidence/<path>" for each file under DIR, sorted
+  by its path relative to DIR with "/" separators, then one line
+  "<sha256 of FILE>  workbook", each line ending in a line feed. The same
+  files give the same digest wherever they are; the workbook's name does not
+  count.
 - integrity --repository OWNER/NAME --sha SHA
   Fails unless the check run Repository integrity succeeded on SHA. It reads
   the check runs through the GitHub CLI.
@@ -42,7 +70,8 @@ Subcommands, all read-only apart from the files that bundle writes:
   is copied to a temporary file, removed afterwards, for gh attestation.
 
 Standard library only, apart from git, and gh for integrity and
-verify-published.
+verify-published. The Excel evidence gate imports tools/check_excel_run.py
+only when evidence is given.
 """
 
 from __future__ import annotations
@@ -57,11 +86,16 @@ import sys
 import tempfile
 import urllib.parse
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from check_changelog import CHANGELOG, VERSION, released_versions  # noqa: E402
+
+if TYPE_CHECKING:
+    import check_excel_run
 
 ROOT = Path(__file__).resolve().parents[1]
 TAG = re.compile(r"^v(\d+\.\d+\.\d+)$")
@@ -77,11 +111,23 @@ SUMS = "SHA256SUMS"
 # The sentence the Release workflow adds to the notes of an unattested draft.
 UNATTESTED = "The source bundle has no build provenance attestation"
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
+# The VBA components whose presence requires an Excel run, as
+# tools/check_excel_run.py components() reads them; a form's .frx goes with
+# its .frm.
+VBA_SUFFIXES = (".bas", ".cls", ".frm")
+# The tag message's declaration of the Excel evidence, which the evidence
+# subcommand prints; any other line that starts with its label is malformed.
+EXCEL_EVIDENCE = "Excel evidence:"
+EXCEL_LINE = re.compile(r"^Excel evidence: ([0-9a-f]{64}) \(run ([0-9a-f]{40})\)\.[ \t]*$")
+INVARIANT_4 = re.compile(r"^Invariant 4:[ \t]*\S")
+LIST_ITEM = re.compile(r"^[ \t]*[-*][ \t]+(.*)$")
 
 # Runs gh with the arguments given and returns the completed process, with
 # stdout and stderr as bytes. Tests replace it with a fake.
 Runner = Callable[[Sequence[str]], "subprocess.CompletedProcess[bytes]"]
 Fact = tuple[str, str]  # PASS, FAIL or NOTE, and what was found
+# check_excel_run.check, or a fake in the tests.
+Checker = Callable[..., "check_excel_run.Evidence"]
 
 
 def run_gh(args: Sequence[str]) -> subprocess.CompletedProcess[bytes]:
@@ -108,8 +154,12 @@ def version_of(tag: str) -> str:
     return match.group(1)
 
 
-def verify(root: Path, tag: str, default_branch: str) -> list[str]:
-    """Every reason the tag cannot be released; empty when it can."""
+def verify(root: Path, tag: str, default_branch: str,
+           evidence: tuple[Path, Path] | None = None,
+           checker: Checker | None = None) -> list[str]:
+    """Every reason the tag cannot be released; empty when it can. With
+    ``evidence``, the evidence folder and the workbook, the declared Excel
+    evidence is checked too (``checker`` replaces check_excel_run.check)."""
     try:
         version = version_of(tag)
     except ReleaseError as error:
@@ -150,7 +200,155 @@ def verify(root: Path, tag: str, default_branch: str) -> list[str]:
         if not DEVIATIONS.search(message):
             problems.append(f"the message of {tag} has no 'Deviations:' line followed by "
                             "text, such as 'none', or by a list")
+        problems += excel_declaration(root, tag, commit, message)
+        if evidence is not None:
+            problems += declared_evidence(root, tag, commit, message, evidence, checker)
+    elif evidence is not None:
+        problems.append(f"{tag} has no message to declare the Excel evidence in")
     return problems
+
+
+def holds_vba(root: Path, commit: str) -> bool:
+    """Whether the commit's tree holds a VBA component, at any depth."""
+    listed = git(root, "ls-tree", "-r", "-z", "--name-only", commit).split("\0")
+    return any(path.lower().endswith(VBA_SUFFIXES) for path in listed)
+
+
+def deviation_items(message: str) -> list[str]:
+    """The items listed under the first "Deviations:" line, each with the lines
+    indented under it."""
+    lines = message.splitlines()
+    start = next((index for index, line in enumerate(lines)
+                  if line.startswith("Deviations:")), None)
+    if start is None:
+        return []
+    items: list[str] = []
+    for line in lines[start + 1:]:
+        item = LIST_ITEM.match(line)
+        if item:
+            items.append(item.group(1).strip())
+        elif items and line[:1] in (" ", "\t") and line.strip():
+            items[-1] += " " + line.strip()
+        else:
+            break
+    return items
+
+
+def excel_lines(message: str) -> list[str]:
+    return [line for line in message.splitlines() if line.startswith(EXCEL_EVIDENCE)]
+
+
+def excel_declaration(root: Path, tag: str, commit: str, message: str) -> list[str]:
+    """Why the message does not declare the Excel run that the commit needs: an
+    evidence line, or an invariant 4 deviation. Only the form is checked."""
+    lines = excel_lines(message)
+    problems = [f"the message of {tag} has a malformed line {line!r}: write "
+                f"'{EXCEL_EVIDENCE} <64-hex digest> (run <40-hex commit>).', as "
+                "tools/release.py evidence prints it" for line in lines
+                if not EXCEL_LINE.match(line)]
+    if len(lines) > 1:
+        problems.append(f"the message of {tag} has {len(lines)} '{EXCEL_EVIDENCE}' lines, "
+                        "not one")
+    if problems or lines:
+        return problems
+    if not holds_vba(root, commit):
+        return []
+    if any(INVARIANT_4.match(item) for item in deviation_items(message)):
+        return []
+    return [f"{tag} ({commit}) holds VBA components, but its message has neither an "
+            f"'{EXCEL_EVIDENCE} <digest> (run <sha>).' line nor a '- Invariant 4: <text>' "
+            "item under 'Deviations:'"]
+
+
+def declared_evidence(root: Path, tag: str, commit: str, message: str,
+                      evidence: tuple[Path, Path], checker: Checker | None) -> list[str]:
+    """The local check: the evidence given passes the gate for the commit and the
+    run the message declares, and has the digest it declares."""
+    declared = [match for match in map(EXCEL_LINE.match, excel_lines(message)) if match]
+    if len(declared) != 1:
+        return [f"the message of {tag} declares no Excel evidence to check against "
+                f"{evidence[0]}"]
+    digest, run = declared[0].groups()
+    try:
+        result = excel_gate(root, commit, evidence[0], evidence[1], run, checker)
+    except ReleaseError as error:
+        return [f"the Excel evidence of {tag}: {error}"]
+    problems = list(result.problems)
+    if not problems and result.digest != digest:
+        problems.append(f"the message of {tag} declares Excel evidence {digest}, but "
+                        f"{evidence[0]} and {evidence[1]} have the digest {result.digest}")
+    return problems
+
+
+@dataclass
+class ExcelGate:
+    """The result of the Excel evidence gate for one candidate commit."""
+
+    candidate: str
+    run: str
+    report: str = ""
+    digest: str = ""
+    problems: list[str] = field(default_factory=list)
+
+    @property
+    def line(self) -> str:
+        """The tag message's declaration of this evidence."""
+        return f"{EXCEL_EVIDENCE} {self.digest} (run {self.run})."
+
+
+def evidence_digest(folder: Path, workbook: Path) -> str:
+    """The SHA-256 of the listing of the evidence folder's files and the workbook,
+    as the module docstring defines it."""
+    files = sorted((path.relative_to(folder).as_posix(), path)
+                   for path in folder.rglob("*") if path.is_file())
+    lines = [f"{hashlib.sha256(path.read_bytes()).hexdigest()}  evidence/{name}\n"
+             for name, path in files]
+    lines.append(f"{hashlib.sha256(workbook.read_bytes()).hexdigest()}  workbook\n")
+    return hashlib.sha256("".join(lines).encode("utf-8")).hexdigest()
+
+
+def commit_of(root: Path, name: str) -> str:
+    try:
+        return git(root, "rev-parse", "--verify", f"{name}^{{commit}}").strip()
+    except ReleaseError as error:
+        raise ReleaseError(f"commit {name} not found") from error
+
+
+def excel_gate(root: Path, candidate: str, folder: Path, workbook: Path,
+               run: str | None = None, checker: Checker | None = None) -> ExcelGate:
+    """Run the checks of tools/check_excel_run.py with a required binding on the
+    evidence of ``run`` (by default the candidate), with --equivalent-to the
+    candidate when the run is of another commit. Carried evidence is never
+    asked for, and refused if a checker reports it."""
+    candidate = commit_of(root, candidate)
+    run = commit_of(root, run) if run is not None else candidate
+    gate = ExcelGate(candidate, run)
+    for path, kind, exists in ((folder, "evidence folder", folder.is_dir()),
+                               (workbook, "workbook", workbook.is_file())):
+        if not exists:
+            gate.problems.append(f"the {kind} {path} is missing")
+    if gate.problems:
+        return gate
+    # Imported here, so that verify without evidence, as in CI, never loads it.
+    import check_excel_run
+
+    equivalent = candidate if run != candidate else None
+    found = (checker or check_excel_run.check)(root, run, folder, workbook,
+                                               require_binding=True,
+                                               equivalent_to=equivalent)
+    gate.report = check_excel_run.report(run, found, equivalent)
+    gate.problems += [f"excel-run: {finding}" for finding in found.findings]
+    if found.binding != "VERIFIED":
+        gate.problems.append(f"the binding is {found.binding}, not VERIFIED")
+    if equivalent is not None and not found.equivalence:
+        gate.problems.append(f"the run of {run[:12]} is not shown equivalent to "
+                             f"{candidate[:12]}")
+    if getattr(found, "carried", ""):
+        gate.problems.append("the evidence is carried from another commit; carried "
+                             "evidence never certifies a release")
+    if not gate.problems:
+        gate.digest = evidence_digest(folder, workbook)
+    return gate
 
 
 def gh_output(runner: Runner, *args: str) -> bytes:
@@ -410,6 +608,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     check = commands.add_parser("verify", help="verify a release tag")
     check.add_argument("tag")
     check.add_argument("--default-branch", required=True)
+    check.add_argument("--excel-evidence", type=Path, metavar="DIR",
+                       help="the Excel run's evidence folder, checked against the tag's "
+                            "declaration on the machine that holds it; needs --workbook")
+    check.add_argument("--workbook", type=Path, metavar="FILE",
+                       help="the workbook of that run; needs --excel-evidence")
+    gate = commands.add_parser("evidence", help="check Excel evidence for a commit and print "
+                                                "the tag message line")
+    gate.add_argument("commit", help="the candidate commit")
+    gate.add_argument("--excel-evidence", type=Path, metavar="DIR", required=True,
+                      help="the evidence folder of the Excel run")
+    gate.add_argument("--workbook", type=Path, metavar="FILE", required=True,
+                      help="the workbook the run used")
+    gate.add_argument("--run-commit", metavar="SHA",
+                      help="the commit the workbook was built from, when it is not the "
+                           "candidate; every run input must be identical at both")
     runs = commands.add_parser("integrity", help="require a successful Repository integrity")
     runs.add_argument("--repository", required=True)
     runs.add_argument("--sha", required=True)
@@ -429,6 +642,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                            help="another expected asset, with its recorded SHA-256")
     args = parser.parse_args(argv)
     root = args.root.resolve()
+    if args.command == "verify" and (args.excel_evidence is None) != (args.workbook is None):
+        parser.error("verify: --excel-evidence and --workbook go together")
+    if args.command == "evidence":
+        return evidence_main(root, args.commit, args.excel_evidence, args.workbook,
+                             args.run_commit)
     if args.command == "verify-published":
         facts = verify_published(args.repository, args.tag, args.milestone, dict(args.asset),
                                  run_gh)
@@ -445,8 +663,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for path in bundle(root, args.ref, args.name, args.out):
                 print(f"wrote {path}")
             return 0
-        problems = (verify(root, args.tag, args.default_branch) if args.command == "verify"
-                    else integrity(args.repository, args.sha))
+        given = ((args.excel_evidence, args.workbook)
+                 if args.command == "verify" and args.excel_evidence is not None else None)
+        problems = (verify(root, args.tag, args.default_branch, given)
+                    if args.command == "verify" else integrity(args.repository, args.sha))
     except ReleaseError as error:
         problems = [str(error)]
     for problem in problems:
@@ -456,6 +676,29 @@ def main(argv: Sequence[str] | None = None) -> int:
              else args.ref if args.command == "bundle" else args.tag)
     print(f"release-{args.command}: {'FAIL' if problems else 'PASS'} ({label})")
     return 1 if problems else 0
+
+
+def evidence_main(root: Path, commit: str, folder: Path, workbook: Path, run: str | None,
+                  checker: Checker | None = None) -> int:
+    """The evidence subcommand: the report, any failure, then the digest and the
+    tag message line."""
+    try:
+        gate = excel_gate(root, commit, folder, workbook, run, checker)
+    except ReleaseError as error:
+        print(f"FAIL: {error}")
+        print(f"release-evidence: FAIL ({commit})")
+        return 1
+    if gate.report:
+        print(gate.report)
+    for problem in gate.problems:
+        print(f"FAIL: {problem}")
+    if not gate.problems:
+        kind = ("a run of the candidate" if gate.run == gate.candidate else
+                f"a run of {gate.run}, equivalent to the candidate")
+        print(f"Excel evidence digest: {gate.digest} ({kind})")
+        print(f"Tag message line: {gate.line}")
+    print(f"release-evidence: {'FAIL' if gate.problems else 'PASS'} ({gate.candidate[:12]})")
+    return 1 if gate.problems else 0
 
 
 if __name__ == "__main__":

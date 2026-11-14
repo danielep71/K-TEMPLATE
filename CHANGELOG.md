@@ -63,8 +63,40 @@ Use only the categories an entry needs.
 
 ## [Unreleased]
 
+### Added
+
+- The **Closing keywords** workflow runs `tools/check_closing_keywords.py` on
+  each pull request. Into a release branch, it fails on any closing keyword,
+  such as `Resolves #N`, in a commit, the title or the body. Into the default
+  branch from a release branch, it fails on a keyword that names an open
+  issue, unless the body lists the issue on a `Reopen after merge: #N` line;
+  each finding names the commit, the keyword as written and the issue. It
+  reads issue states with the workflow token and is not a required check
+  (#497).
+- `tools/check_excel_run.py --carried-to SHA` carries the evidence of an
+  Excel run to a later commit whose VBA components differ from the run's
+  only in comments or layout, so that correcting a comment no longer needs a
+  new Excel run for a pull request. The new `tools/vba_code_identity.py`
+  compares the components' logical lines without comments, with each run of
+  white space outside strings read as one space and the letter case of code
+  ignored, and keeps conditional-compilation directives. It refuses non-ASCII input and any
+  component that uses `[` or `]` outside a string. Every other run input,
+  each form's `.frx` included, must keep its Git blob. The report labels the
+  result `Carried from <run commit>`, with the components carried, and
+  writes nothing into the evidence folder. Carried evidence never certifies
+  a release: `--equivalent-to` keeps its blob identity, and a release still
+  needs a run of the candidate or one `--equivalent-to` proves identical.
+  The VBA lexer no longer reads `Rem` or a colon inside a `[...]` expression
+  as a comment or a statement separator (#499).
+
 ### Changed
 
+- While a release branch is active, commit messages, squash messages and task
+  pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
+  guide and the pull request template now say: a closing keyword in a commit
+  merged into a release branch closes its issue at the integration, whatever
+  its state. `Resolves #N` stays for a pull request into the default branch
+  while no release branch is active (#497).
 - *Start a new repository* in the README says that **Use this template**
   copies the template's default branch, not a release tag, and asks to record
   the template commit a new repository came from; the setup guide's
@@ -102,12 +134,35 @@ Use only the categories an entry needs.
 - The social preview and README banner name the risk areas the template
   is for, market, credit, operational, counterparty, IRRBB and liquidity,
   instead of a list of regimes, and show one formula for each (#492).
+- **Issue triage** reports each open issue in a cycle of open issues'
+  dependency sections, which no finished work can unblock (#506).
+- An issue's *Resolution* names the merge commit, the Excel run with its
+  case and assertion counts when the change needed one, and any deviation
+  from the proposed fix. An issue closed through `release/X.Y.Z` goes into
+  milestone `vX.Y.Z`; the pull request guide, the closeout and the
+  maintenance audit say the same (#507).
+- A release tag whose commit holds a VBA component needs its Excel run.
+  `tools/release.py evidence` checks the evidence folder and the workbook
+  with `tools/check_excel_run.py --require-binding`, for the candidate or
+  for an earlier commit with identical run inputs, and prints an
+  `Excel evidence: <digest> (run <sha>).` line for the tag message. It never
+  accepts carried evidence. `tools/release.py verify` fails unless the tag
+  message has that line or an `- Invariant 4:` deviation. Run with
+  `--excel-evidence` and `--workbook` before the tag is pushed, it also checks
+  the evidence against the line. The **Release** workflow checks only the
+  line's form: the evidence and `host.txt` stay on the machine of the run,
+  so CI cannot check the run itself (#498).
 
 ### Fixed
 
 - `tools/initialize_repository.py` writes no file when it only lists the
   changes, not even the bytecode of the tools it imports, as the README says
   (#464).
+- `tools/format_vba.py` no longer splits a comment that continues with ` _`
+  after an `End` statement, which turned its continuation into code, and no
+  longer moves continuation text that looks like a label or an `End`
+  statement. A folder named as a path is formatted, and a missing path is an
+  error with exit status 2 instead of a traceback (#496).
 
 ## [1.0.0] - 2026-11-11
 

@@ -16,11 +16,14 @@ import tempfile
 import unittest
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any, ClassVar
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
+import check_excel_run  # noqa: E402
 import release  # noqa: E402
 
 try:
@@ -139,6 +142,141 @@ class ReleaseTest(unittest.TestCase):
                          ["the message of v1.2.0 has no 'Deviations:' line followed by text, "
                           "such as 'none', or by a list"])
 
+    def with_vba(self, path: str = "src/modules/MExample.bas") -> str:
+        """Commit a VBA component on main, push it and return the new commit."""
+        (self.root / path).parent.mkdir(parents=True, exist_ok=True)
+        self.commit({path: 'Attribute VB_Name = "MExample"\nOption Explicit\n'})
+        self.git("push", "-q", "origin", "main")
+        return self.git("rev-parse", "HEAD").strip()
+
+    def message(self, head: str, *lines: str, deviations: str = "Deviations: none.") -> str:
+        return "\n".join(["v1.2.0 - Release", "", f"Candidate {head}.", *lines, deviations, ""])
+
+    def retag(self, message: str) -> None:
+        if self.git("tag", "-l", "v1.2.0"):
+            self.git("tag", "-d", "v1.2.0")
+        self.tag(message=message)
+
+    def test_a_vba_component_needs_excel_evidence_or_an_invariant_4_deviation(self) -> None:
+        head = self.with_vba()
+        self.tag(message=self.message(head))
+        self.assertEqual(self.problems(), [
+            f"v1.2.0 ({head}) holds VBA components, but its message has neither an "
+            "'Excel evidence: <digest> (run <sha>).' line nor a '- Invariant 4: <text>' "
+            "item under 'Deviations:'"])
+
+    def test_a_vba_component_is_a_bas_cls_or_frm_file_at_any_depth(self) -> None:
+        for path, component in (("src/modules/MExample.bas", True),
+                                ("deep/er/Sheet.CLS", True), ("forms/frmX.frm", True),
+                                ("forms/frmX.frx", False), ("src/MExample.bas.orig", False)):
+            with self.subTest(path=path):
+                head = self.with_vba(path)
+                self.assertEqual(release.holds_vba(self.root, head), component)
+                self.git("rm", "-q", path)
+                self.git("commit", "-qm", "Remove")
+
+    def test_another_deviation_does_not_waive_the_excel_run(self) -> None:
+        head = self.with_vba()
+        self.tag(message=self.message(head, deviations="Deviations:\n"
+                                      "- Invariant 8: the workbook was not checked.\n"
+                                      "Invariant 4: outside the list."))
+        self.assertEqual(len(self.problems()), 1, self.problems())
+
+    def test_an_excel_evidence_line_is_accepted(self) -> None:
+        head = self.with_vba()
+        for run in (head, "1" * 40):
+            with self.subTest(run=run):
+                self.retag(self.message(head, f"Excel evidence: {'a' * 64} (run {run})."))
+                self.assertEqual(self.problems(), [])
+
+    def test_an_invariant_4_deviation_is_accepted(self) -> None:
+        head = self.with_vba()
+        for deviations in ("Deviations:\n- Invariant 4: no Excel host was available.",
+                           "Deviations:\n- Invariant 8: not checked.\n"
+                           "* Invariant 4: the run names\n  another build."):
+            with self.subTest(deviations=deviations):
+                self.retag(self.message(head, deviations=deviations))
+                self.assertEqual(self.problems(), [])
+
+    def test_a_malformed_excel_evidence_line_fails(self) -> None:
+        head = self.with_vba()
+        digest = "a" * 64
+        for line in (f"Excel evidence: {digest[:-1]} (run {head}).",
+                     f"Excel evidence: {digest.upper()} (run {head}).",
+                     f"Excel evidence: {digest} (run {head[:12]}).",
+                     f"Excel evidence: {digest} (run {head})",
+                     f"Excel evidence: {digest} (run {head}). Checked.",
+                     f"Excel evidence: sha256:{digest} (run {head}).",
+                     "Excel evidence: none."):
+            with self.subTest(line=line):
+                # An invariant 4 deviation does not excuse a malformed line.
+                self.retag(self.message(head, line,
+                                        deviations="Deviations:\n- Invariant 4: no host."))
+                found = self.problems()
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(f"has a malformed line {line!r}", found[0])
+        self.git("tag", "-d", "v1.2.0")
+        line = f"Excel evidence: {digest} (run {head})."
+        self.tag(message=self.message(head, line, line))
+        self.assertEqual(self.problems(),
+                         ["the message of v1.2.0 has 2 'Excel evidence:' lines, not one"])
+
+    def test_without_a_vba_component_no_excel_evidence_is_needed(self) -> None:
+        self.commit({"MExample.bas.orig": "x\n", "frmX.frx": "x\n"})
+        self.git("push", "-q", "origin", "main")
+        head = self.git("rev-parse", "HEAD").strip()
+        self.tag(message=self.message(head))
+        self.assertEqual(self.problems(), [])
+        # A malformed declaration fails all the same.
+        self.git("tag", "-d", "v1.2.0")
+        self.tag(message=self.message(head, "Excel evidence: pending."))
+        self.assertEqual(len(self.problems()), 1)
+
+    def test_verify_with_evidence_checks_the_declared_digest_and_run(self) -> None:
+        head = self.with_vba()
+        folder, workbook = self.evidence_files()
+        checker = FakeChecker()
+        gate = release.excel_gate(self.root, head, folder, workbook, checker=checker)
+        self.assertEqual(gate.problems, [])
+        self.tag(message=self.message(head, gate.line))
+        self.assertEqual(release.verify(self.root, "v1.2.0", "main", (folder, workbook),
+                                        checker), [])
+        self.assertEqual(checker.calls[-1], (head, None))
+        # The evidence changed after the tag line was written.
+        (folder / "host.txt").write_text("operator=Someone else\n", encoding="utf-8")
+        found = release.verify(self.root, "v1.2.0", "main", (folder, workbook), checker)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"declares Excel evidence {gate.digest}, but", found[0])
+        # A tag with only a deviation declares no evidence to check.
+        self.git("tag", "-d", "v1.2.0")
+        self.tag(message=self.message(head, deviations="Deviations:\n- Invariant 4: x."))
+        found = release.verify(self.root, "v1.2.0", "main", (folder, workbook), checker)
+        self.assertEqual(found, [f"the message of v1.2.0 declares no Excel evidence to check "
+                                 f"against {folder}"])
+
+    def test_verify_with_evidence_checks_an_equivalent_run(self) -> None:
+        run = self.with_vba()
+        self.commit({"README.md": "later\n"})
+        self.git("push", "-q", "origin", "main")
+        head = self.git("rev-parse", "HEAD").strip()
+        folder, workbook = self.evidence_files()
+        checker = FakeChecker(equivalence="identical")
+        gate = release.excel_gate(self.root, head, folder, workbook, run, checker)
+        self.assertEqual((gate.problems, gate.run, gate.candidate), ([], run, head))
+        self.tag(message=self.message(head, gate.line))
+        self.assertEqual(release.verify(self.root, "v1.2.0", "main", (folder, workbook),
+                                        checker), [])
+        self.assertEqual(checker.calls[-1], (run, head))
+
+    def evidence_files(self) -> tuple[Path, Path]:
+        folder = self.root.parent / "excel-run"
+        (folder / "exported").mkdir(parents=True)
+        (folder / "host.txt").write_text("operator=Fixture\n", encoding="utf-8")
+        (folder / "exported" / "MExample.bas").write_bytes(b"Option Explicit\r\n")
+        workbook = self.root.parent / "Workbook-development.xlsm"
+        workbook.write_bytes(b"workbook")
+        return folder, workbook
+
     def test_notes_hold_the_message_and_the_changelog_section(self) -> None:
         self.tag()
         text = release.notes(self.root, "v1.2.0")
@@ -197,6 +335,220 @@ class ReleaseTest(unittest.TestCase):
                              1)
         self.assertIn("release-notes: FAIL (v9.9.9)", output.getvalue())
         self.assertIn("release-bundle: FAIL (no-such-ref)", output.getvalue())
+
+
+class FakeChecker:
+    """check_excel_run.check, returning set evidence and recording the commit checked
+    and the commit it was asked to be equivalent to."""
+
+    def __init__(self, findings: Sequence[str] = (), binding: str = "VERIFIED",
+                 equivalence: str = "", carried: str = "") -> None:
+        self.evidence = check_excel_run.Evidence(findings=list(findings), binding=binding,
+                                                 equivalence=equivalence)
+        # Set as an attribute: the check names carried evidence this way once it
+        # can carry a run across comment-only changes.
+        if carried:
+            setattr(self.evidence, "carried", carried)
+        self.calls: list[tuple[str, str | None]] = []
+
+    def __call__(self, root: Path, commit: str, folder: Path, workbook: Path | None = None,
+                 require_binding: bool = False, equivalent_to: str | None = None,
+                 **others: object) -> check_excel_run.Evidence:
+        assert require_binding and workbook is not None and not others, others
+        self.calls.append((commit, equivalent_to))
+        return self.evidence
+
+
+@unittest.skipIf(shutil.which("git") is None, "git is not installed")
+class ExcelGateTest(unittest.TestCase):
+    """The evidence subcommand, with check_excel_run.check replaced at its seam."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory(prefix="release-gate-")
+        self.addCleanup(directory.cleanup)
+        self.base = Path(directory.name)
+        self.root = self.base / "work"
+        self.root.mkdir()
+        for command in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
+                        ["config", "user.email", "fixture@example.invalid"],
+                        ["config", "commit.gpgsign", "false"]):
+            self.git(*command)
+        self.commit("first")
+        self.run_sha = self.git("rev-parse", "HEAD").strip()
+        self.commit("second")
+        self.head = self.git("rev-parse", "HEAD").strip()
+        self.folder = self.base / "excel-run"
+        (self.folder / "exported").mkdir(parents=True)
+        (self.folder / "host.txt").write_bytes(b"outcome=PASS\n")
+        (self.folder / "exported" / "MExample.bas").write_bytes(b"Option Explicit\r\n")
+        self.workbook = self.base / "Workbook-development.xlsm"
+        self.workbook.write_bytes(b"workbook")
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True,
+                              text=True, check=True).stdout
+
+    def commit(self, text: str) -> None:
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "MExample.bas").write_text(text, encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", text)
+
+    def gate(self, checker: FakeChecker, run: str | None = None) -> release.ExcelGate:
+        return release.excel_gate(self.root, "HEAD", self.folder, self.workbook, run, checker)
+
+    def test_good_evidence_gives_the_digest_and_the_tag_line(self) -> None:
+        checker = FakeChecker()
+        gate = self.gate(checker)
+        self.assertEqual(gate.problems, [])
+        self.assertEqual(checker.calls, [(self.head, None)])
+        listing = "".join(f"{hashlib.sha256(data).hexdigest()}  {name}\n" for name, data in (
+            ("evidence/exported/MExample.bas", b"Option Explicit\r\n"),
+            ("evidence/host.txt", b"outcome=PASS\n"), ("workbook", b"workbook")))
+        self.assertEqual(gate.digest, hashlib.sha256(listing.encode()).hexdigest())
+        self.assertEqual(gate.line, f"Excel evidence: {gate.digest} (run {self.head}).")
+        self.assertTrue(release.EXCEL_LINE.match(gate.line))
+        # The same files elsewhere, with the workbook under another name, give the
+        # same digest; another byte gives another.
+        copy = self.base / "copy"
+        shutil.copytree(self.folder, copy)
+        renamed = self.base / "other.xlsm"
+        shutil.copyfile(self.workbook, renamed)
+        self.assertEqual(release.evidence_digest(copy, renamed), gate.digest)
+        (copy / "host.txt").write_bytes(b"outcome=PASS \n")
+        self.assertNotEqual(release.evidence_digest(copy, renamed), gate.digest)
+
+    def test_an_earlier_run_counts_only_when_shown_equivalent(self) -> None:
+        checker = FakeChecker(equivalence=f"{self.head} (2 run inputs identical)")
+        gate = self.gate(checker, self.run_sha[:12])
+        self.assertEqual((gate.problems, gate.run), ([], self.run_sha))
+        self.assertEqual(checker.calls, [(self.run_sha, self.head)])
+        self.assertEqual(gate.line, f"Excel evidence: {gate.digest} (run {self.run_sha}).")
+        gate = self.gate(FakeChecker(findings=["run input src/MExample.bas: differs"]),
+                         self.run_sha)
+        self.assertEqual(gate.problems, [
+            "excel-run: run input src/MExample.bas: differs",
+            f"the run of {self.run_sha[:12]} is not shown equivalent to {self.head[:12]}"])
+        self.assertEqual(gate.digest, "")
+
+    def test_bad_evidence_is_refused(self) -> None:
+        cases: list[tuple[FakeChecker, str]] = [
+            (FakeChecker(findings=["host.txt: outcome is FAIL"]),
+             "excel-run: host.txt: outcome is FAIL"),
+            (FakeChecker(binding="UNVERIFIED"), "the binding is UNVERIFIED, not VERIFIED"),
+            (FakeChecker(binding="FAIL"), "the binding is FAIL, not VERIFIED"),
+            (FakeChecker(carried="Carried from 0123456789ab: src/MExample.bas differ only "
+                                 "in comments"),
+             "the evidence is carried from another commit; carried evidence never "
+             "certifies a release")]
+        for checker, problem in cases:
+            with self.subTest(problem=problem):
+                gate = self.gate(checker)
+                self.assertEqual((gate.problems, gate.digest), ([problem], ""))
+
+    def test_missing_evidence_is_refused_without_a_check(self) -> None:
+        checker = FakeChecker()
+        gate = release.excel_gate(self.root, "HEAD", self.base / "none",
+                                  self.base / "none.xlsm", checker=checker)
+        self.assertEqual(gate.problems, [f"the evidence folder {self.base / 'none'} is missing",
+                                         f"the workbook {self.base / 'none.xlsm'} is missing"])
+        self.assertEqual(checker.calls, [])
+        with self.assertRaisesRegex(release.ReleaseError, "commit nothing not found"):
+            self.gate(checker, "nothing")
+
+    def test_main_prints_the_report_and_the_tag_line(self) -> None:
+        arguments = ["--root", str(self.root), "evidence", "HEAD", "--excel-evidence",
+                     str(self.folder), "--workbook", str(self.workbook)]
+        with mock.patch.object(check_excel_run, "check", FakeChecker()), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(release.main(arguments), 0)
+        text = output.getvalue()
+        digest = release.evidence_digest(self.folder, self.workbook)
+        self.assertIn(f"Candidate commit: {self.head}\nEnvironment:", text)
+        self.assertIn("Binding: VERIFIED\n", text)
+        self.assertIn(f"Excel evidence digest: {digest} (a run of the candidate)\n", text)
+        self.assertIn(f"Tag message line: Excel evidence: {digest} (run {self.head}).\n", text)
+        self.assertTrue(text.endswith(f"release-evidence: PASS ({self.head[:12]})\n"))
+        with mock.patch.object(check_excel_run, "check", FakeChecker(binding="FAIL")), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(release.main([*arguments, "--run-commit", "nothing"]), 1)
+            self.assertEqual(release.main(arguments), 1)
+        self.assertIn("FAIL: commit nothing not found\nrelease-evidence: FAIL (HEAD)",
+                      output.getvalue())
+        self.assertIn("FAIL: the binding is FAIL, not VERIFIED\n", output.getvalue())
+        self.assertNotIn("Tag message line", output.getvalue())
+
+    def test_verify_takes_the_evidence_and_the_workbook_together(self) -> None:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            release.main(["--root", str(self.root), "verify", "v1.2.0", "--default-branch",
+                          "main", "--excel-evidence", str(self.folder)])
+
+
+@unittest.skipIf(shutil.which("git") is None, "git is not installed")
+class ExcelGateRunTest(unittest.TestCase):
+    """The evidence subcommand on the evidence fixtures of test_check_excel_run.py,
+    with the real check: a run of the candidate, an equivalent run and a run whose
+    inputs changed."""
+
+    fixtures: ClassVar[Any]
+    root: ClassVar[Path]
+    built: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        loaded = "test_check_excel_run" in sys.modules
+        import test_check_excel_run as fixtures
+
+        if not loaded:
+            cls.addClassCleanup(fixtures.tearDownModule)
+        if not fixtures.COMMIT:
+            raise unittest.SkipTest("needs the modules of tests/modules/")
+        cls.fixtures = fixtures
+        cls.root, cls.built = fixtures.make_repository()
+        cls.addClassCleanup(shutil.rmtree, cls.root, True)
+        # The fixture helpers read the example suite from their own repository,
+        # which their module removes once its tests have run.
+        for name, value in (("ROOT", cls.root), ("COMMIT", cls.built)):
+            patcher = mock.patch.object(fixtures, name, value)
+            patcher.start()
+            cls.addClassCleanup(patcher.stop)
+
+    def gate(self, candidate: str, run: str | None = None) -> release.ExcelGate:
+        fixtures = self.fixtures
+        with fixtures.evidence(root=self.root, commit=self.built) as folder:
+            workbook = folder.parent / f"{folder.name}-Workbook.xlsm"
+            workbook.write_bytes(fixtures.workbook_bytes(self.built))
+            try:
+                fixtures.export_manifest.write(workbook, folder)
+                return release.excel_gate(self.root, candidate, folder, workbook, run)
+            finally:
+                workbook.unlink(missing_ok=True)
+
+    def test_a_run_of_the_candidate_passes(self) -> None:
+        gate = self.gate(self.built)
+        self.assertEqual(gate.problems, [])
+        self.assertIn("Binding: VERIFIED", gate.report)
+        self.assertTrue(release.DIGEST.match(gate.digest))
+
+    def test_an_equivalent_run_passes_and_a_changed_input_fails(self) -> None:
+        later = self.fixtures.commit_change(self.root, self.built,
+                                            {"README.md": b"Documentation only.\n"})
+        gate = self.gate(later, self.built)
+        self.assertEqual(gate.problems, [])
+        self.assertIn(f"Equivalent: {later} (", gate.report)
+        self.assertEqual(gate.line, f"Excel evidence: {gate.digest} (run {self.built}).")
+        harness = (self.root / self.fixtures.POLICY.harness).read_bytes()
+        changed = self.fixtures.commit_change(self.root, self.built,
+                                              {self.fixtures.POLICY.harness: harness + b"' x\n"})
+        gate = self.gate(changed, self.built)
+        self.assertIn(f"the run of {self.built[:12]} is not shown equivalent to "
+                      f"{changed[:12]}", gate.problems)
+        self.assertTrue(any(f"run input {self.fixtures.POLICY.harness}: differs" in problem
+                            for problem in gate.problems), gate.problems)
+        # Evidence of the run is no evidence of the changed commit by itself.
+        gate = self.gate(changed)
+        self.assertNotEqual(gate.problems, [])
+        self.assertEqual(gate.digest, "")
 
 
 class IntegrityTest(unittest.TestCase):
