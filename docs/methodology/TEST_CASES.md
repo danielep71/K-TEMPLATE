@@ -23,6 +23,7 @@ two forms:
 | `tests/expected/<case-id>.json` | Expected results, each with its provenance |
 | `tests/derivations/<name>.py` | Optional: a script that computes expected values from the documented method, separately from the code under test |
 | `tests/accuracy/contracts.json` | Optional: the [accuracy contracts](#accuracy-contracts), each stating the worst error a calculation guarantees over a set of cases |
+| `tests/accuracy/holdout_exposures.json` | Beside the contracts: the [holdout exposure record](#holdout-exposure-record), each first measurement of a frozen contract's holdout |
 | `tests/independent/adapters.json` | Optional: the [adapters](#independent-implementations) that run an independent implementation on the cases, with their scripts beside it |
 
 - Use a **JSON fixture** to test a calculation: its inputs are values, already
@@ -382,6 +383,7 @@ blocks, and so can be tighter than what a release may promise.
 | `status`, `decision` | `draft`, with `decision` `null`, or `frozen`, with the issue or record that froze it |
 | `calibration_cases` | The cases that may be used to set the threshold, each listed once |
 | `holdout_cases` | The cases that never are, each listed once; no case is in both lists |
+| `design` | Optional: the committed design or preregistration document of the contract, a path under `docs/methodology/` or `tests/accuracy/`, where `tools/check_excel_run.py` copies it from; later amendments only append to it. Leave it out when the project keeps none |
 
 - **Frozen.** A contract may be frozen only with at least `min_holdout_cases`
   holdout cases, and only when every expected value of its quantities in
@@ -407,18 +409,22 @@ blocks, and so can be tighter than what a release may promise.
   - an output without a result;
   - a result outside its own tolerance;
   - a worst error above the threshold, which it computes separately for the
-    calibration and the holdout cases;
+    calibration and the holdout cases; the holdout only once its
+    [exposure is recorded](#holdout-exposure-record);
+  - a frozen contract whose holdout has no exposure recorded under its
+    decision;
   - an output that an [invariant](#invariants) reads without a result, and a
     result that breaks an invariant.
 
   For each split it prints the worst error, the threshold and the target, or
-  `no target`. A worst error above the target but within the threshold
-  passes, and its line ends with `target missed`; one above the threshold
-  ends with `threshold exceeded` and fails:
+  `no target`, and for the holdout the number of its exposures. A worst
+  error above the target but within the threshold passes, and its line ends
+  with `target missed`; one above the threshold ends with
+  `threshold exceeded` and fails:
 
   ```text
   ACC-02 calibration: worst relative error 4e-06, threshold 0.0001, target 1e-05
-  ACC-02 holdout: worst relative error 5e-05, threshold 0.0001, target 1e-05: target missed
+  ACC-02 holdout: worst relative error 5e-05, threshold 0.0001, target 1e-05, exposures 1: target missed
   ```
 
 ```json
@@ -444,6 +450,110 @@ commit of the workbook's build stamp
 `tools/check_excel_run.py` then measures the commit's contracts on all these
 files together, and fails the run when they do not hold. A contract whose
 outputs a project suite computes is therefore measured on that suite's file.
+
+<a id="holdout-exposure-record"></a>
+
+### Holdout exposure record
+
+A holdout shows how the calculation does on cases that played no part in
+setting the threshold only if nobody saw its errors while the threshold could
+still change. The record `tests/accuracy/holdout_exposures.json` is the
+evidence: it lists each time a frozen contract's holdout was first measured
+under a decision. A repository with a registry keeps the record, with an
+empty `exposures` list until a holdout is first measured; the check fails
+when it is missing, and nothing ever resets it.
+
+- **Sealed while draft.** With `--results`, a draft contract's calibration
+  cases are measured; its holdout is not compared, not printed and needs no
+  result. Its line says it is sealed. The harness still asserts each case
+  within its own tolerance, and the [invariants](#invariants) still read
+  every case they name: sealing hides the contract's worst error over the
+  holdout, the number a threshold could be tuned to.
+- **Sealed until recorded.** A frozen contract's holdout is sealed in the same
+  way until its exposure under its current `decision` is recorded, and with
+  `--results` that is a finding:
+
+  ```text
+  ACC-01 holdout: sealed while the contract is draft, exposures 0
+  ACC-02 holdout: sealed until its exposure under decision #N is recorded, exposures 0
+  FAIL: tests/accuracy/contracts.json: ACC-02: its holdout has no exposure recorded under decision #N, so it was not measured: measure it once with tools/check_accuracy.py --record-holdout ACC-02
+  ```
+
+- **The first exposure.** Freeze the contract, run Excel on a commit that
+  holds it frozen, then record the exposure from a checkout of that commit,
+  with the results files of the run:
+
+  ```sh
+  python tools/check_accuracy.py --results <folder>/results.json --commit <commit> --record-holdout ACC-02
+  ```
+
+  It writes the exposure into the record first, then measures as `--results`
+  does, holdout included, and prints a `Recorded:` line. Commit the record:
+  it is part of what [validates](VALIDATION_PLAN.md#what-an-accuracy-contract-proves)
+  the contract. The exposure is recorded even when the holdout then fails:
+  its errors were seen.
+- **Refusals.** `--record-holdout` writes and measures nothing, and ends
+  `accuracy: REFUSED`, for a draft contract, a contract already exposed under
+  its decision (a second first exposure), a missing, malformed or
+  inconsistent record, any finding of the check without results, and
+  results that are unusable or lack an output of the holdout:
+
+  ```text
+  REFUSED: second first exposure of ACC-02 refused: its holdout was exposed under decision #N with the results of commit 3f2c1e0a9b8d (exposures 1). Another exposure needs a new decision that states the earlier exposures
+  accuracy: REFUSED (nothing measured; tests/accuracy/holdout_exposures.json not written)
+  ```
+
+- **Regression, not exposure.** Every later measurement of a recorded
+  holdout, such as `tools/check_excel_run.py` on a later candidate, measures
+  it as a regression of a threshold already fixed, prints the number of
+  exposures and writes nothing.
+
+Each exposure holds:
+
+| Field | Holds |
+| --- | --- |
+| `contract`, `decision` | The contract's ID and the decision it was frozen under |
+| `exposures` | The number of exposures of the contract's holdout, this one included: earlier exposures under other decisions count |
+| `commit`, `results` | The commit the results are of, and each results file's name and SHA-256 |
+| `entry_sha256`, `threshold` | The SHA-256 of the contract's entry, written as JSON with sorted keys, no white space and UTF-8, and its threshold |
+| `holdout` | Each holdout case with the SHA-256 of its fixture and of its expected file. A file-based fixture's is the SHA-256 of a listing of its folder: one line per file, sorted by path, with the file's SHA-256, two spaces and its path |
+| `design` | `null`, or the contract's `design` document: its path, its length in bytes and their SHA-256 |
+
+The record is checked with or without results. The check fails on an
+exposure that is malformed, numbered out of order, or a second one of a
+contract under the same decision; on an exposure whose contract is no longer
+in the registry; and on a record that no longer starts with the exposures
+recorded at the newest `vX.Y.Z` tag. It fails on a frozen contract whose
+`decision` is that of an earlier exposure but not of its last: a decision
+used again after a later one cannot state the exposures since, and
+`--record-holdout` refuses it. For a frozen contract whose `decision` is
+still that of its last exposure, it also fails on:
+
+- an entry that differs from the one recorded, the target included;
+- a threshold lower than the one recorded: a threshold lowered after the
+  holdout errors were seen was set with them;
+- a holdout fixture or expected file that differs from the one recorded;
+- a design document that no longer begins with the bytes recorded: an
+  amendment appends, never rewrites.
+
+```text
+FAIL: tests/accuracy/contracts.json: ACC-02: its entry changed since its holdout was exposed under decision #N (exposure 1, results of commit 3f2c1e0a9b8d): a change after an exposure needs a new decision that states the earlier exposures
+FAIL: tests/accuracy/contracts.json: ACC-02: threshold 5e-05 is lower than 0.0001, the threshold when its holdout was exposed: a threshold lowered after an exposure needs a new decision
+FAIL: tests/accuracy/contracts.json: ACC-02: the expected file of holdout case portfolio-large changed since its holdout was exposed under decision #N (exposure 1, results of commit 3f2c1e0a9b8d)
+```
+
+To change a frozen contract after an exposure, name a new `decision` and
+state in it the earlier exposures that the record lists. The comparisons
+then stop, and the holdout is sealed again until its exposure under the new
+decision is recorded, which counts the earlier ones. A contract returned to
+draft keeps its exposures; it is sealed and prints them.
+
+A contract measured before the record existed is recorded once, with its
+next run; its decision should state that the holdout was measured before.
+The template's record holds no exposure: its only contract, `ACC-01`, is
+illustrative, so it stays draft and its holdout stays sealed. A repository
+generated from the template starts with the same empty record and records
+its first exposure when it freezes its first contract.
 
 <a id="invariants"></a>
 

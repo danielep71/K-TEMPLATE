@@ -451,7 +451,11 @@ accuracy contracts, as step 3 says.
    the commit, the host and the Git blob id of every imported component. When
    the commit holds accuracy contracts, an `Accuracy:` line gives each
    contract's worst error over its calibration and its holdout cases, with
-   its threshold and its target, and says when the target was missed;
+   its threshold and its target, and says when the target was missed; the
+   holdout line gives the number of its exposures, or says that the holdout
+   is sealed: while the contract is draft, or until its first exposure is
+   [recorded](docs/methodology/TEST_CASES.md#holdout-exposure-record), which
+   fails the run for a frozen contract;
    another gives what each invariant of the registry checked. For
    a workbook imported by hand, omit `--workbook` and `--require-binding`:
    the binding is then `UNVERIFIED`, which a release does not accept, and

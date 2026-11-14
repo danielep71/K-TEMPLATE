@@ -1236,8 +1236,10 @@ class ResultsTest(unittest.TestCase):
 
     def test_a_missing_or_wrong_result_fails(self) -> None:
         def drop(document: dict[str, Any]) -> None:
-            document["results"].pop()
-        self.assertIn("no result for", " ".join(self.changed(drop)))
+            # The calibration result: the holdout of a draft contract is sealed.
+            document["results"] = [item for item in document["results"]
+                                   if item["case"] != "synthetic-calibration"]
+        self.assertIn("no result for synthetic-calibration", " ".join(self.changed(drop)))
 
         def wrong(document: dict[str, Any]) -> None:
             document["results"][0]["value"] += 1
@@ -1273,6 +1275,63 @@ class ResultsTest(unittest.TestCase):
                                 check_accuracy.REGISTRY.as_posix()], check=True)
         self.assertEqual(after.findings, [])
         self.assertEqual(after.accuracy, before)
+
+
+def frozen_files() -> dict[str, bytes]:
+    """The files of a commit whose registry holds one frozen contract, ACC-01, on a
+    calculation that is not illustrative, with independent values."""
+    files = accuracy_files(EXAMPLE_CONTRACTS)
+    files[CALCULATIONS] = (SOURCE / CALCULATIONS).read_bytes() + \
+        f"\n### `{CALCULATION}` Synthetic total\n".encode()
+    registry = json.loads(files[check_accuracy.REGISTRY.as_posix()])
+    registry["contracts"][0].update(regime="CRR3", status="frozen", decision="#1")
+    files[check_accuracy.REGISTRY.as_posix()] = json.dumps(registry).encode()
+    for case in ("synthetic-calibration", "synthetic-holdout"):
+        name = f"tests/expected/{case}.json"
+        files[name] = files[name].replace(b'"illustrative"', b'"independent"')
+    return files
+
+
+@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+class HoldoutExposureTest(unittest.TestCase):
+    """A frozen contract's holdout is measured on an Excel run only once its first
+    exposure is recorded, and a run of a later candidate records nothing."""
+
+    def test_a_recorded_holdout_is_measured_and_not_counted_again(self) -> None:
+        root, first = make_repository(extra=frozen_files())
+        record = root / check_accuracy.EXPOSURES
+        try:
+            with evidence(None, root, first) as folder:
+                unrecorded = check_excel_run.check(root, first, folder)
+                recorded = check_accuracy.record_holdout(root, ["ACC-01"],
+                                                         [folder / POLICY.results], first)
+            for command in (["add", "-A"],
+                            ["-c", "user.name=Fixture", "-c",
+                             "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                             "commit", "-qm", "Record the holdout exposure"]):
+                subprocess.run(["git", "-C", str(root), *command], capture_output=True,
+                               check=True)
+            second = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                                    capture_output=True, check=True, text=True).stdout.strip()
+            before = record.read_bytes()
+            with evidence(None, root, second) as folder:
+                later = check_excel_run.check(root, second, folder)
+            after = record.read_bytes()
+            status = subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
+                                    capture_output=True, check=True, text=True).stdout
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        self.assertEqual(len(unrecorded.findings), 1, unrecorded.findings)
+        self.assertIn("ACC-01: its holdout has no exposure recorded under decision #1",
+                      unrecorded.findings[0])
+        self.assertEqual(unrecorded.accuracy[1], "ACC-01 holdout: sealed until its exposure "
+                                                 "under decision #1 is recorded, exposures 0")
+        self.assertEqual(recorded[0], [])
+        self.assertEqual(later.findings, [])
+        self.assertEqual(later.accuracy[1], "ACC-01 holdout: worst absolute error 0.0, "
+                                            "threshold 1e-06, no target, exposures 1")
+        self.assertEqual((after, status), (before, ""))
+        self.assertEqual([item["commit"] for item in json.loads(after)["exposures"]], [first])
 
 
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")

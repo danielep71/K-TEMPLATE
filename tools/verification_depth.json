@@ -277,9 +277,12 @@
       "proofs": [
         "tests.test_check_accuracy.RegistryTest.test_malformed_contracts",
         "tests.test_check_accuracy.WideningTest.test_a_frozen_threshold_widens_only_with_a_new_decision",
-        "tests.test_check_accuracy.WideningTest.test_a_frozen_contract_is_neither_removed_nor_unfrozen"
+        "tests.test_check_accuracy.WideningTest.test_a_frozen_contract_is_neither_removed_nor_unfrozen",
+        "tests.test_check_accuracy.RecordCheckTest.test_a_malformed_record_is_a_finding",
+        "tests.test_check_accuracy.ExposureDriftTest.test_a_lower_threshold_after_an_exposure_is_a_finding",
+        "tests.test_check_accuracy.ExposureDriftTest.test_a_changed_holdout_file_is_a_finding"
       ],
-      "negative_claim": "a malformed accuracy contract, and a frozen contract widened, removed or unfrozen without a new decision, fail the check",
+      "negative_claim": "a malformed accuracy contract, a frozen contract widened, removed or unfrozen without a new decision, a malformed holdout exposure record, and a frozen contract whose entry, threshold or holdout files changed under the decision of its recorded exposure, fail the check",
       "state": "green"
     },
     {
