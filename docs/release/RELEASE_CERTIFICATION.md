@@ -53,6 +53,7 @@ empty or marked `NOT RUN` is never a pass.
 | Harness certification ([recording an Excel run](../../INSTALLATION.md#recording-an-excel-run)) | `CERTIFICATION=PASS` or `FAIL`, `COMPLETE` or `INCOMPLETE` | `certification.log` |
 | Workbook built from the Excel run commit (`tools/devbuild/build_workbook.py`) | Its `build_commit` stamp, which must be the Excel run commit without *NOT evidence-grade* | For a run by hand, the workbook's SHA-256 in `export-manifest.json`; for a run of `tools/devbuild/excel_run.py`, `Binding: VERIFIED` by rebuild in the check report, with the SHA-256 of `test-results/build/Workbook-development.xlsm` |
 | `tools/check_excel_run.py --workbook … --require-binding` against the candidate, or against the Excel run commit with `--equivalent-to` the candidate | `Binding: VERIFIED` and `excel-run: PASS`, with the `Equivalent:` line for an earlier commit, or each `FAIL` line | Its report, with the Git blob id of every component |
+| Excel evidence gate: `tools/release.py evidence CANDIDATE_SHA --excel-evidence … --workbook …`, with `--run-commit` the Excel run commit when it is not the candidate ([RELEASING.md step 4](../../RELEASING.md#excel-evidence-gate)) | `release-evidence: PASS`, or each `FAIL` line; carried evidence is never accepted | Its `Excel evidence digest:` and `Tag message line:` lines; the tag message carries the second |
 | Accuracy contracts, measured on `results.json` and the results file of each project suite that names one | Each contract's worst calibration and holdout error against its threshold, from the report's `Accuracy:` lines; `frozen` or `draft` | The report and those results files |
 | Regression cases (validation plan) | Number run, passed, failed | Log or evidence folder |
 | Failure paths: invalid input, cleanup after an error | PASS or FAIL | Log lines |
@@ -94,6 +95,8 @@ The checks of RELEASING.md step 8, after publication. Write
 ### Deviations
 
 `None`, or each release invariant not met, why, and my decision to accept it.
+Without Excel evidence for a candidate that holds a VBA component, the tag
+message lists the same `- Invariant 4: …` item under `Deviations:`.
 
 ### Limits
 
