@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -19,6 +20,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tools"))
+
+import check_repository  # noqa: E402
+
 SCRIPT = ROOT / ".github/scripts/labels-sync.mjs"
 MANIFEST = ROOT / ".github/labels.json"
 NODE = shutil.which("node")
@@ -172,6 +177,66 @@ class ReconcileOrderTests(unittest.TestCase):
         self.assertIn('Refusing to prune labels still used by an issue or pull request: "legacy"',
                       result.stderr)
         self.assertEqual(self.api.writes, [])
+
+
+@unittest.skipIf(NODE is None and not os.environ.get("GITHUB_ACTIONS"), "Node.js is not on PATH")
+class IntegrityCommandTests(unittest.TestCase):
+    """The label checks of Repository integrity fail on a defective script or catalogue.
+
+    Each runs the check's own command in a copy of .github/ in which one
+    thing is broken.
+    """
+
+    @staticmethod
+    def command(name: str) -> list[str]:
+        context = check_repository.Context(ROOT)
+        check = next(check for check in check_repository.checks(context) if check.name == name)
+        assert check.command is not None
+        return [NODE or "node", *check.command[1:]]
+
+    def run_check(self, name: str, path: str = "", find: str = "",
+                  replace: str = "") -> subprocess.CompletedProcess[str]:
+        """Run a check in a copy of .github/ where the text find in path is replaced."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / ".github/scripts", root / ".github/scripts")
+            shutil.copy(MANIFEST, root / ".github/labels.json")
+            if path:
+                target = root / path
+                text = target.read_text(encoding="utf-8")
+                self.assertEqual(text.count(find), 1, f"{find!r} in {path}")
+                target.write_text(text.replace(find, replace), encoding="utf-8")
+            env = {key: value for key, value in os.environ.items()
+                   if key not in {"GITHUB_STEP_SUMMARY", "GITHUB_REPOSITORY", "GITHUB_TOKEN"}}
+            return subprocess.run(self.command(name), cwd=root, capture_output=True, text=True,
+                                  encoding="utf-8", env=env, timeout=120, check=False)
+
+    def test_the_catalogue_check_rejects_an_invalid_label(self) -> None:
+        self.assertEqual(self.run_check("labels-catalogue").returncode, 0)
+        manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        color = manifest["core"][0]["color"]
+        result = self.run_check("labels-catalogue", ".github/labels.json",
+                                f'"color": "{color}"', f'"color": "#{color.lower()}"')
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("core[0].color must be six uppercase hexadecimal characters without #",
+                      result.stderr)
+
+    def test_the_sync_self_test_fails_when_validation_accepts_a_bad_colour(self) -> None:
+        self.assertEqual(self.run_check("labels-sync-self-test").returncode, 0)
+        result = self.run_check("labels-sync-self-test", ".github/scripts/labels-sync.mjs",
+                                'typeof label.color !== "string" || '
+                                '!/^[0-9A-F]{6}$/.test(label.color)',
+                                'typeof label.color !== "string"')
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertNotIn("SELF-TEST PASS", result.stdout)
+
+    def test_the_drift_self_test_fails_when_a_disagreement_is_ignored(self) -> None:
+        self.assertEqual(self.run_check("labels-drift-self-test").returncode, 0)
+        result = self.run_check("labels-drift-self-test", ".github/scripts/labels-drift.mjs",
+                                "const agree = JSON.stringify(reported) === "
+                                "JSON.stringify(planned);", "const agree = true;")
+        self.assertNotEqual(result.returncode, 0, result.stdout)
+        self.assertNotIn("SELF-TEST PASS", result.stdout)
 
 
 if __name__ == "__main__":

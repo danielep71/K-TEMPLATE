@@ -169,6 +169,9 @@ tools/format_vba.py
 tests/test_format_vba.py
 tools/check_links.py
 tests/test_check_links.py
+tools/check_verification_depth.py
+tools/verification_depth.json
+tests/test_check_verification_depth.py
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications compare commit with commit for the Excel-run check instead of
@@ -191,4 +194,9 @@ pages as raw Markdown; it keeps its HTTPS requirement and expiring
 exceptions, moves the exclusions file under .github/ with stricter
 validation, requests wiki pages only while the repository answers anonymous
 requests, ends a fence with its list item and reads lazy continuation lines
-only where they do not start a block.
+only where they do not start a block. The verification-depth inventory and
+its check take the checks that need an entry from tools/check_repository.py
+instead of a fixed list, compare each entry with what its check runs, accept
+unittest ids or the check's probe as proofs and require each test to be
+collected by the tests check instead of listed in a runner, and are tested
+with unit tests on fixtures.

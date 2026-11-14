@@ -463,6 +463,26 @@ class RunTest(RepositoryTest):
         self.assertIn("linted the workflows", printed)
         self.assertEqual(report["checks"][0]["exit_code"], 1)
 
+    def test_the_tests_check_fails_on_a_failing_or_broken_test(self) -> None:
+        # The real check, run in a fixture whose tests/ holds only the module below.
+        check = next(check for check in check_repository.checks(self.context())
+                     if check.name == "tests")
+        passing = ("import unittest\n\n\nclass ProbeTest(unittest.TestCase):\n"
+                   "    def test_probe(self) -> None:\n        self.assertEqual(1, 1)\n")
+        cases = [("passes", passing, "pass"),
+                 ("fails", passing.replace("assertEqual(1, 1)", "assertEqual(1, 2)"), "fail"),
+                 ("cannot be imported", "import a_module_that_does_not_exist\n", "fail")]
+        if sys.version_info >= (3, 12):
+            # From Python 3.12, a run that finds no test exits with 5.
+            cases.append(("holds no test", "", "fail"))
+        for index, (name, source, status) in enumerate(cases):
+            with self.subTest(module=name):
+                # A new module name each time, so that no cached bytecode is read.
+                shutil.rmtree(self.root / "tests", ignore_errors=True)
+                self.write({f"tests/test_probe_{index}.py": source})
+                result = check_repository.run_check(check, self.context(), strict=True)
+                self.assertEqual(result.status, status, result.log)
+
     def test_github_annotations(self) -> None:
         with mock.patch.dict(os.environ, {"GITHUB_ACTIONS": "true"}):
             self.assertEqual(check_repository.annotate(("a.md", "bad")), "::error file=a.md::bad")
@@ -497,7 +517,7 @@ class RunTest(RepositoryTest):
                          "vba-format", "vba-errors", "vba-calls", "data-contract", "test-cases",
                          "derivations", "independent-implementations", "workbook-protection",
                          "changelog", "generated-docs", "restated-counts", "markdown-links",
-                         "documented-commands", "codeql-default-branch",
+                         "documented-commands", "verification-depth", "codeql-default-branch",
                          "whitespace-committed"):
             self.assertIn(expected, names)
         advisory = {check.name for check in check_repository.checks(self.context())

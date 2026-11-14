@@ -112,6 +112,25 @@ Record in *Validated* which way you used, the command, and the failing result
 on the defective code; for a mutant, also its SHA-256. When no test can fail on
 the defect, write NOT APPLICABLE with the reason.
 
+A negative control proves one fix. `tools/verification_depth.json` keeps the
+standing record: for each check of **Repository integrity** that can fail the
+run, what it runs, its negative proofs, the violations they show rejected and
+its state. A proof is a unittest id, such as
+`tests.test_check_links.CheckTests.test_missing_files_anchors_and_paths_are_errors`,
+of a test that shows the check rejecting a bad input, or `probe` for a check
+whose probe the run makes the tool reject first. The state is `green`, or
+`green_in_ci` when a proof is skipped where a tool it needs is missing and runs
+in CI. The `verification-depth` check, `python tools/check_verification_depth.py`,
+takes the checks from `tools/check_repository.py` as CI runs them, less the
+advisory ones, and fails when one has no entry; when an entry names no such
+check, is listed twice, has a missing or empty field, a checker that differs
+from what the check runs, another state or a claim too short to be specific;
+or when a proof names a test that `python -m unittest discover -s tests` does
+not collect. It does not run the proofs: the `tests` check does. A pull request
+that adds a check, or renames or deletes a proof, updates the inventory in the
+same change; to write a missing proof, make its defective input with
+`tools/make_mutant.py`.
+
 ## 📐 Contract changes
 
 A contract change alters what a documented contract promises its users:
@@ -196,6 +215,7 @@ either, `changelog` runs without `--repository`.
 | `restated-counts` | `python tools/check_restated_counts.py` |
 | `markdown-links` | `python tools/check_links.py` |
 | `documented-commands` | `python tools/check_doc_commands.py` |
+| `verification-depth` | `python tools/check_verification_depth.py` |
 | `dependabot-target-branches` | Built in: Every Dependabot target-branch exists. |
 | `codeql-default-branch` | Built in: codeql.yml lists the default branch, which branch filters cannot name. |
 | `required-documents` | Built in: The documents the repository requires exist and are not empty. |

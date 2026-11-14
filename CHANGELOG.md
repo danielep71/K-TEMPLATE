@@ -99,6 +99,17 @@ Use only the categories an entry needs.
   module and to remove its baseline entry. The template has no baseline,
   since its modules are in layout; the house style describes how to create
   one (#502).
+- **Repository integrity** runs a new check, `verification-depth`, which
+  fails while a check that can fail the run lacks an executable negative
+  proof. `tools/verification_depth.json` lists each such check with what it
+  runs, the unittest ids of the tests that show it rejecting a bad input, or
+  its probe, the violations they show rejected and a state from a closed
+  list. The checks come from `tools/check_repository.py` as CI runs them,
+  less the advisory ones, so a pull request that adds a check without an
+  entry, renames or deletes a proof test, or leaves an entry for a removed
+  check fails. New tests prove that the `tests` check fails on a failing or
+  unimportable test, and that the three label checks fail on a defective
+  script or catalogue (#503).
 - The **Repository integrity** check `restated-counts` runs the new
   `tools/check_restated_counts.py`. It fails when a tracked Markdown file
   other than this changelog states, outside a generated block, a count that

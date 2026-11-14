@@ -345,6 +345,9 @@ def checks(context: Context) -> list[Check]:
         Check("restated-counts", [python, "tools/check_restated_counts.py"]),
         Check("markdown-links", [python, "tools/check_links.py"]),
         Check("documented-commands", [python, "tools/check_doc_commands.py"]),
+        # Every check of this list that can fail the run, this one included, needs a
+        # negative proof in tools/verification_depth.json.
+        Check("verification-depth", [python, "tools/check_verification_depth.py"]),
         Check("dependabot-target-branches", function=dependabot_branches),
         Check("codeql-default-branch", function=codeql_default_branch, missing=codeql_missing),
         Check("required-documents", function=required_documents),
