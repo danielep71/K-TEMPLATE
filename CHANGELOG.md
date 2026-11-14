@@ -99,6 +99,9 @@ Use only the categories an entry needs.
 - The traffic guide creates the `traffic-history` branch in a separate
   worktree with commands that work alike in PowerShell and `sh`, instead of
   `sh`-only commands with a temporary directory and a shell variable (#484).
+- The social preview and README banner name the risk areas the template
+  is for, market, credit, operational, counterparty, IRRBB and liquidity,
+  instead of a list of regimes, and show one formula for each (#492).
 
 ### Fixed
 
