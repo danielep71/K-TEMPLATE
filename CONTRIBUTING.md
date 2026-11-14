@@ -193,6 +193,7 @@ either, `changelog` runs without `--repository`.
 | `workbook-protection` | `python tools/check_workbook_protection.py` |
 | `changelog` | `python tools/check_changelog.py --repository OWNER/REPOSITORY` |
 | `generated-docs` | `python tools/render_docs.py --check` |
+| `restated-counts` | `python tools/check_restated_counts.py` |
 | `markdown-links` | `python tools/check_links.py` |
 | `documented-commands` | `python tools/check_doc_commands.py` |
 | `dependabot-target-branches` | Built in: Every Dependabot target-branch exists. |
@@ -205,7 +206,10 @@ either, `changelog` runs without `--repository`.
 `python tools/render_docs.py --write` regenerates this table and the other
 blocks between `BEGIN generated` and `END generated` markers from the code;
 **Repository integrity** fails while one differs from a fresh render. Edit
-the renderer in `tools/render_docs.py`, never the block. A check whose tool or GitHub
+the renderer in `tools/render_docs.py`, never the block. Outside a block, link
+a count's source instead of copying the count: `restated-counts` fails on a
+count of cases, assertions, modes, checks, datasets or finding codes written
+by hand, as the docstring of `tools/check_restated_counts.py` lists. A check whose tool or GitHub
 context is missing locally, such as Ruff or the default branch, is reported as
 skipped, as is `dependabot-target-branches` when a `target-branch` has no
 remote-tracking branch and the `origin` remote cannot be asked whether it

@@ -217,8 +217,8 @@ TEST_Examples.RunExampleTests "C:\path\to\checkout\tests\fixtures"
 
 It runs the example suite through `TEST_Harness` and writes one record per
 line. One case reads the illustrative test cases from that folder and
-records their totals as results. The two entry points below take the same
-argument. A passing run ends with:
+records their totals as results. The entry points below that show the
+failure paths take the same argument. A passing run ends with:
 
 <!-- BEGIN generated: example-suite-results -->
 ```text

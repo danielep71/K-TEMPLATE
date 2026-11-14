@@ -342,6 +342,7 @@ def checks(context: Context) -> list[Check]:
         Check("workbook-protection", [python, "tools/check_workbook_protection.py"]),
         Check("changelog", changelog),
         Check("generated-docs", [python, "tools/render_docs.py", "--check"]),
+        Check("restated-counts", [python, "tools/check_restated_counts.py"]),
         Check("markdown-links", [python, "tools/check_links.py"]),
         Check("documented-commands", [python, "tools/check_doc_commands.py"]),
         Check("dependabot-target-branches", function=dependabot_branches),

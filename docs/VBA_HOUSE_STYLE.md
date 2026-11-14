@@ -218,7 +218,7 @@ compiles nor checks the other rules of this guide.
 
 ## Static checks
 
-**Repository integrity** runs nine static checks on every tracked `.bas`,
+**Repository integrity** runs the static checks below on every tracked `.bas`,
 `.cls` and `.frm` file. Each also runs on its own, for example
 `python tools/check_vba_source.py`; with no VBA source, each passes and says
 it examined no component. The call check is advisory: **Repository
