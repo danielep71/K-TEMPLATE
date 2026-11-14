@@ -266,6 +266,18 @@ class GitHubReadingTests(unittest.TestCase):
                                   "README.md: missing target: missing-b.md",
                                   "README.md: missing target: missing-c.md"])
 
+    def test_backticks_inside_comments_do_not_open_code_spans(self) -> None:
+        # Comments and code spans are read left to right: a backtick inside a
+        # comment is part of the comment, and "<!--" inside a code span is code.
+        errors, _, _ = run_check({
+            "README.md": "Text <!-- ` -->\n[x](missing.md)\nText <!-- ` -->\n\n"
+                         "Text <!-- ` -->\n[h](http://h.example)\nText <!-- ` -->\n\n"
+                         "A `<!--` span [y](missing-y.md) `-->` and <!-- [z](missing.md) -->\n",
+        })
+        self.assertEqual(errors, ["README.md: missing target: missing.md",
+                                  "README.md: plain HTTP link, use https: http://h.example",
+                                  "README.md: missing target: missing-y.md"])
+
     def test_indented_code_blocks_are_ignored(self) -> None:
         errors, _, count = run_check({
             "README.md": "Text\n\n    [a](missing.md)\n\n    [b](missing.md)\n\n"
@@ -355,6 +367,14 @@ class GitHubReadingTests(unittest.TestCase):
         })
         self.assertEqual(errors, ["README.md: missing anchor: guide.md#nowhere",
                                   "README.md: missing anchor: guide.md#api-2"])
+
+    def test_escaped_underscores_stay_in_the_slug(self) -> None:
+        self.assertEqual(check_links.github_slug("\\_foo\\_"), "_foo_")
+        self.assertEqual(check_links.github_slug("\\_foo_ and _bar_"), "_foo_-and-bar")
+        errors, _, _ = run_check({
+            "README.md": "# \\_foo\\_\n# \\_foo\\_\n\n[a](#_foo_) [b](#_foo_-1) [c](#foo)\n",
+        })
+        self.assertEqual(errors, ["README.md: missing anchor: #foo"])
 
     def test_docstring_has_no_invalid_escape(self) -> None:
         source = (ROOT / "tools" / "check_links.py").read_text(encoding="utf-8")

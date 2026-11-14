@@ -91,7 +91,7 @@ REFERENCE = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-
 ESCAPABLE = re.compile(r"[!-/:-@\[-`{-~]")  # ASCII punctuation, escapable with a backslash
 LIST_ITEM = re.compile(r"( *)([-*+]|\d{1,9}[.)])( {1,4}|$)")
 QUOTE = re.compile(r" {0,3}>[ \t]?")
-COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+CODE_OR_COMMENT = re.compile(r"<!--|`+")
 THEMATIC = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*$")
 SETEXT = re.compile(r" {0,3}(?:=+|-+)[ \t]*$")
 ATX = re.compile(r" {0,3}#{1,6}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
@@ -146,7 +146,7 @@ def strip_underscore_emphasis(text: str) -> str:
     letter or digit, and close when it is preceded by a non-space and not
     followed by a letter or digit (CommonMark's rule for "_": never inside a
     word). An opener pairs with the next closer of the same length; unpaired
-    runs are literal.
+    runs, and a "_" escaped with a backslash, are literal.
     """
     parts = re.split(r"((`+).+?\2)", text)
     # re.split gives [text, code span, its backticks, text, ...]; only text changes.
@@ -159,23 +159,26 @@ def strip_segment_emphasis(segment: str) -> str:
     def side(position: int) -> str:
         return segment[position] if 0 <= position < len(segment) else " "
 
-    runs = list(re.finditer(r"_+", segment))
+    # A backslash escapes the first "_" of a run, which stays literal text.
+    runs = [(run.start() + escaped(segment, run.start()), run.end())
+            for run in re.finditer(r"_+", segment)]
+    runs = [(start, end) for start, end in runs if start < end]
     removed: set[int] = set()
-    for number, opener in enumerate(runs):
-        if number in removed or side(opener.end()).isspace() \
-                or side(opener.start() - 1).isalnum():
+    for number, (start, end) in enumerate(runs):
+        if number in removed or side(end).isspace() or side(start - 1).isalnum():
             continue
         for later in range(number + 1, len(runs)):
-            closer = runs[later]
-            if (later not in removed and len(closer.group()) == len(opener.group())
-                    and not side(closer.start() - 1).isspace()
-                    and not side(closer.end()).isalnum()):
+            close_start, close_end = runs[later]
+            if (later not in removed and close_end - close_start == end - start
+                    and not side(close_start - 1).isspace()
+                    and not side(close_end).isalnum()):
                 removed |= {number, later}
                 break
     kept, position = [], 0
-    for number, run in enumerate(runs):
-        kept.append(segment[position:run.start()] + ("" if number in removed else run.group()))
-        position = run.end()
+    for number, (start, end) in enumerate(runs):
+        if number in removed:
+            kept.append(segment[position:start])
+            position = end
     return "".join(kept) + segment[position:]
 
 
@@ -256,26 +259,36 @@ def escaped(text: str, position: int) -> bool:
     return (position - start) % 2 == 1
 
 
-def strip_code_spans(text: str) -> str:
-    """Remove the code spans of one block of text, which may span several lines.
+def strip_code_and_comments(text: str) -> str:
+    """Remove the code spans and HTML comments of one block of text, which may
+    span several lines.
 
-    As in CommonMark, a backtick run opens a span only if it is not escaped and
-    an equally long run follows in the same block; otherwise it is literal. The
-    newlines inside a removed span are kept, so the text keeps its lines.
+    They are read left to right, as in CommonMark, so whichever starts first
+    wins: a backtick inside a comment is part of the comment, and "<!--" inside
+    a code span is code. A backtick run opens a span only if it is not escaped
+    (a backslash escapes its first backtick only) and an equally long run
+    follows in the same block; "<!--" opens a comment only if it is not escaped
+    and "-->" follows. Otherwise they are literal. The newlines inside a removed
+    span or comment are kept, so the text keeps its lines.
     """
-    runs = list(re.finditer(r"`+", text))
     kept, position, index = [], 0, 0
-    while index < len(runs):
-        opener = runs[index]
-        closer = None if escaped(text, opener.start()) else next(
-            (later for later in range(index + 1, len(runs))
-             if len(runs[later].group()) == len(opener.group())), None)
-        if closer is None:
-            index += 1
+    while match := CODE_OR_COMMENT.search(text, index):
+        opener = match.start()
+        if escaped(text, opener):
+            index = opener + 1
             continue
-        kept += [text[position:opener.start()],
-                 "\n" * text.count("\n", opener.start(), runs[closer].end())]
-        position, index = runs[closer].end(), closer + 1
+        if match.group().startswith("<"):
+            found = text.find("-->", match.end())
+            close = found + 3 if found >= 0 else None
+        else:
+            length = len(match.group())
+            closer = re.compile(rf"(?<!`)`{{{length}}}(?!`)").search(text, match.end())
+            close = closer.end() if closer else None
+        if close is None:
+            index = match.end()
+            continue
+        kept += [text[position:opener], "\n" * text.count("\n", opener, close)]
+        position = index = close
     return "".join(kept) + text[position:]
 
 
@@ -295,8 +308,7 @@ def line_links(line: str) -> tuple[list[str], set[str]]:
 def block_links(lines: Sequence[str]) -> tuple[list[str], set[str]]:
     """Links and explicit anchors of one block of text lines, outside its code spans
     and HTML comments."""
-    text = strip_code_spans("\n".join(lines))
-    text = COMMENT.sub(lambda match: "\n" * match.group().count("\n"), text)
+    text = strip_code_and_comments("\n".join(lines))
     links = [decode_destination(link) for link in inline_destinations(text)]
     anchors: set[str] = set()
     for line in text.split("\n"):
