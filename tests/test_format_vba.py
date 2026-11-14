@@ -262,20 +262,29 @@ class HeaderTest(unittest.TestCase):
 
 
 def deform(text: str) -> str:
-    """Module text with every kind of drift that the formatter must undo."""
-    out: list[str] = []
+    """Module text with every kind of drift that the formatter must undo.
+
+    The VBE header is kept as it stands, as the formatter keeps it, and a line
+    that a continuation carries over is never read as an End statement.
+    """
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    split = format_vba.header_length(lines)
+    out: list[str] = lines[:split]
     continued = False
-    for line in text.split("\r\n")[:-1]:
-        code = line.strip()
-        if format_vba.outer_level(line) and not continued:
+    for line in lines[split:]:
+        carried = continued
+        code = format_vba.split_code_comment(line.strip())[0].strip()
+        if format_vba.outer_level(line) and not carried:
             line = "  " + line                          # outer-level line indented
         elif line.startswith("    "):
             line = "\t" + line[4:]                      # tab indentation
-        if code and not code.startswith(("'", "Attribute")):
+        if code and not code.startswith("Attribute"):
             line += " \t"                               # trailing white space
         out.append(line)
         continued = format_vba.continues(line.rstrip())
-        if format_vba.PROCEDURE_END.match(code) and not continued:
+        if not carried and not continued and format_vba.PROCEDURE_END.match(code):
             out.append("")                              # an extra blank line after End
     return "\n".join(out) + "\n\n\n"                    # LF endings, blank lines at the end
 
@@ -284,6 +293,37 @@ def baselined(root: Path) -> set[str]:
     """The modules the root's default layout baseline lists; none without the file."""
     path = root / format_vba.BASELINE
     return set(format_vba.load_baseline(path, format_vba.BASELINE)) if path.exists() else set()
+
+
+class DeformTest(unittest.TestCase):
+    """The drift helper on module shapes a generated repository may track."""
+
+    CLASS = ("VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\n"
+             'Attribute VB_Name = "CResult"\r\nOption Explicit\r\n\r\n'
+             "Public Sub Run()\r\n    X = 1\r\nEnd Sub\r\n")
+    STANDARD = 'Attribute VB_Name = "A"\r\nOption Explicit\r\n\r\nSub Run()\r\n    X = 1\r\nEnd Sub\r\n'
+    CONTINUED_COMMENT = ('Attribute VB_Name = "A"\r\nSub Run()\r\n    X = 1 \' note _\r\n'
+                         "End Sub\r\nEnd Sub\r\n")
+
+    def assert_undone(self, text: str) -> None:
+        drifted = deform(text)
+        self.assertNotEqual(drifted, text)
+        formatted = format_vba.format_text(drifted)
+        self.assertEqual(formatted, format_vba.format_text(text))
+        self.assertEqual(tokens(formatted), tokens(text))
+
+    def test_a_class_header_is_kept(self) -> None:
+        self.assertEqual(format_vba.format_text(self.CLASS), self.CLASS)
+        self.assert_undone(self.CLASS)
+        self.assertTrue(deform(self.CLASS).startswith("VERSION 1.0 CLASS\nBEGIN\n  MultiUse"))
+
+    def test_lf_endings_and_a_missing_final_line_break(self) -> None:
+        for text in (self.STANDARD.replace("\r\n", "\n"), self.STANDARD[:-2]):
+            with self.subTest(repr(text[-12:])):
+                self.assert_undone(text)
+
+    def test_a_continued_comment_before_end_is_not_an_end(self) -> None:
+        self.assert_undone(self.CONTINUED_COMMENT)
 
 
 class TrackedModuleTest(unittest.TestCase):
