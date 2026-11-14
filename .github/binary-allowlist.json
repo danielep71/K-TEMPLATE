@@ -2,7 +2,7 @@
   "schema_version": 1,
   "files": {
     "docs/assets/social-preview.png": {
-      "sha256": "9e1d736112f5636a5a914c47b360abd5ef019d3c1592ecb4b0668c8c35970928",
+      "sha256": "a1819f599d4636db9cea58a4aa495c4600c0b423267b67ff325c18aaaa8da078",
       "reason": "The repository's social preview and README banner, exported from docs/assets/social-preview.svg"
     }
   }
