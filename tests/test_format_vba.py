@@ -1,14 +1,20 @@
-"""Tests for tools/format_vba.py, with synthetic VBA fragments.
+"""Tests for tools/format_vba.py: layout rules, the tracked modules and the baseline.
 
 Each rule case states one line or a few lines as the formatter must leave
 them, so that a failure names the rule. The literal and apostrophe cases are
-the ones a line-based formatter is most likely to get wrong.
+the ones a line-based formatter is most likely to get wrong. Every rule case
+also checks that formatting keeps each logical line, with its continuations
+joined, and every token outside white space. The command-line cases run in
+temporary Git repositories.
 """
 
 from __future__ import annotations
 
 import contextlib
 import io
+import json
+import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import format_vba  # noqa: E402
+import vba_lexer  # noqa: E402
 
 HEAD = ['Attribute VB_Name = "CORE_Probe"', "Option Explicit", "Option Private Module", ""]
 
@@ -30,11 +37,41 @@ def body_of(text: str) -> list[str]:
     return text.split("\r\n")[len(HEAD):-1]
 
 
+# A token is a string literal, a comment without its trailing white space, or a
+# run of code characters; white space and line breaks separate tokens.
+TOKEN = re.compile(r'"(?:[^"\r\n]|"")*"|\'[^\r\n]*|[^\s"\']+')
+
+
+def tokens(text: str) -> list[str]:
+    return [token.rstrip() if token.startswith("'") else token
+            for token in TOKEN.findall(text)]
+
+
+def logical_lines(text: str) -> list[tuple[str, list[str]]]:
+    """Each logical line that tools/vba_lexer.py reads, as its statements.
+
+    Continuations, in code and in comments, are joined and comments removed,
+    so a blank line added to or removed from a logical line, or comment text
+    turned into code, changes the result. Blank logical lines are left out.
+    """
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return [(kind, vba_lexer.split_statements(code))
+            for _, _, kind, code in vba_lexer.logical_units(lines) if code.strip()]
+
+
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", "-C", str(root), "-c", "core.autocrlf=false", *args],
+                   check=True, capture_output=True)
+
+
 class RuleTest(unittest.TestCase):
     def assertFormats(self, before: list[str], after: list[str]) -> None:
-        formatted = format_vba.format_text(module(*before))
+        text = module(*before)
+        formatted = format_vba.format_text(text)
         self.assertEqual(body_of(formatted), after)
         self.assertEqual(format_vba.format_text(formatted), formatted, "not idempotent")
+        self.assertEqual(logical_lines(formatted), logical_lines(text), "logical lines changed")
+        self.assertEqual(tokens(formatted), tokens(text), "tokens changed")
 
     def test_formatted_module_is_unchanged(self) -> None:
         text = module("Private Sub Run()", "    Dim Count As Long", "End Sub")
@@ -98,6 +135,64 @@ class RuleTest(unittest.TestCase):
         # A blank line ends the continuation; the two blank lines then follow it.
         self.assertFormats(["End Sub ' a _", "    more", "", "Private Sub Two()", "End Sub"],
                            ["End Sub ' a _", "    more", "", "", "Private Sub Two()", "End Sub"])
+
+    def test_statement_keywords_are_not_labels(self) -> None:
+        # A keyword and a colon separator, such as Else: or Loop:, keeps its
+        # indentation; a label still moves to the outer level.
+        lines = ["Private Sub Run()", "    If Ready Then", "        Count = 1", "    Else:",
+                 "        Count = 2", "    End If", "    Do", "    Loop:", "End Sub"]
+        self.assertFormats(lines, lines)
+        for word in sorted(format_vba.NOT_LABELS):
+            for spelled in (word, word.capitalize(), word.upper()):
+                with self.subTest(keyword=spelled):
+                    lines = ["Private Sub Run()", f"    {spelled}:", "End Sub"]
+                    self.assertFormats(lines, lines)
+        self.assertFormats(["Private Sub Run()", "    Elsewhere:", "    Done:", "End Sub"],
+                           ["Private Sub Run()", "Elsewhere:", "Done:", "End Sub"])
+
+    # Each row: the input lines and the lines the formatter must leave.
+    PROBE_ROWS = [
+        ("a continued comment after End",
+         ["End Sub ' explanation _", "    Debug.Print 1", "Private Sub Two()"],
+         ["End Sub ' explanation _", "    Debug.Print 1", "", "", "Private Sub Two()"]),
+        ("comment continuation text that looks like a label",
+         ["    ' note _", "        Done:"], ["    ' note _", "        Done:"]),
+        ("a tab before the underscore",
+         ["    Debug.Print\t_", "        Done:"], ["    Debug.Print\t_", "        Done:"]),
+        ("a blank line that ends a continuation at the end of the file",
+         ["End Sub ' a _", ""], ["End Sub ' a _", ""]),
+        ("statement keywords with a colon", ["    Else:", "    Loop:"],
+         ["    Else:", "    Loop:"]),
+        ("indented comment headings", ["'Declare", "    'Invert", "  ' text"],
+         ["'Declare", "    'Invert", "  ' text"]),
+    ]
+
+    def test_probe_rows(self) -> None:
+        for label, before, after in self.PROBE_ROWS:
+            with self.subTest(label):
+                self.assertFormats(before, after)
+
+    def test_blank_lines_inside_a_logical_line_are_kept(self) -> None:
+        # A blank line that a continuation carries over ends that logical line:
+        # it is neither removed nor joined to what follows, after an End
+        # statement or at the end of the file included.
+        unchanged = [
+            ["Private Sub One()", "    X = 1 _", "", "    Y = 2", "End Sub"],
+            ["Private Sub One()", "    ' a _", "", "End Sub"],
+            ["Private Sub One()", "End Sub ' a _", "", "", "", "Private Sub Two()", "End Sub"],
+            ["Private Sub One()", "    X = 1 _", ""],
+        ]
+        for lines in unchanged:
+            with self.subTest(lines=lines):
+                self.assertFormats(lines, lines)
+        self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "Private Sub Two()",
+                            "End Sub"],
+                           ["Private Sub One()", "End Sub ' a _", "", "", "",
+                            "Private Sub Two()", "End Sub"])
+        self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "", ""],
+                           ["Private Sub One()", "End Sub ' a _", ""])
+        self.assertFormats(["Private Const A As Long = 1 _", "    + 1", "", "  ", ""],
+                           ["Private Const A As Long = 1 _", "    + 1"])
 
     def test_two_blank_lines_between_procedures(self) -> None:
         self.assertFormats(["Private Sub One()", "End Sub", "'Header of Two",
@@ -166,48 +261,242 @@ class HeaderTest(unittest.TestCase):
         self.assertEqual(format_vba.header_length(lines), len(header))
 
 
+def deform(text: str) -> str:
+    """Module text with every kind of drift that the formatter must undo."""
+    out: list[str] = []
+    continued = False
+    for line in text.split("\r\n")[:-1]:
+        code = line.strip()
+        if format_vba.outer_level(line) and not continued:
+            line = "  " + line                          # outer-level line indented
+        elif line.startswith("    "):
+            line = "\t" + line[4:]                      # tab indentation
+        if code and not code.startswith(("'", "Attribute")):
+            line += " \t"                               # trailing white space
+        out.append(line)
+        continued = format_vba.continues(line.rstrip())
+        if format_vba.PROCEDURE_END.match(code) and not continued:
+            out.append("")                              # an extra blank line after End
+    return "\n".join(out) + "\n\n\n"                    # LF endings, blank lines at the end
+
+
+class TrackedModuleTest(unittest.TestCase):
+    """The formatter on the text of this repository's tracked modules, read only."""
+
+    modules: dict[str, str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.modules = {name: format_vba.read(ROOT / name)
+                       for name in format_vba.tracked_modules(ROOT)}
+
+    def test_modules_are_in_layout(self) -> None:
+        for name, text in self.modules.items():
+            with self.subTest(name):
+                self.assertEqual(format_vba.format_text(text), text)
+
+    def test_drift_is_undone_without_changing_code(self) -> None:
+        for name, text in self.modules.items():
+            with self.subTest(name):
+                drifted = deform(text)
+                self.assertNotEqual(drifted, text)
+                formatted = format_vba.format_text(drifted)
+                self.assertEqual(formatted, format_vba.format_text(text))
+                self.assertEqual(tokens(formatted), tokens(text))
+                self.assertEqual(logical_lines(formatted), logical_lines(text))
+                self.assertEqual(format_vba.format_text(formatted), formatted)
+
+    def test_token_check_detects_a_change(self) -> None:
+        self.assertNotEqual(tokens('X = "a  b"'), tokens('X = "a b"'))
+        self.assertNotEqual(tokens("X = a b"), tokens("X = ab"))
+        self.assertEqual(tokens("  X = 1 ' note  \r\n"), tokens("X  =  1\t' note"))
+        self.assertNotEqual(logical_lines("End Sub ' a _\r\n    Debug.Print 1\r\n"),
+                            logical_lines("End Sub ' a _\r\n\r\n    Debug.Print 1\r\n"))
+
+
 class MainTest(unittest.TestCase):
-    def run_main(self, files: dict[str, str], *args: str) -> tuple[int, str, Path]:
+    """The command line, in temporary Git repositories."""
+
+    GOOD = module("Private Sub Run()", "End Sub")
+    BAD = module("  Private Sub Run()", "End Sub")
+
+    def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory(prefix="format-vba-")
         self.addCleanup(directory.cleanup)
-        root = Path(directory.name)
+        self.root = Path(directory.name)
+        git(self.root, "init", "-q")
+
+    def track(self, files: dict[str, str], *, add: bool = True) -> None:
         for name, text in files.items():
-            (root / name).parent.mkdir(parents=True, exist_ok=True)
-            (root / name).write_bytes(text.encode("latin-1"))
-        with contextlib.redirect_stdout(io.StringIO()) as printed:
-            code = format_vba.main([*args, "--root", str(root)])
-        return code, printed.getvalue(), root
+            (self.root / name).parent.mkdir(parents=True, exist_ok=True)
+            (self.root / name).write_bytes(text.encode("latin-1"))
+        if add:
+            git(self.root, "add", "--all")
+
+    def baseline(self, files: object, **fields: object) -> None:
+        path = self.root / format_vba.BASELINE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"schema_version": 1, "files": files, **fields}),
+                        encoding="utf-8")
+
+    def run_main(self, *args: str) -> tuple[int, str, str]:
+        with contextlib.redirect_stdout(io.StringIO()) as printed, \
+                contextlib.redirect_stderr(io.StringIO()) as errors:
+            code = format_vba.main([*args, "--root", str(self.root)])
+        return code, printed.getvalue(), errors.getvalue()
 
     def test_no_source_passes(self) -> None:
-        code, printed, _ = self.run_main({}, "--check")
+        code, printed, _ = self.run_main("--check")
         self.assertEqual(code, 0)
         self.assertIn("vba-format: PASS (no VBA source found)", printed)
 
     def test_repository_passes(self) -> None:
-        with contextlib.redirect_stdout(io.StringIO()):
+        with contextlib.redirect_stdout(io.StringIO()) as printed:
             self.assertEqual(format_vba.main(["--check", "--root", str(ROOT)]), 0)
+        self.assertIn("vba-format: PASS (", printed.getvalue())
 
     def test_check_and_write(self) -> None:
-        drifted = module("  Private Sub Run()  ", "End Sub")
-        files = {"src/core/CORE_Probe.bas": drifted,
-                 "src/workbook/frmRun.frx": "\x00\x01",
-                 "docs/notes.bas": drifted}
-        code, printed, root = self.run_main(files, "--check")
+        files = {"src/core/CORE_Probe.bas": self.BAD, "src/workbook/frmRun.frx": "\x00\x01",
+                 "docs/notes.bas": self.BAD}
+        self.track(files)
+        code, printed, _ = self.run_main("--check")
         self.assertEqual(code, 1)
         self.assertIn("FAIL: src/core/CORE_Probe.bas: not in house-style layout", printed)
         self.assertNotIn("docs/notes.bas", printed)
-        self.assertIn("vba-format: FAIL (1 file(s)", printed)
-        code, printed, root = self.run_main(files, "--write")
+        self.assertIn("vba-format: FAIL (1 file(s), 0 baselined", printed)
+        code, printed, _ = self.run_main("--write")
         self.assertEqual(code, 0)
-        self.assertEqual((root / "src/core/CORE_Probe.bas").read_bytes().decode("latin-1"),
-                         module("Private Sub Run()", "End Sub"))
-        self.assertEqual((root / "docs/notes.bas").read_bytes().decode("latin-1"), drifted)
+        self.assertIn("formatted: src/core/CORE_Probe.bas", printed)
+        self.assertIn("Re-import each rewritten module into the VBE", printed)
+        self.assertEqual((self.root / "src/core/CORE_Probe.bas").read_bytes().decode("latin-1"),
+                         self.GOOD)
+        self.assertEqual((self.root / "docs/notes.bas").read_bytes().decode("latin-1"),
+                         self.BAD)
+
+    def test_only_tracked_modules_are_read(self) -> None:
+        self.track({"src/A.bas": self.GOOD, "tests/modules/B.cls": self.GOOD,
+                    "examples/modules/C.frm": self.GOOD, "notes/D.bas": self.BAD})
+        self.track({"src/Untracked.bas": self.BAD}, add=False)
+        code, printed, _ = self.run_main("--check")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("(3 file(s), 0 baselined", printed)
+        self.assertNotIn("Untracked", printed)
+
+    def test_not_a_git_repository(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="format-vba-plain-") as plain:
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()) as errors:
+                code = format_vba.main(["--check", "--root", plain])
+        self.assertEqual(code, 2)
+        self.assertIn("vba-format: ERROR: cannot list the tracked files", errors.getvalue())
+
+    def test_baselined_module_out_of_layout_passes(self) -> None:
+        self.track({"src/A.bas": self.BAD, "src/B.bas": self.GOOD})
+        self.baseline(["src/A.bas"])
+        code, printed, _ = self.run_main("--check")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("baselined: src/A.bas: not in house-style layout, listed in "
+                      "tools/vba_layout_baseline.json", printed)
+        self.assertIn("vba-format: PASS (2 file(s), 1 baselined", printed)
+
+    def test_unlisted_module_out_of_layout_fails(self) -> None:
+        self.track({"src/A.bas": self.BAD, "src/B.bas": self.BAD})
+        self.baseline(["src/A.bas"])
+        code, printed, _ = self.run_main("--check")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL: src/B.bas: not in house-style layout; run python "
+                      "tools/format_vba.py --write src/B.bas", printed)
+        self.assertNotIn("FAIL: src/A.bas", printed)
+
+    def test_listed_module_in_layout_fails_until_removed(self) -> None:
+        self.track({"src/A.bas": self.BAD, "src/B.bas": self.GOOD})
+        self.baseline(["src/A.bas"])
+        code, printed, _ = self.run_main("--write", "src/A.bas")
+        self.assertEqual(code, 0)
+        self.assertIn("formatted: src/A.bas", printed)
+        self.assertIn("Re-import each rewritten module into the VBE", printed)
+        self.assertIn("Remove src/A.bas from tools/vba_layout_baseline.json", printed)
+        code, printed, _ = self.run_main("--check")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL: src/A.bas: in layout but still listed in "
+                      "tools/vba_layout_baseline.json; remove its entry", printed)
+        self.baseline([])
+        self.assertEqual(self.run_main("--check")[0], 0)
+        (self.root / format_vba.BASELINE).unlink()
+        self.assertEqual(self.run_main("--check")[0], 0)
+
+    def test_listed_path_that_is_not_a_tracked_module_fails(self) -> None:
+        self.track({"src/A.bas": self.GOOD, "docs/C.bas": self.BAD, "src/D.txt": self.BAD})
+        self.track({"src/Untracked.bas": self.BAD}, add=False)
+        for name in ("src/Gone.bas", "src/Untracked.bas", "docs/C.bas", "src/D.txt"):
+            with self.subTest(name):
+                self.baseline([name])
+                code, printed, _ = self.run_main("--check")
+                self.assertEqual(code, 1)
+                self.assertIn(f"FAIL: {name}: listed in tools/vba_layout_baseline.json but not "
+                              "a tracked VBA module", printed)
+
+    def test_no_baseline_checks_every_module(self) -> None:
+        self.track({"src/A.bas": self.BAD})
+        self.baseline(["src/A.bas"])
+        code, printed, _ = self.run_main("--check", "--no-baseline")
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL: src/A.bas: not in house-style layout", printed)
+        self.assertIn("0 baselined", printed)
+        # --no-baseline ignores a baseline file, even a malformed one.
+        (self.root / format_vba.BASELINE).write_text("{", encoding="utf-8")
+        self.assertEqual(self.run_main("--check", "--no-baseline")[0], 1)
+
+    def test_explicit_baseline(self) -> None:
+        self.track({"src/A.bas": self.BAD})
+        (self.root / "layout.json").write_text(
+            json.dumps({"schema_version": 1, "files": ["src/A.bas"]}), encoding="utf-8")
+        code, printed, _ = self.run_main("--check", "--baseline", "layout.json")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("baselined: src/A.bas: not in house-style layout, listed in layout.json",
+                      printed)
+        code, _, errors = self.run_main("--check", "--baseline", "missing.json")
+        self.assertEqual(code, 2)
+        self.assertIn("vba-format: ERROR: cannot read baseline missing.json", errors)
+
+    def test_baseline_errors(self) -> None:
+        self.track({"src/A.bas": self.BAD, "src/B.bas": self.GOOD})
+        valid = {"schema_version": 1, "files": ["src/A.bas"]}
+        cases: dict[str, object] = {
+            "not JSON": "{",
+            "not an object": json.dumps(["src/A.bas"]),
+            "wrong schema_version": json.dumps({**valid, "schema_version": 2}),
+            "no schema_version": json.dumps({"files": ["src/A.bas"]}),
+            "files not a list": json.dumps({**valid, "files": "src/A.bas"}),
+            "a path not a string": json.dumps({**valid, "files": [1]}),
+            "unsorted": json.dumps({**valid, "files": ["src/B.bas", "src/A.bas"]}),
+            "duplicated": json.dumps({**valid, "files": ["src/A.bas", "src/A.bas"]}),
+            "absolute": json.dumps({**valid, "files": ["/src/A.bas"]}),
+            "drive letter": json.dumps({**valid, "files": ["C:/src/A.bas"]}),
+            "backslash": json.dumps({**valid, "files": ["src\\A.bas"]}),
+            "parent": json.dumps({**valid, "files": ["src/../src/A.bas"]}),
+            "dot": json.dumps({**valid, "files": ["./src/A.bas"]}),
+            "empty": json.dumps({**valid, "files": [""]}),
+        }
+        path = self.root / format_vba.BASELINE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        for label, content in cases.items():
+            for mode in ("--check", "--write"):
+                with self.subTest(label, mode=mode):
+                    path.write_text(str(content), encoding="utf-8")
+                    code, _, errors = self.run_main(mode)
+                    self.assertEqual(code, 2)
+                    self.assertIn("vba-format: ERROR: ", errors)
+                    self.assertIn("tools/vba_layout_baseline.json", errors)
+        # An error never rewrites a module.
+        self.assertEqual((self.root / "src/A.bas").read_bytes().decode("latin-1"), self.BAD)
 
     def test_bytes_outside_ascii_round_trip(self) -> None:
         text = module("Private Sub Run()", "    ' caf\xe9", "End Sub")
-        code, _, root = self.run_main({"src/core/CORE_Probe.bas": text}, "--write")
+        self.track({"src/core/CORE_Probe.bas": text})
+        code, _, _ = self.run_main("--write")
         self.assertEqual(code, 0)
-        self.assertEqual((root / "src/core/CORE_Probe.bas").read_bytes(),
+        self.assertEqual((self.root / "src/core/CORE_Probe.bas").read_bytes(),
                          text.encode("latin-1"))
 
     def test_paths_outside_the_root(self) -> None:
@@ -215,34 +504,41 @@ class MainTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="format-vba-outside-") as outside:
             files = [Path(outside) / name for name in ("A.bas", "B.bas")]
             for path in files:
-                path.write_bytes(module("  Private Sub Run()", "End Sub").encode("latin-1"))
+                path.write_bytes(self.BAD.encode("latin-1"))
             for mode in ("--check", "--write"):
                 with self.subTest(mode=mode):
-                    code, printed, _ = self.run_main({}, mode, *map(str, files))
+                    code, printed, _ = self.run_main(mode, *map(str, files))
                     for path in files:
                         self.assertIn(path.resolve().as_posix(), printed)
             self.assertEqual(code, 0)
             for path in files:
-                self.assertEqual(path.read_bytes().decode("latin-1"),
-                                 module("Private Sub Run()", "End Sub"))
+                self.assertEqual(path.read_bytes().decode("latin-1"), self.GOOD)
 
     def test_folder_paths(self) -> None:
-        files = {"elsewhere/a/CORE_Probe.bas": module("  Private Sub Run()", "End Sub"),
-                 "elsewhere/b/notes.txt": "  not VBA\r\n"}
-        code, printed, root = self.run_main(files, "--write", "elsewhere")
+        self.track({"elsewhere/a/CORE_Probe.bas": self.BAD,
+                    "elsewhere/b/notes.txt": "  not VBA\r\n"}, add=False)
+        code, printed, _ = self.run_main("--write", "elsewhere")
         self.assertEqual(code, 0, printed)
         self.assertIn("formatted: elsewhere/a/CORE_Probe.bas", printed)
-        self.assertEqual((root / "elsewhere/b/notes.txt").read_bytes(), b"  not VBA\r\n")
-        with contextlib.redirect_stderr(io.StringIO()) as errors:
-            code, _, _ = self.run_main({}, "--check", "missing")
+        self.assertEqual((self.root / "elsewhere/b/notes.txt").read_bytes(), b"  not VBA\r\n")
+        code, _, errors = self.run_main("--check", "missing")
         self.assertEqual(code, 2)
-        self.assertIn("missing is not a file or folder", errors.getvalue())
+        self.assertIn("missing is not a file or folder", errors)
 
     def test_explicit_paths(self) -> None:
-        files = {"elsewhere/CORE_Probe.bas": module("  Private Sub Run()", "End Sub")}
-        code, printed, _ = self.run_main(files, "--check", "elsewhere/CORE_Probe.bas")
+        self.track({"src/A.bas": self.GOOD})
+        self.track({"elsewhere/CORE_Probe.bas": self.BAD}, add=False)
+        code, printed, _ = self.run_main("--check", "elsewhere/CORE_Probe.bas")
         self.assertEqual(code, 1)
         self.assertIn("FAIL: elsewhere/CORE_Probe.bas", printed)
+        self.assertIn("(1 file(s)", printed)
+        # A named path is checked against the baseline; entries outside the
+        # named paths are not reported.
+        self.baseline(["elsewhere/CORE_Probe.bas", "src/Gone.bas"])
+        code, printed, _ = self.run_main("--check", "elsewhere/CORE_Probe.bas")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("baselined: elsewhere/CORE_Probe.bas", printed)
+        self.assertEqual(self.run_main("--check", "src/A.bas")[0], 0)
 
 
 if __name__ == "__main__":
