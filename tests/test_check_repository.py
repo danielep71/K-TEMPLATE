@@ -496,8 +496,9 @@ class RunTest(RepositoryTest):
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "secret-files",
                          "vba-format", "vba-errors", "vba-calls", "data-contract", "test-cases",
                          "derivations", "independent-implementations", "workbook-protection",
-                         "changelog", "generated-docs", "markdown-links", "documented-commands",
-                         "codeql-default-branch", "whitespace-committed"):
+                         "changelog", "generated-docs", "restated-counts", "markdown-links",
+                         "documented-commands", "codeql-default-branch",
+                         "whitespace-committed"):
             self.assertIn(expected, names)
         advisory = {check.name for check in check_repository.checks(self.context())
                     if check.advisory}

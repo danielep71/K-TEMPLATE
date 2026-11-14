@@ -88,6 +88,18 @@ Use only the categories an entry needs.
   needs a run of the candidate or one `--equivalent-to` proves identical.
   The VBA lexer no longer reads `Rem` or a colon inside a `[...]` expression
   as a comment or a statement separator (#499).
+- The **Repository integrity** check `restated-counts` runs the new
+  `tools/check_restated_counts.py`. It fails when a tracked Markdown file
+  other than this changelog states, outside a generated block, a count that
+  has a single source: the example suite's cases, assertions, modes and
+  failure entry points, the integrity checks and the static checks of VBA
+  source, the data contract's datasets and the validator's finding codes. It
+  matches a count in digits or in words before the phrase that names the
+  source, whatever its value, so a stale copy fails too, and names the file,
+  line, phrase and source. A reviewed restatement stays only in its list of
+  allowed restatements, with a reason. The installation guide, the harness
+  guide, the VBA house style and the setup guide no longer restate these
+  counts (#504).
 
 ### Changed
 
