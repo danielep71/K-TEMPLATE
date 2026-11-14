@@ -9,12 +9,17 @@ Base: <!-- the default branch, merged with a merge commit; or `release/X.Y.Z`: a
 
 ## 🔗 Linked issues
 
-<!-- Link task issues with Resolves #; integration and sync PRs use Refs #
-for the issues and preceding PRs they carry. Release branches section of
+<!-- While a release branch is active, use only Refs # here, in the title and
+in every commit message: a closing keyword in any of them closes its issue
+when the release branch reaches the default branch. Use Resolves # only into
+the default branch while no release branch is active, for an issue this PR
+completes. Integration and sync PRs use Refs # for the issues and preceding
+PRs they carry; an integration lists each open issue that a merged commit
+would close on a line "Reopen after merge: #N". Release branches section of
 docs/repo_governance/PULL_REQUESTS.md: bases, keywords and merge methods.
 Milestones belong to issues only. -->
 
-Resolves #
+Refs #
 
 ## 🧾 Changes
 
