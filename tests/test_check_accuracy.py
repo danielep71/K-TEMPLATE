@@ -1103,6 +1103,33 @@ class RecordHoldoutTest(unittest.TestCase):
                       "under decision #1 with the results of commit aaaaaaaaaaaa (exposures 1)",
                       output)
 
+    def test_a_decision_used_again_after_a_later_one_is_refused(self) -> None:
+        def exposed_twice(root: Path) -> None:
+            expose(root, "ACC-02")
+            (root / check_accuracy.REGISTRY).write_text(
+                json.dumps(registry({**FROZEN, "decision": "#2"})), "utf-8")
+            expose(root, "ACC-02")
+            (root / check_accuracy.REGISTRY).write_text(json.dumps(registry(FROZEN)), "utf-8")
+
+        with repository(registry(FROZEN)) as root:
+            exposed_twice(root)
+            found = check_accuracy.check(root)[0]
+        self.assertEqual(found, ["tests/accuracy/contracts.json: ACC-02: decision #1 was already "
+                                 "used for exposure 1 (results of commit aaaaaaaaaaaa), before "
+                                 "decision #2: a new exposure needs a new decision that states "
+                                 "the earlier exposures"])
+        output = self.refused(registry(FROZEN), "--record-holdout", "ACC-02",
+                              prepare=exposed_twice)
+        self.assertIn("decision #1 was already used for exposure 1", output)
+        # The guard holds even without the registry check, which refuses first.
+        with repository(registry(FROZEN)) as root:
+            exposed_twice(root)
+            read = check_accuracy.read_registry(root, None, Report(), "registry")
+            record = check_accuracy.read_record(root, None, Report(), "record")
+        assert read is not None and record is not None
+        reused = check_accuracy.reused_decision(read.contracts[0], record.of("ACC-02"))
+        self.assertEqual((reused.decision, reused.count) if reused else None, ("#1", 1))
+
     def test_a_missing_malformed_or_inconsistent_record_is_refused(self) -> None:
         def entry(root: Path) -> dict[str, Any]:
             expose(root, "ACC-02")

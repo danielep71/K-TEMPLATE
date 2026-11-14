@@ -523,8 +523,11 @@ The record is checked with or without results. The check fails on an
 exposure that is malformed, numbered out of order, or a second one of a
 contract under the same decision; on an exposure whose contract is no longer
 in the registry; and on a record that no longer starts with the exposures
-recorded at the newest `vX.Y.Z` tag. For a frozen contract whose `decision`
-is still that of its last exposure, it also fails on:
+recorded at the newest `vX.Y.Z` tag. It fails on a frozen contract whose
+`decision` is that of an earlier exposure but not of its last: a decision
+used again after a later one cannot state the exposures since, and
+`--record-holdout` refuses it. For a frozen contract whose `decision` is
+still that of its last exposure, it also fails on:
 
 - an entry that differs from the one recorded, the target included;
 - a threshold lower than the one recorded: a threshold lowered after the

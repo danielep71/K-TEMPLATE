@@ -953,6 +953,14 @@ def exposed_under(contract: Contract, exposures: Sequence[Exposure]) -> Exposure
     return exposures[-1]
 
 
+def reused_decision(contract: Contract, exposures: Sequence[Exposure]) -> Exposure | None:
+    """An exposure, other than the latest, under the frozen contract's current decision: a
+    decision used again after a later one, which cannot state the exposures since."""
+    if contract.status != "frozen" or exposed_under(contract, exposures) is not None:
+        return None
+    return next((item for item in exposures if item.decision == contract.decision), None)
+
+
 def drift_problems(root: Path, contract: Contract, exposures: Sequence[Exposure]) -> list[str]:
     """How a frozen contract differs from its exposure under the same decision: its
     entry, a lower threshold, a holdout fixture or expected file, or a design
@@ -960,7 +968,12 @@ def drift_problems(root: Path, contract: Contract, exposures: Sequence[Exposure]
     comparison."""
     last = exposed_under(contract, exposures)
     if last is None:
-        return []
+        reused = reused_decision(contract, exposures)
+        return [] if reused is None else [
+            f"decision {reused.decision} was already used for exposure {reused.count} "
+            f"(results of commit {reused.commit[:12]}), before decision "
+            f"{exposures[-1].decision}: a new exposure needs a new decision that states the "
+            "earlier exposures"]
     since = f"since its holdout was exposed under decision {last.decision} (exposure " \
             f"{last.count}, results of commit {last.commit[:12]})"
     problems = []
@@ -1328,6 +1341,11 @@ def record_holdout(root: Path, names: Sequence[str], paths: Sequence[Path],
         elif contract.status != "frozen":
             refusals.append(f"{name} is draft: its holdout stays sealed while its threshold "
                             "may still change. Freeze it first")
+        elif (reused := reused_decision(contract, earlier)) is not None:
+            refusals.append(f"exposure of {name} under decision {contract.decision} refused: "
+                            f"that decision was already used for exposure {reused.count}, "
+                            f"before decision {earlier[-1].decision}. Another exposure needs a "
+                            "new decision that states the earlier exposures")
         elif exposed_under(contract, earlier) is not None:
             refusals.append(f"second first exposure of {name} refused: its holdout was "
                             f"exposed under decision {contract.decision} with the results of "
