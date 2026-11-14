@@ -329,7 +329,8 @@ starting point:
 - **Near zero** the absolute bound governs: an expected `0` is matched within
   `absolute` only, so an `absolute` of 0 demands an exact zero.
 - **Domain rules apply before tolerance:** a quantity that must not be
-  negative fails if it is negative, however small.
+  negative fails if it is negative, however small. Declare such a rule as a
+  `bounds` [invariant](#invariants), which checks it on the results.
 - Results are compared unrounded, unless the contract rounds them.
 
 <a id="accuracy-contracts"></a>
@@ -406,7 +407,9 @@ blocks, and so can be tighter than what a release may promise.
   - an output without a result;
   - a result outside its own tolerance;
   - a worst error above the threshold, which it computes separately for the
-    calibration and the holdout cases.
+    calibration and the holdout cases;
+  - an output that an [invariant](#invariants) reads without a result, and a
+    result that breaks an invariant.
 
   For each split it prints the worst error, the threshold and the target, or
   `no target`. A worst error above the target but within the threshold
@@ -441,6 +444,114 @@ commit of the workbook's build stamp
 `tools/check_excel_run.py` then measures the commit's contracts on all these
 files together, and fails the run when they do not hold. A contract whose
 outputs a project suite computes is therefore measured on that suite's file.
+
+<a id="invariants"></a>
+
+### Invariants
+
+An invariant is a property that the results of a calculation's cases always
+have, such as a quantity that is never negative, or parts that add up to
+their total. Unlike a contract it has no threshold and no status: a result
+that breaks it fails, whatever the status of any contract over the same
+cases, and whether or not a contract covers them. Declare invariants in an
+optional `invariants` list of the registry, beside `contracts`; a registry
+without it keeps `schema_version` 1. The example shows one invariant of each
+kind; `INV-02` and `INV-03` are on a calculation `CALC-02` and cases the
+template does not have:
+
+```json
+"invariants": [
+  {
+    "id": "INV-01",
+    "kind": "bounds",
+    "calculation": "CALC-01",
+    "basis": "The domain rule that makes it hold",
+    "quantity": "illustrative_total_notional_amount",
+    "cases": ["illustrative-format-example", "illustrative-file-import-example"],
+    "minimum": 0,
+    "maximum": null
+  },
+  {
+    "id": "INV-02",
+    "kind": "monotone",
+    "calculation": "CALC-02",
+    "basis": "Why the quantity cannot fall along the sequence",
+    "quantity": "total_exposure_amount",
+    "scope": null,
+    "direction": "non-decreasing",
+    "sequence": [
+      {"case": "portfolio-small", "variant": null},
+      {"case": "portfolio-large", "variant": null}
+    ]
+  },
+  {
+    "id": "INV-03",
+    "kind": "sum",
+    "calculation": "CALC-02",
+    "basis": "Why the parts add up to the total",
+    "parts": ["secured_exposure_amount", "unsecured_exposure_amount"],
+    "total": "total_exposure_amount",
+    "cases": ["portfolio-small", "portfolio-large"]
+  }
+]
+```
+
+| Field | Rule |
+| --- | --- |
+| `id` | `INV-` and a number, unique among the invariants |
+| `kind` | `bounds`, `monotone` or `sum`; it decides the other fields, and no other field is allowed |
+| `calculation` | A `CALC-` ID declared by the calculation contracts; every case of the invariant tests it |
+| `basis` | The domain rule, or the property of the calculation, that makes the invariant hold |
+| `quantity` | `bounds` and `monotone`: the quantity checked |
+| `cases` | `bounds` and `sum`: the cases checked, each listed once |
+| `minimum`, `maximum` | `bounds`: the limits, inclusive, each a finite number or `null` for none; at least one is a number, and the minimum is no larger than the maximum |
+| `scope`, `direction`, `sequence` | `monotone`: the scope of the quantity, `null` or a `dataset` and a `record` as in the expected file; `non-decreasing` or `non-increasing`; at least two points in order, each a `case` and its `variant`, `null` for a JSON fixture, none listed twice |
+| `parts`, `total` | `sum`: the quantities that add up, each named once; the quantity they add up to, which is not one of the parts, or a constant number |
+
+- **`bounds`:** each number of the quantity, in every variant and scope of
+  each case, lies within the limits exactly, with no tolerance: this is how
+  a domain rule applies before tolerance.
+- **`monotone`:** from each point to the next, the quantity does not move
+  against the direction by more than the two outputs' own tolerances added
+  together. A smaller reversal is counted in the measurement line, and fails
+  nothing.
+- **`sum`:** in each case, at every variant and scope where one of the
+  quantities has an expected number, every one of them has one, and the
+  parts differ from the total by no more than the tolerances of all these
+  outputs added together; a constant total has no tolerance of its own.
+
+Without `--results`, the check reads each invariant against the cases: a
+calculation that is not declared, a case that does not exist or tests another
+calculation, a case or point with no expected number for a quantity the
+invariant reads, and expected values that themselves break the invariant are
+findings. With `--results`, it also checks the invariant on the results, and
+an output it reads without a result is a finding. It prints a line for each
+invariant, after the lines of the contracts:
+
+```text
+INV-01 bounds: 0.0 <= illustrative_total_notional_amount, 3 result(s) checked
+INV-02 monotone: total_exposure_amount non-decreasing over 2 point(s), 1 step(s) checked, 1 reversal(s) within the allowance
+INV-03 sum: secured_exposure_amount + unsecured_exposure_amount = total_exposure_amount, 2 group(s) checked, 1 beyond the allowance
+```
+
+On results that break them, each break is a `FAIL` line, and the
+invariant's line ends with the number of breaks: `outside the bounds`,
+`reversal(s) beyond the allowance` or `beyond the allowance`:
+
+```text
+FAIL: tests/accuracy/contracts.json: INV-01: illustrative-format-example illustrative_total_notional_amount is -0.5, below the minimum 0.0
+FAIL: tests/accuracy/contracts.json: INV-02: total_exposure_amount decreases from 120.0 at portfolio-small to 100.0 at portfolio-large, by 20.0, beyond the allowance 0.02
+FAIL: tests/accuracy/contracts.json: INV-03: at portfolio-large, secured_exposure_amount + unsecured_exposure_amount is 100.5 and the total is 100.0: the difference 0.5 is beyond the allowance 0.03
+```
+
+An invariant does not repeat the per-case check: every output of a contract's
+cases already fails outside its own tolerance. When the expected values keep
+a `monotone` or `sum` invariant exactly, results within their own tolerances
+keep it too, so such an invariant adds most for the outputs that no contract
+measures. A `bounds` invariant is stricter than any tolerance. The template's
+registry declares only the illustrative `INV-01`: the illustrative total is a
+sum of notional amounts, which the illustrative data contract requires to be
+at least 0. Like the contract on the same cases, it validates nothing.
 
 <a id="categories"></a>
 
