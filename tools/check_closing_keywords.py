@@ -286,10 +286,19 @@ def from_event(path: Path) -> Request:
         base_ref, head_ref = str(pull["base"]["ref"]), str(pull["head"]["ref"])
         base, head = str(pull["base"]["sha"]), str(pull["head"]["sha"])
         title, body = str(pull.get("title") or ""), str(pull.get("body") or "")
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        # A head in another repository, such as a fork, or one whose repository
+        # was deleted, is never this repository's default or release branch.
+        head_repository = (pull["head"].get("repo") or {}).get("full_name")
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         raise UsageError(f"{path} is not a pull_request event: {error!r}") from None
+    own_head = str(head_repository or "").lower() == repository.lower()
+    if not own_head and not base_ref.startswith(RELEASE_PREFIX):
+        source = head_repository or "a deleted repository"
+        return Request("none", repository, base, head, title, body,
+                       f"not checked: a pull request from {source}:{head_ref} into "
+                       f"{base_ref} is not an integration of this repository's release branch")
     mode, reason = mode_for(base_ref, head_ref, default_branch)
-    if mode == "release" and head_ref == default_branch:
+    if mode == "release" and own_head and head_ref == default_branch:
         return Request(mode, repository, None, None, title, body,
                        f"commits not checked: the head {head_ref} is the default branch, "
                        "whose commits are already there")

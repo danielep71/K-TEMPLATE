@@ -287,14 +287,17 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertEqual(summary.read_text(encoding="utf-8"), output)
 
-    def event(self, base_ref: str, head_ref: str, body: str = "", **pull: Any) -> str:
+    def event(self, base_ref: str, head_ref: str, body: str = "",
+              head_repository: str | None = REPOSITORY, **pull: Any) -> str:
         path = self.root.parent / f"{self.root.name}-event.json"
         self.addCleanup(path.unlink, missing_ok=True)
         path.write_text(json.dumps({
             "repository": {"full_name": REPOSITORY, "default_branch": "main"},
             "pull_request": {"title": "Integrate", "body": body,
                              "base": {"ref": base_ref, "sha": self.base},
-                             "head": {"ref": head_ref, "sha": self.head}, **pull},
+                             "head": {"ref": head_ref, "sha": self.head,
+                                      "repo": ({"full_name": head_repository}
+                                               if head_repository else None)}, **pull},
         }), encoding="utf-8")
         return path.as_posix()
 
@@ -315,6 +318,21 @@ class RepositoryTests(unittest.TestCase):
         code, output, _ = run_main("--root", str(self.root),
                                    "--event", self.event("release/1.2.0", "main", "Fixes #7"))
         self.assertEqual(code, 1, output)
+
+    def test_a_fork_is_never_a_sync_or_an_integration(self) -> None:
+        # A fork's main into a release branch: its commits are read, as any task's.
+        code, output, _ = run_main("--root", str(self.root), "--event",
+                                   self.event("release/1.2.0", "main",
+                                              head_repository="someone/fork"))
+        self.assertEqual((code, "Mode: release" in output), (1, True), output)
+        self.assertNotIn("commits not checked", output.lower())
+        # A fork's release branch into the default branch is no integration.
+        for repository in ("someone/fork", None):
+            with self.subTest(repository=repository):
+                code, output, _ = run_main("--root", str(self.root), "--event",
+                                           self.event("main", "release/1.2.0",
+                                                      head_repository=repository))
+                self.assertEqual((code, "Mode: none" in output), (0, True), output)
 
     def test_another_pull_request_is_reported_as_not_checked(self) -> None:
         code, output, _ = run_main("--root", str(self.root),
