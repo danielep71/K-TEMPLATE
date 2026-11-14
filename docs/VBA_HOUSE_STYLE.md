@@ -198,8 +198,9 @@ each failed restoration, and a primary and cleanup failure together.
   by hand.
 
 `python tools/format_vba.py --write` applies the mechanical part of these
-rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
-`examples/modules/`, or to the modules and folders you name:
+rules to the `.bas`, `.cls` and `.frm` files that Git tracks under `src/`,
+`tests/modules/` and `examples/modules/`, or to the modules and folders you
+name:
 
 - CRLF line endings and one final line ending;
 - no trailing white space, and four spaces for each indentation tab;
@@ -208,13 +209,49 @@ rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
 - two blank lines after each procedure's `End` statement.
 
 It never changes a string literal, and it keeps the `VERSION`, `BEGIN`, `END`,
-`Object` and `Attribute` lines that the VBE writes. A line that ends with a
-space or tab and `_` continues on the next one, in a comment as in code: the
-lines that continue it stay where they are, and the blank lines after an
-`End` statement follow the end of what it continues. **Repository integrity**
-runs it with `--check`. Re-import a module it rewrote into the VBE before
-committing, so that the workbook and the source stay the same. It neither
-compiles nor checks the other rules of this guide.
+`Object` and `Attribute` lines that the VBE writes. A statement keyword and a
+colon, such as `Else:` or `Loop:`, is not a label and keeps its indentation.
+A line that ends with a space or tab and `_` continues on the next one, in a
+comment as in code. No blank line is added to or removed from one logical
+line: each line a continuation carries over stays as it is, blank or not, the
+blank lines after an `End` statement follow the end of what it continues, and
+a blank line that ends a continuation at the end of the file stays. It
+neither compiles nor checks the other rules of this guide.
+
+**Repository integrity** runs it with `--check`. Re-import a module it
+rewrote into the VBE before committing, so that the workbook and the source
+stay the same; where Excel evidence is bound to the module, the rewrite also
+needs a new run.
+
+A project that imports existing modules can adopt the check one module at a
+time with a baseline, `tools/vba_layout_baseline.json`, which lists the
+modules not yet in layout. Without that file, every module must be in layout.
+To create it, run `python tools/format_vba.py --check --no-baseline`, and
+list each module it reports, by its path from the repository root with `/`
+separators, sorted and without duplicates:
+
+```json
+{
+  "schema_version": 1,
+  "files": [
+    "src/modules/PROJ_Imported.bas"
+  ]
+}
+```
+
+`--check` then reports each listed module as baselined, and fails on:
+
+- a module out of layout that the baseline does not list;
+- a listed module that is in layout, until you remove its entry;
+- a listed path that is not a tracked module under the source directories.
+
+To bring a listed module into layout, run
+`python tools/format_vba.py --write src/modules/PROJ_Imported.bas`,
+re-import it, and remove its entry in the same commit; delete the file once
+its list is empty. `--baseline FILE` reads another file, and `--no-baseline`
+ignores it. A missing `--baseline` file, a malformed one, or an entry that is
+absolute, uses `\` or `..`, or breaks the order is an error with exit status
+2, distinct from the exit status 1 of a layout finding.
 
 ## Static checks
 

@@ -165,6 +165,8 @@ tests/test_vba_code_identity.py
 tools/vba_lexer.py
 tools/check_vba_conditionals.py
 tests/test_check_vba.py
+tools/format_vba.py
+tests/test_format_vba.py
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications compare commit with commit for the Excel-run check instead of
@@ -176,4 +178,9 @@ reading of a colon and Rem inside a [...] expression. The conditional-
 compilation check takes from it the evaluation of a module-level #Const,
 without its Win16 and Mac constants, and also rejects a #Const named like an
 operator of the expression grammar; its tests take the #Const fixtures with
-neutral names.
+neutral names. The VBA formatter takes from it the layout baseline and its
+ratchet, the handling of lines that a continuation carries over and of
+statement keywords followed by a colon, and the tests of these; it keeps its
+own source directories, folder and outside paths, output and exit status 2
+for every error, and its tests compare logical lines with this repository's
+lexer.
