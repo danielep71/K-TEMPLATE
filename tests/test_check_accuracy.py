@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import io
 import json
 import shutil
@@ -71,11 +72,15 @@ def git(root: Path, *args: str) -> None:
                     "-c", "tag.gpgsign=false", *args], capture_output=True, check=True)
 
 
+EMPTY_RECORD: dict[str, Any] = {"schema_version": 1, "kind": "holdout-exposures",
+                                "exposures": []}
+
+
 @contextlib.contextmanager
 def repository(content: dict[str, Any] | None) -> Iterator[Path]:
     """This repository's guides and cases, CALC-02 and its three cases, CALC-03 and its
-    two cases, and ``content``. The two calculations are declared last, so they
-    replace any of the same ID."""
+    two cases, and ``content`` with an empty exposure record. The two calculations are
+    declared last, so they replace any of the same ID."""
     with tempfile.TemporaryDirectory(prefix="accuracy-") as temporary:
         root = Path(temporary)
         for name in ("docs/methodology", "tests/fixtures", "tests/expected"):
@@ -91,12 +96,41 @@ def repository(content: dict[str, Any] | None) -> Iterator[Path]:
         if content is not None:
             (root / "tests/accuracy").mkdir(parents=True)
             (root / "tests/accuracy/contracts.json").write_text(json.dumps(content), "utf-8")
+            write_record(root, EMPTY_RECORD)
         yield root
 
 
+def write_record(root: Path, record: dict[str, Any]) -> None:
+    (root / check_accuracy.EXPOSURES).write_text(json.dumps(record, indent=2), "utf-8")
+
+
+def read_record(root: Path) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads((root / check_accuracy.EXPOSURES).read_text("utf-8"))
+    return data
+
+
+def expose(root: Path, *names: str) -> None:
+    """Record an exposure of each named contract of the registry in ``root`` under its
+    decision, as --record-holdout writes it for results of CANDIDATE."""
+    if not names:
+        return
+    registry = check_accuracy.read_registry(root, None, Report(), "registry")
+    assert registry is not None
+    record = read_record(root)
+    for contract in registry.contracts:
+        if contract.id in names:
+            earlier = sum(item["contract"] == contract.id for item in record["exposures"])
+            record["exposures"].append(check_accuracy.exposure_entry(
+                root, contract, earlier, CANDIDATE, [root / check_accuracy.REGISTRY]))
+    write_record(root, record)
+
+
 def findings(content: dict[str, Any] | None, results: dict[str, Any] | None = None,
-             commit: str | None = CANDIDATE) -> list[str]:
+             commit: str | None = CANDIDATE, exposed: tuple[str, ...] = ()) -> list[str]:
+    """The findings on ``content``, measured on ``results`` when given, once the
+    holdouts of the ``exposed`` contracts are recorded."""
     with repository(content) as root:
+        expose(root, *exposed)
         path = None
         if results is not None:
             path = root / "results.json"
@@ -260,6 +294,7 @@ class ResultsTest(unittest.TestCase):
     def test_results_within_every_bound_pass_and_are_reported(self) -> None:
         good = results(demo_calibration=100.005, demo_holdout_1=200.001, demo_holdout_2=0)
         with repository(registry(FROZEN)) as root:
+            expose(root, "ACC-02")
             path = root / "results.json"
             path.write_text(json.dumps(good), "utf-8")
             found, contracts, lines = check_accuracy.check(root, path, CANDIDATE)
@@ -269,11 +304,13 @@ class ResultsTest(unittest.TestCase):
         worst = [float(line.split(" error ")[1].split(",")[0]) for line in lines]
         self.assertAlmostEqual(worst[0], 5e-05, places=12)
         self.assertAlmostEqual(worst[1], 5e-06, places=12)
-        self.assertTrue(all(line.endswith("threshold 0.0001, no target") for line in lines),
-                        lines)
+        # The holdout line also gives the number of exposures of the holdout.
+        self.assertTrue(lines[0].endswith("threshold 0.0001, no target"), lines)
+        self.assertTrue(lines[1].endswith("threshold 0.0001, no target, exposures 1"), lines)
 
     def measured(self, contract: dict[str, Any], **values: float) -> tuple[list[str], list[str]]:
         with repository(registry(contract)) as root:
+            expose(root, contract["id"])
             path = root / "results.json"
             path.write_text(json.dumps(results(**values)), "utf-8")
             found, _, lines = check_accuracy.check(root, path, CANDIDATE)
@@ -284,8 +321,10 @@ class ResultsTest(unittest.TestCase):
                                      demo_holdout_1=200.001, demo_holdout_2=0)
         self.assertEqual(found, [])
         self.assertEqual(len(lines), 2, lines)
-        self.assertTrue(all(line.endswith(", threshold 0.0001, target 1e-05")
-                            for line in lines), lines)
+        self.assertEqual([line.endswith(", threshold 0.0001, target 1e-05") for line in lines],
+                         [True, False])
+        self.assertTrue(lines[1].endswith(", threshold 0.0001, target 1e-05, exposures 1"),
+                        lines)
 
     def test_a_missed_target_within_the_threshold_passes_and_is_reported(self) -> None:
         # Relative 5e-05 on the calibration: above the target 1e-05, within the threshold.
@@ -296,7 +335,8 @@ class ResultsTest(unittest.TestCase):
                         lines)
         self.assertTrue(lines[0].endswith(", threshold 0.0001, target 1e-05: target missed"),
                         lines)
-        self.assertTrue(lines[1].endswith(", threshold 0.0001, target 1e-05"), lines)
+        self.assertTrue(lines[1].endswith(", threshold 0.0001, target 1e-05, exposures 1"),
+                        lines)
         # A target equal to 0 is missed by any error, and still blocks nothing.
         found, lines = self.measured({**FROZEN, "target": 0}, demo_calibration=100.005,
                                      demo_holdout_1=200, demo_holdout_2=0)
@@ -305,6 +345,7 @@ class ResultsTest(unittest.TestCase):
                          [True, False])
         with repository(registry({**FROZEN, "target": 0.00001})) as root, \
                 contextlib.redirect_stdout(io.StringIO()) as output:
+            expose(root, "ACC-02")
             path = root / "results.json"
             path.write_text(json.dumps(results(demo_calibration=100.005, demo_holdout_1=200,
                                                demo_holdout_2=0)), "utf-8")
@@ -324,12 +365,12 @@ class ResultsTest(unittest.TestCase):
         self.assertIn("over holdout cases exceeds the threshold 0.001", found[0])
         self.assertTrue(lines[0].endswith("threshold 0.001, target 0.0001: target missed"),
                         lines)
-        self.assertTrue(lines[1].endswith("threshold 0.001, target 0.0001: threshold exceeded"),
-                        lines)
+        self.assertTrue(lines[1].endswith("threshold 0.001, target 0.0001, exposures 1: "
+                                          "threshold exceeded"), lines)
 
     def test_a_result_outside_its_own_tolerance_fails(self) -> None:
         found = findings(registry(FROZEN), results(demo_calibration=100.02, demo_holdout_1=200,
-                                                   demo_holdout_2=0))
+                                                   demo_holdout_2=0), exposed=("ACC-02",))
         self.assertTrue(any("demo-calibration total_exposure_amount is 100.02, expected 100.0 "
                             "within 0.01" in item for item in found), found)
 
@@ -338,18 +379,19 @@ class ResultsTest(unittest.TestCase):
         # threshold of 0.001 on the holdout only.
         loose = {**FROZEN, "metric": "absolute", "threshold": 0.001}
         found = findings(registry(loose), results(demo_calibration=100.0005,
-                                                  demo_holdout_1=200.005, demo_holdout_2=0))
+                                                  demo_holdout_1=200.005, demo_holdout_2=0),
+                         exposed=("ACC-02",))
         self.assertEqual(len(found), 1, found)
         self.assertIn("worst absolute error 0.00499", found[0])
         self.assertIn("over holdout cases exceeds the threshold 0.001", found[0])
 
     def test_a_relative_error_at_zero_and_a_missing_result(self) -> None:
-        found = findings(registry({**FROZEN, "holdout_cases": ["demo-holdout-2"],
-                                   "status": "draft", "decision": None}),
-                         results(demo_calibration=100, demo_holdout_2=0.001))
+        found = findings(registry({**FROZEN, "holdout_cases": ["demo-holdout-2"]}, minimum=1),
+                         results(demo_calibration=100, demo_holdout_2=0.001),
+                         exposed=("ACC-02",))
         self.assertTrue(any("worst relative error inf over holdout cases" in item
                             for item in found), found)
-        missing = findings(registry(FROZEN), results(demo_calibration=100))
+        missing = findings(registry(FROZEN), results(demo_calibration=100), exposed=("ACC-02",))
         self.assertTrue(any("no result for demo-holdout-1 total_exposure_amount" in item
                             for item in missing), missing)
 
@@ -397,6 +439,7 @@ class ResultsTest(unittest.TestCase):
     def test_the_results_files_of_several_suites_are_measured_together(self) -> None:
         with repository(registry(FROZEN)) as root, \
                 contextlib.redirect_stdout(io.StringIO()) as output:
+            expose(root, "ACC-02")
             first, second = root / "results.json", root / "project-results.json"
             first.write_text(json.dumps(results(demo_calibration=100)), "utf-8")
             second.write_text(json.dumps(results(demo_holdout_1=200, demo_holdout_2=0)),
@@ -612,8 +655,11 @@ def checked(content: dict[str, Any], document: dict[str, Any] | None = None,
             parts: dict[str, float] | None = PARTS,
             variants: dict[str, float] | None = None) -> tuple[list[str], list[str]]:
     """The findings and the measurement lines of ``content``, with demo-parts and,
-    when given, demo-variants; measured on ``document`` when given."""
+    when given, demo-variants; measured on ``document`` when given, once the holdout
+    of each frozen contract is recorded."""
     with repository(content) as root:
+        expose(root, *[item["id"] for item in content.get("contracts", [])
+                       if isinstance(item, dict) and item.get("status") == "frozen"])
         if parts is not None:
             parts_case(root, parts)
         if variants is not None:
@@ -920,6 +966,397 @@ class InvariantResultsTest(unittest.TestCase):
                                  "demo-parts part_b_amount (DS-01/P1)"])
         self.assertEqual(lines, ["INV-03 sum: part_a_amount + part_b_amount = "
                                  "total_exposure_amount, 1 group(s) checked"])
+
+
+# Results of CALC-02 within every bound; demo-holdout-1 is off by 0.5 in OFF_HOLDOUT,
+# beyond its own tolerance and any contract threshold here.
+EXACT = results(demo_calibration=100, demo_holdout_1=200, demo_holdout_2=0)
+OFF_HOLDOUT = results(demo_calibration=100, demo_holdout_1=200.5, demo_holdout_2=0)
+DRAFT = {**FROZEN, "status": "draft", "decision": None}
+
+
+def run(root: Path, *args: str, document: dict[str, Any] | None = EXACT) -> tuple[int, str]:
+    """main() on ``root`` with ``args``, measuring ``document`` as results.json of
+    CANDIDATE when given; the exit code and the output."""
+    options = ["--root", str(root), "--commit", CANDIDATE]
+    if document is not None:
+        path = root / "results.json"
+        path.write_text(json.dumps(document), "utf-8")
+        options += ["--results", str(path)]
+    with contextlib.redirect_stdout(io.StringIO()) as output:
+        code = check_accuracy.main([*options, *args])
+    return code, output.getvalue()
+
+
+def measured_in(root: Path, document: dict[str, Any] = EXACT) -> tuple[list[str], list[str]]:
+    path = root / "results.json"
+    path.write_text(json.dumps(document), "utf-8")
+    found, _, lines = check_accuracy.check(root, path, CANDIDATE)
+    return found, lines
+
+
+class SealedHoldoutTest(unittest.TestCase):
+    def test_a_draft_holdout_is_neither_measured_nor_printed(self) -> None:
+        with repository(registry(DRAFT)) as root:
+            found, lines = measured_in(root, OFF_HOLDOUT)
+            code, output = run(root, document=OFF_HOLDOUT)
+        self.assertEqual(found, [])
+        self.assertEqual(lines, ["ACC-02 calibration: worst relative error 0.0, threshold "
+                                 "0.0001, no target",
+                                 "ACC-02 holdout: sealed while the contract is draft, "
+                                 "exposures 0"])
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("200.5", output)
+        self.assertNotIn("holdout cases", output)
+        # A draft holdout needs no result either.
+        with repository(registry(DRAFT)) as root:
+            self.assertEqual(measured_in(root, results(demo_calibration=100))[0], [])
+
+    def test_a_frozen_holdout_with_no_exposure_is_sealed_and_fails_with_results(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            self.assertEqual(check_accuracy.check(root)[0], [])
+            found, lines = measured_in(root, OFF_HOLDOUT)
+        self.assertEqual(found, ["tests/accuracy/contracts.json: ACC-02: its holdout has no "
+                                 "exposure recorded under decision #1, so it was not measured: "
+                                 "measure it once with tools/check_accuracy.py "
+                                 "--record-holdout ACC-02"])
+        self.assertEqual(lines[1], "ACC-02 holdout: sealed until its exposure under decision #1 "
+                                   "is recorded, exposures 0")
+
+
+class RecordHoldoutTest(unittest.TestCase):
+    def test_the_first_exposure_is_recorded_then_measured(self) -> None:
+        design = "docs/methodology/ACC-02-design.md"
+        contract = {**FROZEN, "design": design}
+        with repository(registry(contract)) as root:
+            (root / design).write_text("# Design\n\nThe threshold and the holdout.\n", "utf-8")
+            code, output = run(root, "--record-holdout", "ACC-02")
+            record = read_record(root)
+            files = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in (
+                "results.json", design, "tests/fixtures/demo-holdout-1.json",
+                "tests/expected/demo-holdout-1.json", "tests/fixtures/demo-holdout-2.json",
+                "tests/expected/demo-holdout-2.json")}
+            size = (root / design).stat().st_size
+            # A later measurement is a regression: it records nothing.
+            before = (root / check_accuracy.EXPOSURES).read_bytes()
+            again, regression = run(root)
+            after = (root / check_accuracy.EXPOSURES).read_bytes()
+        self.assertEqual(code, 0, output)
+        self.assertIn("ACC-02 holdout: worst relative error 0.0, threshold 0.0001, no target, "
+                      "exposures 1\n", output)
+        self.assertIn("Recorded: exposure 1 of the holdout of ACC-02 under decision #1, with the "
+                      "results of commit aaaaaaaaaaaa, in tests/accuracy/holdout_exposures.json: "
+                      "commit it\n", output)
+        canonical = json.dumps(contract, sort_keys=True, separators=(",", ":"))
+        self.assertEqual(record["exposures"], [{
+            "contract": "ACC-02", "decision": "#1", "exposures": 1, "commit": CANDIDATE,
+            "results": [{"file": "results.json", "sha256": files["results.json"]}],
+            "entry_sha256": hashlib.sha256(canonical.encode()).hexdigest(),
+            "threshold": 0.0001,
+            "holdout": [{"case": case, "fixture_sha256": files[f"tests/fixtures/{case}.json"],
+                         "expected_sha256": files[f"tests/expected/{case}.json"]}
+                        for case in ("demo-holdout-1", "demo-holdout-2")],
+            "design": {"path": design, "bytes": size, "sha256": files[design]}}])
+        self.assertEqual((again, before), (0, after), regression)
+        self.assertIn("ACC-02 holdout: worst relative error 0.0, threshold 0.0001, no target, "
+                      "exposures 1\n", regression)
+        self.assertNotIn("Recorded:", regression)
+
+    def test_a_failing_holdout_is_still_recorded(self) -> None:
+        # Its errors were seen: the exposure counts, though the measurement fails.
+        with repository(registry(FROZEN)) as root:
+            code, output = run(root, "--record-holdout", "ACC-02", document=OFF_HOLDOUT)
+            record = read_record(root)
+        self.assertEqual(code, 1, output)
+        self.assertIn("over holdout cases exceeds the threshold", output)
+        self.assertEqual([item["exposures"] for item in record["exposures"]], [1])
+
+    def refused(self, content: dict[str, Any], *args: str,
+                prepare: Any = None, document: dict[str, Any] | None = EXACT) -> str:
+        """The output of a refused --record-holdout, which leaves the record as it was."""
+        with repository(content) as root:
+            if prepare is not None:
+                prepare(root)
+            path = root / check_accuracy.EXPOSURES
+            before = path.read_bytes() if path.is_file() else None
+            code, output = run(root, *args, document=document)
+            after = path.read_bytes() if path.is_file() else None
+        self.assertEqual((code, after), (1, before), output)
+        self.assertIn("accuracy: REFUSED (nothing measured; tests/accuracy/holdout_exposures.json "
+                      "not written)", output)
+        self.assertNotIn("worst", output)
+        return output
+
+    def test_a_draft_or_unknown_contract_is_refused(self) -> None:
+        self.assertIn("REFUSED: ACC-02 is draft: its holdout stays sealed",
+                      self.refused(registry(DRAFT), "--record-holdout", "ACC-02"))
+        self.assertIn("REFUSED: ACC-09 is not a contract of tests/accuracy/contracts.json",
+                      self.refused(registry(FROZEN), "--record-holdout", "ACC-09"))
+        self.assertIn("REFUSED: --record-holdout needs --results",
+                      self.refused(registry(FROZEN), "--record-holdout", "ACC-02",
+                                   document=None))
+
+    def test_a_second_first_exposure_is_refused(self) -> None:
+        output = self.refused(registry(FROZEN), "--record-holdout", "ACC-02",
+                              prepare=lambda root: expose(root, "ACC-02"))
+        self.assertIn("REFUSED: second first exposure of ACC-02 refused: its holdout was exposed "
+                      "under decision #1 with the results of commit aaaaaaaaaaaa (exposures 1)",
+                      output)
+
+    def test_a_missing_malformed_or_inconsistent_record_is_refused(self) -> None:
+        def entry(root: Path) -> dict[str, Any]:
+            expose(root, "ACC-02")
+            item: dict[str, Any] = read_record(root)["exposures"][0]
+            return item
+
+        def remove(root: Path) -> None:
+            (root / check_accuracy.EXPOSURES).unlink()
+
+        def broken(root: Path) -> None:
+            (root / check_accuracy.EXPOSURES).write_text("{broken", "utf-8")
+
+        def miscounted(root: Path) -> None:
+            write_record(root, {**EMPTY_RECORD, "exposures": [{**entry(root), "exposures": 2}]})
+
+        def repeated(root: Path) -> None:
+            item = entry(root)
+            write_record(root, {**EMPTY_RECORD, "exposures": [item, {**item, "exposures": 2}]})
+
+        def wrong_kind(root: Path) -> None:
+            write_record(root, {**EMPTY_RECORD, "kind": "other"})
+
+        cases = [
+            (remove, "tests/accuracy/holdout_exposures.json is missing: restore it from Git"),
+            (broken, "tests/accuracy/holdout_exposures.json: not valid UTF-8 JSON"),
+            (wrong_kind, "envelope is not schema_version 1, kind 'holdout-exposures'"),
+            (miscounted, "exposures is 2, but this is exposure 1 of ACC-02 in the record"),
+            (repeated, "records a second first exposure of ACC-02 under decision #1"),
+        ]
+        for prepare, text in cases:
+            with self.subTest(text=text):
+                self.assertIn(text, self.refused(registry(FROZEN), "--record-holdout",
+                                                 "ACC-02", prepare=prepare))
+
+    def test_unusable_or_incomplete_results_are_refused(self) -> None:
+        self.assertIn("the results are unusable, so nothing is measured: ",
+                      self.refused(registry(FROZEN), "--record-holdout", "ACC-02",
+                                   document={**EXACT, "commit": "b" * 40}))
+        self.assertIn("ACC-02: the results hold no value for holdout output(s) demo-holdout-2 "
+                      "total_exposure_amount, so nothing is measured",
+                      self.refused(registry(FROZEN), "--record-holdout", "ACC-02",
+                                   document=results(demo_calibration=100, demo_holdout_1=200)))
+
+    def test_a_registry_with_a_finding_is_refused(self) -> None:
+        self.assertIn("the check fails, so no holdout is exposed: ",
+                      self.refused(registry(FROZEN, minimum=3), "--record-holdout", "ACC-02"))
+
+    def test_a_new_decision_may_be_exposed_and_counts_the_earlier_exposures(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            expose(root, "ACC-02")
+            (root / check_accuracy.REGISTRY).write_text(json.dumps(registry(
+                {**FROZEN, "decision": "#2", "threshold": 0.00005})), "utf-8")
+            self.assertEqual(check_accuracy.check(root)[0], [])
+            found, lines = measured_in(root)
+            code, output = run(root, "--record-holdout", "ACC-02")
+            record = read_record(root)
+        self.assertTrue(found and "no exposure recorded under decision #2" in found[0], found)
+        self.assertEqual(lines[1], "ACC-02 holdout: sealed until its exposure under decision #2 "
+                                   "is recorded, exposures 1")
+        self.assertEqual(code, 0, output)
+        self.assertIn("threshold 5e-05, no target, exposures 2\n", output)
+        self.assertEqual([(item["decision"], item["exposures"]) for item in record["exposures"]],
+                         [("#1", 1), ("#2", 2)])
+
+
+class ExposureDriftTest(unittest.TestCase):
+    def drift(self, change: Any, contract: dict[str, Any] = FROZEN) -> list[str]:
+        """The findings once ``change`` is applied to a repository whose ACC-02 holdout
+        was exposed under ``contract``."""
+        with repository(registry(contract)) as root:
+            design = root / "docs/methodology/ACC-02-design.md"
+            design.write_text("# Design\n", "utf-8")
+            expose(root, "ACC-02")
+            change(root)
+            return check_accuracy.check(root)[0]
+
+    def contract(self, **change: Any) -> Any:
+        def apply(root: Path) -> None:
+            (root / check_accuracy.REGISTRY).write_text(
+                json.dumps(registry({**FROZEN, **change})), "utf-8")
+        return apply
+
+    def test_an_unchanged_contract_passes(self) -> None:
+        self.assertEqual(self.drift(lambda root: None), [])
+
+    def test_a_changed_entry_is_a_finding_unless_a_new_decision_states_it(self) -> None:
+        found = self.drift(self.contract(provenance="Changed after the exposure"))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("ACC-02: its entry changed since its holdout was exposed under decision #1 "
+                      "(exposure 1, results of commit aaaaaaaaaaaa): a change after an exposure "
+                      "needs a new decision that states the earlier exposures", found[0])
+        self.assertEqual(self.drift(self.contract(provenance="Changed", decision="#2")), [])
+        # A changed target is a changed entry too, once the holdout was exposed.
+        self.assertTrue(self.drift(self.contract(target=0.00001)))
+
+    def test_a_lower_threshold_after_an_exposure_is_a_finding(self) -> None:
+        found = self.drift(self.contract(threshold=0.00005))
+        self.assertTrue(any("ACC-02: threshold 5e-05 is lower than 0.0001, the threshold when "
+                            "its holdout was exposed: a threshold lowered after an exposure "
+                            "needs a new decision" in item for item in found), found)
+        self.assertEqual(self.drift(self.contract(threshold=0.00005, decision="#2")), [])
+
+    def test_a_changed_holdout_file_is_a_finding(self) -> None:
+        def fixture(root: Path) -> None:
+            path = root / "tests/fixtures/demo-holdout-1.json"
+            path.write_text(path.read_text("utf-8").replace("Synthetic", "Changed"), "utf-8")
+
+        def expected(root: Path) -> None:
+            path = root / "tests/expected/demo-holdout-2.json"
+            path.write_text(path.read_text("utf-8").replace('"value": 0.0',
+                                                            '"value": 0.001'), "utf-8")
+
+        found = self.drift(fixture)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("ACC-02: the fixture of holdout case demo-holdout-1 changed since its "
+                      "holdout was exposed", found[0])
+        found = self.drift(expected)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("ACC-02: the expected file of holdout case demo-holdout-2 changed", found[0])
+        # Under a new decision, the cases may change.
+        def both(root: Path) -> None:
+            fixture(root)
+            self.contract(decision="#2")(root)
+        self.assertEqual(self.drift(both), [])
+
+    def test_a_design_may_only_be_appended_to(self) -> None:
+        path = "docs/methodology/ACC-02-design.md"
+        designed = {**FROZEN, "design": path}
+
+        def append(root: Path) -> None:
+            with (root / path).open("a", encoding="utf-8") as file:
+                file.write("\nAmendment: a later note.\n")
+
+        def rewrite(root: Path) -> None:
+            (root / path).write_text("# Redesign\n", "utf-8")
+
+        self.assertEqual(self.drift(append, designed), [])
+        found = self.drift(rewrite, designed)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn(f"ACC-02: design {path} no longer begins with the 9 bytes recorded since "
+                      "its holdout was exposed under decision #1", found[0])
+        self.assertIn("it was changed, not amended by appending", found[0])
+
+    def test_a_design_is_a_file_where_the_excel_run_check_copies_it(self) -> None:
+        for design in ("../outside.md", "/docs/methodology/x.md", "docs/other/x.md",
+                       "docs/methodology/../x.md", "docs\\methodology\\x.md", 7):
+            with self.subTest(design=design):
+                found = findings(registry({**FROZEN, "design": design}))
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("design is not a path to a file under docs/methodology/ or "
+                              "tests/accuracy/", found[0])
+        self.assertEqual(findings(registry({**FROZEN, "design": "docs/methodology/none.md"})),
+                         ["tests/accuracy/contracts.json: ACC-02: design docs/methodology/none.md "
+                          "is not a file"])
+
+    def test_a_file_based_fixture_is_bound_file_by_file(self) -> None:
+        with repository(None) as root:
+            variant_case(root, {"base": 10.0})
+            folder = root / "tests/fixtures/demo-variants"
+            (folder / "base").mkdir()
+            (folder / "base/positions.csv").write_bytes(b"id,amount\r\nP1,10\r\n")
+            first = check_accuracy.fixture_sha256(root, "demo-variants")
+            (folder / "base/positions.csv").write_bytes(b"id,amount\nP1,10\n")
+            second = check_accuracy.fixture_sha256(root, "demo-variants")
+            self.assertIsNone(check_accuracy.fixture_sha256(root, "missing-case"))
+        self.assertNotEqual(first, second)
+
+
+class RecordCheckTest(unittest.TestCase):
+    def test_the_record_is_kept_beside_a_registry(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            (root / check_accuracy.EXPOSURES).unlink()
+            found = check_accuracy.check(root)[0]
+        self.assertEqual(found, ["tests/accuracy/holdout_exposures.json: is missing: a "
+                                 "repository with accuracy contracts keeps it, with an empty "
+                                 "exposures list until a holdout is first measured. Restore it "
+                                 "from Git: a record is never reset"])
+
+    def test_a_malformed_record_is_a_finding(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            expose(root, "ACC-02")
+            good = read_record(root)["exposures"][0]
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({"commit": "HEAD"}, "commit is not a full lower-case commit SHA"),
+            ({"exposures": 0}, "exposures is not a whole number of at least 1"),
+            ({"exposures": True}, "exposures is not a whole number of at least 1"),
+            ({"contract": ["ACC-02"]}, "contract is not ACC-<number>"),
+            ({"decision": {"id": 1}}, "decision is not a text"),
+            ({"results": []}, "results is not a non-empty list"),
+            ({"entry_sha256": "A" * 64}, "entry_sha256 is not a lower-case SHA-256"),
+            ({"threshold": -1}, "threshold is not a finite number of at least 0"),
+            ({"holdout": [good["holdout"][0]] * 2}, "holdout lists a case twice"),
+            ({"holdout": [{"case": "x"}]}, "holdout is not a non-empty list"),
+            ({"design": {"path": "x.md", "bytes": 1, "sha256": "0" * 64}},
+             "design is not null or an object"),
+            ({"note": "extra"}, "keys are not commit, contract, decision"),
+        ]
+        for change, text in cases:
+            with self.subTest(text=text), repository(registry(FROZEN)) as root:
+                write_record(root, {**EMPTY_RECORD, "exposures": [{**good, **change}]})
+                found = check_accuracy.check(root)[0]
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("tests/accuracy/holdout_exposures.json: exposures[0]", found[0])
+                self.assertIn(text, found[0])
+        envelopes: list[Any] = [{**EMPTY_RECORD, "exposures": {}}, [],
+                                {**EMPTY_RECORD, "extra": 1}]
+        for envelope in envelopes:
+            with self.subTest(envelope=envelope), repository(registry(FROZEN)) as root:
+                (root / check_accuracy.EXPOSURES).write_text(json.dumps(envelope), "utf-8")
+                found = check_accuracy.check(root)[0]
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("envelope is not schema_version 1, kind 'holdout-exposures'",
+                              found[0])
+
+    def test_an_exposed_contract_is_never_removed(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            expose(root, "ACC-02")
+            (root / check_accuracy.REGISTRY).write_text(json.dumps(registry()), "utf-8")
+            removed = check_accuracy.check(root)[0]
+            (root / check_accuracy.REGISTRY).unlink()
+            deleted = check_accuracy.check(root)[0]
+        for found in (removed, deleted):
+            self.assertEqual(found, ["tests/accuracy/holdout_exposures.json: ACC-02 has recorded "
+                                     "holdout exposures but no contract in "
+                                     "tests/accuracy/contracts.json: a contract whose holdout "
+                                     "was exposed is never removed"])
+
+    def test_a_draft_after_an_exposure_stays_sealed_and_counts_it(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            expose(root, "ACC-02")
+            (root / check_accuracy.REGISTRY).write_text(json.dumps(registry(DRAFT)), "utf-8")
+            found, lines = measured_in(root, OFF_HOLDOUT)
+        self.assertEqual(found, [])
+        self.assertEqual(lines[1], "ACC-02 holdout: sealed while the contract is draft, "
+                                   "exposures 1")
+
+    @unittest.skipUnless(shutil.which("git"), "needs Git")
+    def test_the_exposures_recorded_at_a_tag_are_kept(self) -> None:
+        with repository(registry(FROZEN)) as root:
+            expose(root, "ACC-02")
+            git(root, "init", "-q")
+            git(root, "add", "-A")
+            git(root, "commit", "-qm", "Release")
+            git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
+            self.assertEqual(check_accuracy.check(root)[0], [])
+            write_record(root, EMPTY_RECORD)
+            (root / check_accuracy.REGISTRY).write_text(
+                json.dumps(registry({**FROZEN, "decision": "#2"})), "utf-8")
+            found = check_accuracy.check(root)[0]
+            skipped = check_accuracy.check(root, widening=False)[0]
+        self.assertEqual(found, ["tests/accuracy/holdout_exposures.json: the exposures recorded "
+                                 "at v1.0.0 are not all kept, unchanged, at the start of the "
+                                 "record: the record only grows"])
+        self.assertEqual(skipped, [])
 
 
 if __name__ == "__main__":

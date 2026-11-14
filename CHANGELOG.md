@@ -149,6 +149,26 @@ Use only the categories an entry needs.
   The summary line counts the invariants beside the contracts. The template
   declares one illustrative invariant, `INV-01`: the illustrative total is
   at least 0 (#505).
+- `tests/accuracy/holdout_exposures.json` records each first measurement of
+  a frozen accuracy contract's holdout under its decision: the contract, the
+  decision, the number of exposures, the commit and SHA-256 of each results
+  file, the SHA-256 of the canonical contract entry and its threshold, the
+  SHA-256 of each holdout case's fixture and expected file, and the length
+  and SHA-256 of an optional `design` document the contract may name. With
+  `--results`, `tools/check_accuracy.py` no longer measures or prints a draft
+  contract's holdout, and seals a frozen contract's holdout, as a finding,
+  until `--record-holdout ACC-NN` records its exposure; that mode refuses a
+  draft contract, a second first exposure under the same decision, a
+  missing, malformed or inconsistent record, a failing registry check and
+  incomplete results, and writes nothing then. The check fails on a
+  malformed record, an exposed contract that is removed, exposures recorded
+  at the newest tag that are dropped, and, under the decision of the last
+  exposure, a changed entry, a lower threshold, a changed holdout fixture or
+  expected file, or a design document that was rewritten rather than
+  appended to. Holdout lines print the number of exposures;
+  `tools/check_excel_run.py` measures a recorded holdout as a regression and
+  records nothing. The template ships an empty record: its illustrative
+  `ACC-01` stays draft, so its holdout stays sealed (#505).
 
 ### Changed
 
