@@ -152,6 +152,19 @@ Use only the categories an entry needs.
   the evidence against the line. The **Release** workflow checks only the
   line's form: the evidence and `host.txt` stay on the machine of the run,
   so CI cannot check the run itself (#498).
+- `tools/check_vba_conditionals.py` accepts a module-level `#Const`, such as
+  `#Const WRITE_STATUS_BAR = False`, instead of rejecting every `#Const`. Its
+  value is `True`, `False`, `-1`, `0` or an expression with `Not`, `And`,
+  `Or`, `=`, `<>` and parentheses over `VBA6`, `VBA7`, `Win32`, `Win64` and
+  the module's earlier `#Const` names. It is defined from its line on in each
+  compilation environment that reaches it, and a condition is not evaluated
+  where its branch cannot be entered. The VBA checks that read each
+  environment's source, such as `vba-identifiers`, `vba-jumps` and
+  `vba-public-api`, read the branch the `#Const` selects. Any other symbol,
+  such as a project's conditional-compilation argument or a `#Const` used
+  before its definition, stays a finding, as does a malformed, non-Boolean or
+  duplicate `#Const` or one that redefines a compiler constant. Static check
+  only; nothing was compiled or run in Excel (#500).
 
 ### Fixed
 

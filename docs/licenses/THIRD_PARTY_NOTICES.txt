@@ -163,6 +163,8 @@ Mozilla Public License 2.0:
 tools/vba_code_identity.py
 tests/test_vba_code_identity.py
 tools/vba_lexer.py
+tools/check_vba_conditionals.py
+tests/test_check_vba.py
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications compare commit with commit for the Excel-run check instead of
@@ -170,4 +172,8 @@ a recorded digest, cover class and form modules as well as standard modules,
 compare the letter case of code as the export comparison does, report the
 line of each version of the first changed statement, and turn the tests into
 unit tests with neutral module names. The VBA lexer takes from it only the
-reading of a colon and Rem inside a [...] expression.
+reading of a colon and Rem inside a [...] expression. The conditional-
+compilation check takes from it the evaluation of a module-level #Const,
+without its Win16 and Mac constants, and also rejects a #Const named like an
+operator of the expression grammar; its tests take the #Const fixtures with
+neutral names.
