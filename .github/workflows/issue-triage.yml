@@ -4,8 +4,8 @@ run-name: "Issue triage — ${{ github.event_name }} by ${{ github.actor }}"
 # Audits every open issue against the rules issue forms cannot enforce:
 # assignee, exactly one priority, P1 only on bugs, an open milestone, a
 # target end date before that milestone's due date, a dependency section,
-# catalogue labels, and `blocked` exactly while a named prerequisite is
-# unresolved.
+# catalogue labels, `blocked` exactly while a named prerequisite is
+# unresolved, and no cycle among open issues' dependency sections.
 # Read-only: it never changes an issue. A failed run is the triage signal;
 # I resolve each finding by hand (docs/repo_governance/ISSUE_LABELS.md).
 # Issue events run the workflow from the default branch only.
