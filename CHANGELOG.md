@@ -141,6 +141,17 @@ Use only the categories an entry needs.
   from the proposed fix. An issue closed through `release/X.Y.Z` goes into
   milestone `vX.Y.Z`; the pull request guide, the closeout and the
   maintenance audit say the same (#507).
+- A release tag whose commit holds a VBA component needs its Excel run.
+  `tools/release.py evidence` checks the evidence folder and the workbook
+  with `tools/check_excel_run.py --require-binding`, for the candidate or
+  for an earlier commit with identical run inputs, and prints an
+  `Excel evidence: <digest> (run <sha>).` line for the tag message. It never
+  accepts carried evidence. `tools/release.py verify` fails unless the tag
+  message has that line or an `- Invariant 4:` deviation. Run with
+  `--excel-evidence` and `--workbook` before the tag is pushed, it also checks
+  the evidence against the line. The **Release** workflow checks only the
+  line's form: the evidence and `host.txt` stay on the machine of the run,
+  so CI cannot check the run itself (#498).
 
 ### Fixed
 

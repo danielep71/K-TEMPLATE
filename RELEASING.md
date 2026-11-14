@@ -88,7 +88,9 @@ A version may be published only when:
    identical ([step 4](#4-certify-the-workbook)), and passes
    `tools/check_excel_run.py` with a `VERIFIED` binding, never on carried
    evidence, and the result is in
-   the [release certification](docs/release/RELEASE_CERTIFICATION.md);
+   the [release certification](docs/release/RELEASE_CERTIFICATION.md). The
+   tag message declares the run with the line that `tools/release.py evidence`
+   prints for it ([the Excel evidence gate](#excel-evidence-gate));
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
 6. the [maintenance audit](docs/release/MAINTENANCE_AUDIT.md) was run before
@@ -223,6 +225,37 @@ from the run's only in comments or layout
 `Carried from` line, are evidence for a pull request only. After such a
 change, record a new run of the candidate.
 
+<a id="excel-evidence-gate"></a>
+
+Then run the Excel evidence gate on the same machine, from the same clean
+checkout. It runs the same checks with `--require-binding`, fails on any
+finding, and prints the line the tag message must carry:
+
+```sh
+python tools/release.py evidence CANDIDATE_SHA --excel-evidence test-results/excel-run --workbook test-results/build/Workbook-development.xlsm
+```
+
+For a run of an earlier commit, add `--run-commit RUN_SHA`: the gate then
+checks the evidence against `RUN_SHA` with `--equivalent-to CANDIDATE_SHA`.
+It never asks for carried evidence, and refuses it. It must end with
+`release-evidence: PASS`, after these two lines, the first of which ends
+`(a run of RUN_SHA, equivalent to the candidate)` for an earlier run:
+
+```text
+Excel evidence digest: <digest> (a run of the candidate)
+Tag message line: Excel evidence: <digest> (run <run commit>).
+```
+
+The digest is the SHA-256 of a listing of the evidence: one line
+`<SHA-256 of the file>  evidence/<path>` for each file in the evidence
+folder, sorted by its path relative to the folder with `/` separators, then
+one line `<SHA-256 of the workbook>  workbook`, each ending in a line feed.
+The same files give the same digest wherever they are, and the workbook's
+name does not count. Nothing is published: the evidence folder, its
+`host.txt` and the workbook stay on the machine of the run. Keep them
+unchanged until the version is published, because step 6 checks them against
+the tag. Copy the two lines into the certification record.
+
 If the repository keeps a [user manual](#user-manual), build its PDF from the
 candidate as that section describes, and record it, with the PDF tool and its
 version, in *Artifacts* of the certification record.
@@ -242,6 +275,7 @@ annotated:
 git fetch origin
 git tag -a vX.Y.Z FULL_SHA -F ../tag-message-vX.Y.Z.txt
 git cat-file -t vX.Y.Z        # must print: tag
+python tools/release.py verify vX.Y.Z --default-branch DEFAULT_BRANCH --excel-evidence test-results/excel-run --workbook test-results/build/Workbook-development.xlsm
 git push origin vX.Y.Z
 ```
 
@@ -253,6 +287,7 @@ vX.Y.Z - <milestone title>
 Candidate <full 40-character SHA>.
 Repository integrity: run <run id> PASS.
 Excel: <host, build, bitness>; certification #<issue>.
+Excel evidence: <digest> (run <full SHA of the run's commit>).
 Distribution review: #<issue>.
 Deviations: none.
 ```
@@ -269,6 +304,23 @@ Deviations:
 `Deviations:` with nothing after it fails. Copy results from the runs
 themselves.
 
+When the candidate holds a VBA component (a `.bas`, `.cls` or `.frm` file
+anywhere in its tree), the message needs the `Excel evidence:` line exactly
+as the [Excel evidence gate](#excel-evidence-gate) printed it in step 4, or,
+when no run could be recorded, an invariant 4 item under `Deviations:`, such
+as `- Invariant 4: <what was not met, and why>.` `Deviations: none.` does
+not waive the run, and a line that starts with `Excel evidence:` in any other
+form fails. Without a VBA component, neither is needed.
+
+Before pushing the tag, run `tools/release.py verify` on the machine that
+holds the evidence, as above. With `--excel-evidence` and `--workbook`, it
+also runs the gate of step 4 for the tagged commit and the run commit the
+line names, and fails unless the evidence still has the digest the line
+declares. Leave both options out when the message declares an invariant 4
+deviation instead. It must end with `release-verify: PASS (vX.Y.Z)`. If it
+fails, the tag is still only local: delete it with `git tag -d vX.Y.Z`, fix
+the message or the evidence, and create it again.
+
 Pushing the tag starts the **Release** workflow
 (`.github/workflows/release.yml`). It stops before building anything if any of
 these fails:
@@ -279,7 +331,14 @@ these fails:
 - the tagged commit is on the default branch;
 - the message names that commit on the `Candidate` line and has a
   `Deviations:` line in one of the two forms above;
+- when the commit holds a VBA component, the message has one well-formed
+  `Excel evidence:` line or an invariant 4 item under `Deviations:`;
 - **Repository integrity** succeeded on the commit.
+
+The workflow checks the `Excel evidence:` line for its form only. It never
+downloads or re-runs the evidence, which never leaves the machine of the run:
+CI cannot check the run itself, only that the tag declares it. The local
+`verify` before the push is what ties the line to the evidence.
 
 The workflow then builds `<repository>-X.Y.Z-source.tar.gz` and `SHA256SUMS`
 from the tag with `tools/release.py`; the same tag always gives the same bytes.
@@ -410,7 +469,8 @@ Keep with the release, in its certification issue and the release notes:
 - the maintenance audit report;
 - the candidate SHA and the integration pull request;
 - the **Repository integrity** run and the CodeQL assessment;
-- the Excel run, with the host it names;
+- the Excel run, with the host it names, and the `Excel evidence:` line of the
+  tag message, or the invariant 4 deviation;
 - the distribution review;
 - the tag name and its target;
 - the output of `tools/release.py verify-published`;
@@ -450,7 +510,7 @@ Logs and artifacts expire, so copy the decisive lines.
 | 7 | Release certification recorded for the candidate | ☐ |
 | 8 | Distribution review recorded and closed | ☐ |
 | 9 | I decided to publish | ☐ |
-| 10 | Annotated tag on the candidate | ☐ |
+| 10 | Annotated tag on the candidate, with the `Excel evidence:` line or an invariant 4 deviation, and `tools/release.py verify` passed with the evidence before the push | ☐ |
 | 11 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
 | 12 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
 | 13 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |

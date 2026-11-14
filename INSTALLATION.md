@@ -529,6 +529,11 @@ run commit, and adds
 difference is a `FAIL` line that names the path; record a new run for that
 commit instead. Record both commits wherever you cite the run.
 
+For a release, `tools/release.py evidence` runs this check with
+`--require-binding`, for the candidate or, with `--run-commit`, for an
+earlier run, and prints the `Excel evidence:` line of the tag message
+([RELEASING.md step 4](RELEASING.md#excel-evidence-gate)).
+
 #### Carried evidence
 
 A comment does not change what Excel runs. For a pull request, a run also
