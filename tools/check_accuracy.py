@@ -5,10 +5,13 @@ An accuracy contract (docs/methodology/TEST_CASES.md, Accuracy contracts) is the
 worst error a calculation guarantees for one regime, over the outputs of its
 quantities in two lists of cases: the calibration cases, which may be used to
 set the threshold, and the holdout cases, which never are. The registry is
-tests/accuracy/contracts.json.
+tests/accuracy/contracts.json. The threshold is the guarantee, which blocks;
+an optional target, no larger, is the accuracy aimed for, which is only
+reported.
 
 Without a results file, the check reads the registry against the cases:
-- every contract is well formed;
+- every contract is well formed, and its target, when it has one, is a finite
+  number of at least 0 and no larger than its threshold;
 - its calculation is declared by the calculation contracts;
 - each of its cases tests that calculation and has an expected number for each
   of its quantities, and no case is both calibration and holdout;
@@ -18,7 +21,7 @@ Without a results file, the check reads the registry against the cases:
 - a contract frozen at the newest vX.Y.Z tag that HEAD contains is still
   frozen, and keeps its guarantee unless it names another decision: the same
   calculation, regime and metric, a threshold no larger, and every quantity
-  and case it had.
+  and case it had. Its target may change under the same decision.
 
 With --results, a results file of an Excel run, it also fails; repeated, it
 measures the results files of several suites together:
@@ -29,6 +32,9 @@ measures the results files of several suites together:
 - a result outside its expected output's own tolerance;
 - a contract whose worst error, among its calibration or among its holdout
   outputs, exceeds its threshold.
+It prints, for each split, the worst error, the threshold and the target, and
+marks the target missed when the worst error is above the target but within
+the threshold: that passes.
 
 The error is |a - e| for an absolute contract and |a - e| / |e| for a relative
 one; a relative error at e = 0 is 0 when a = 0 and infinite otherwise. A
@@ -67,6 +73,8 @@ REGISTRY_KEYS = frozenset({"schema_version", "kind", "min_holdout_cases", "contr
 CONTRACT_KEYS = frozenset({"id", "calculation", "regime", "quantities", "metric", "threshold",
                            "provenance", "status", "decision", "calibration_cases",
                            "holdout_cases"})
+# Keys a contract may leave out: a registry without them keeps schema_version 1.
+OPTIONAL_CONTRACT_KEYS = frozenset({"target"})
 RESULTS_KEYS = frozenset({"schema_version", "kind", "commit", "results"})
 RESULT_KEYS = frozenset({"case", "variant", "quantity", "scope", "value"})
 # Each pattern must match a whole value (fullmatch): "$" would also accept a
@@ -106,6 +114,8 @@ class Contract:
     decision: str | None
     calibration: list[str]
     holdout: list[str]
+    # Reported only: the worst error aimed for, no larger than the threshold.
+    target: float | None = None
 
 
 @dataclass
@@ -162,6 +172,20 @@ def case_outputs(root: Path, case: str, report: Report) -> tuple[str | None, lis
     return calculation if isinstance(calculation, str) else None, outputs
 
 
+def target_problems(data: Mapping[str, Any]) -> list[str]:
+    """What is wrong with a contract's optional target, which is only reported: a
+    target looser than the threshold, which blocks, would aim for nothing."""
+    if "target" not in data:
+        return []
+    target = data["target"]
+    if not is_number(target) or target < 0:
+        return ["target is not a finite number of at least 0"]
+    threshold = data.get("threshold")
+    if is_number(threshold) and target > threshold:
+        return [f"target {target!r} is larger than the threshold {threshold!r}"]
+    return []
+
+
 def contract_problems(data: Mapping[str, Any]) -> list[str]:
     """What is wrong with one contract's own fields."""
     problems = []
@@ -179,6 +203,7 @@ def contract_problems(data: Mapping[str, Any]) -> list[str]:
         problems.append("metric is not absolute or relative")
     if not is_number(data.get("threshold")) or data["threshold"] < 0:
         problems.append("threshold is not a finite number of at least 0")
+    problems += target_problems(data)
     if not isinstance(data.get("provenance"), str) or not data["provenance"].strip():
         problems.append("provenance is not a text")
     if data.get("status") not in STATUSES:
@@ -229,8 +254,10 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
     for index, item in enumerate(data["contracts"]):
         name = item.get("id") if isinstance(item, dict) else None
         at = f"{where}: contracts[{index}]" + (f" {name}" if isinstance(name, str) else "")
-        if not isinstance(item, dict) or item.keys() != CONTRACT_KEYS:
-            report.add(at, f"keys are not {', '.join(sorted(CONTRACT_KEYS))}")
+        if not isinstance(item, dict) or \
+                not CONTRACT_KEYS <= set(item) <= CONTRACT_KEYS | OPTIONAL_CONTRACT_KEYS:
+            report.add(at, f"keys are not {', '.join(sorted(CONTRACT_KEYS))}, and "
+                           f"optionally {', '.join(sorted(OPTIONAL_CONTRACT_KEYS))}")
             continue
         problems = contract_problems(item)
         # A malformed id is already a problem; only a text id can repeat.
@@ -246,7 +273,8 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
             item["id"], str(item["calculation"]), item["regime"], list(item["quantities"]),
             item["metric"],
             float(item["threshold"]), item["status"], item["decision"],
-            list(item["calibration_cases"]), list(item["holdout_cases"])))
+            list(item["calibration_cases"]), list(item["holdout_cases"]),
+            float(item["target"]) if "target" in item else None))
     return registry
 
 
@@ -339,7 +367,8 @@ def widening_problems(root: Path, registry: Registry, report: Report) -> list[st
 
 
 def weakened(before: Contract, now: Contract) -> list[str]:
-    """How ``now`` changes or weakens the guarantee ``before`` froze; tightening is no change."""
+    """How ``now`` changes or weakens the guarantee ``before`` froze; tightening is no change.
+    The target is only reported, so a change of target is no change of the guarantee."""
     changes = [f"{name} is {getattr(now, name)!r}, not {getattr(before, name)!r}"
                for name in ("calculation", "regime", "metric")
                if getattr(now, name) != getattr(before, name)]
@@ -427,9 +456,24 @@ def merged_results(paths: Sequence[Path], root: Path, candidate: str | None,
     return merged if usable else None
 
 
+def summary(contract: Contract, split: str, worst: float) -> str:
+    """One split's measurement: the worst error, the threshold, which blocks, and the
+    target, which is only reported."""
+    target = "no target" if contract.target is None else f"target {contract.target!r}"
+    line = (f"{contract.id} {split}: worst {contract.metric} error {worst!r}, "
+            f"threshold {contract.threshold!r}, {target}")
+    if worst > contract.threshold:
+        return f"{line}: threshold exceeded"
+    if contract.target is not None and worst > contract.target:
+        return f"{line}: target missed"
+    return line
+
+
 def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Mapping[Key, float],
             report: Report, where: str) -> list[str]:
-    """Each output against its own tolerance and the contract; one summary line per split."""
+    """Each output against its own tolerance and the contract; one summary line per split.
+    Only the threshold blocks: a worst error above the target but within the threshold
+    passes, and its line says that the target was missed."""
     lines = []
     for split, outputs in splits.items():
         worst = 0.0
@@ -447,8 +491,7 @@ def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Map
             report.add(where, f"worst {contract.metric} error {worst!r} over {split} cases "
                               f"exceeds the threshold {contract.threshold!r}")
         if outputs:
-            lines.append(f"{contract.id} {split}: worst {contract.metric} error {worst!r}, "
-                         f"threshold {contract.threshold!r}")
+            lines.append(summary(contract, split, worst))
     return lines
 
 

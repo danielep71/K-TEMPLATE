@@ -339,7 +339,10 @@ starting point:
 A case's tolerance decides whether that case passes. An accuracy contract
 states the guarantee a calculation gives for one regime: the worst error
 allowed over the outputs of its quantities in a set of cases. It is what a
-release may publish as the calculation's accuracy.
+release may publish as the calculation's accuracy. The contract's
+`threshold` is that guarantee, and blocks. An optional `target`, no larger,
+is the worst error the project aims for: it is measured and reported, never
+blocks, and so can be tighter than what a release may promise.
 `tests/accuracy/contracts.json` holds the contracts:
 
 ```json
@@ -355,7 +358,8 @@ release may publish as the calculation's accuracy.
       "quantities": ["illustrative_total_notional_amount"],
       "metric": "absolute",
       "threshold": 0.000001,
-      "provenance": "Why the threshold is what it is",
+      "target": 0,
+      "provenance": "Why the threshold and the target are what they are",
       "status": "draft",
       "decision": null,
       "calibration_cases": ["illustrative-format-example"],
@@ -371,8 +375,9 @@ release may publish as the calculation's accuracy.
 | `calculation` | A `CALC-` ID declared by the calculation contracts; every case of the contract tests it |
 | `regime` | A free text label, such as the regulation or its version |
 | `quantities` | The outputs the contract covers; every case has an expected number for each |
-| `metric`, `threshold` | `absolute`: the absolute difference between the result and the expected value; `relative`: that difference divided by the expected value's magnitude, which is 0 at an expected 0 only when the result is 0 too. The threshold is a finite number of at least 0 |
-| `provenance` | Why the threshold is what it is |
+| `metric`, `threshold` | `absolute`: the absolute difference between the result and the expected value; `relative`: that difference divided by the expected value's magnitude, which is 0 at an expected 0 only when the result is 0 too. The threshold, the guarantee, is a finite number of at least 0 |
+| `target` | Optional: the worst error aimed for, in the same metric, a finite number of at least 0 and no larger than the threshold. Only reported; leave it out for no target. No rule derives the threshold from it: declare each one |
+| `provenance` | Why the threshold, and the target if any, are what they are |
 | `status`, `decision` | `draft`, with `decision` `null`, or `frozen`, with the issue or record that froze it |
 | `calibration_cases` | The cases that may be used to set the threshold, each listed once |
 | `holdout_cases` | The cases that never are, each listed once; no case is in both lists |
@@ -386,7 +391,9 @@ release may publish as the calculation's accuracy.
   same `decision`, it may only get stricter: a lower threshold, or added
   quantities and cases. A change of calculation, regime or metric, a larger
   threshold, or a dropped quantity or case needs a new `decision`. The check
-  compares with the newest `vX.Y.Z` tag of the branch.
+  compares with the newest `vX.Y.Z` tag of the branch. The target is not
+  part of the guarantee: it may be added, changed or removed under the same
+  `decision`, within the threshold.
 - **Measured on the workbook.** The contracts measure the workbook's results,
   which exist only after an Excel run. `python tools/check_accuracy.py`, which
   **Repository integrity** runs, checks the registry against the cases. With
@@ -400,6 +407,16 @@ release may publish as the calculation's accuracy.
   - a result outside its own tolerance;
   - a worst error above the threshold, which it computes separately for the
     calibration and the holdout cases.
+
+  For each split it prints the worst error, the threshold and the target, or
+  `no target`. A worst error above the target but within the threshold
+  passes, and its line ends with `target missed`; one above the threshold
+  ends with `threshold exceeded` and fails:
+
+  ```text
+  ACC-02 calibration: worst relative error 4e-06, threshold 0.0001, target 1e-05
+  ACC-02 holdout: worst relative error 5e-05, threshold 0.0001, target 1e-05: target missed
+  ```
 
 ```json
 {

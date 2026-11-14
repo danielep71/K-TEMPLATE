@@ -1170,8 +1170,9 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(result.findings, [])
         self.assertEqual([line.split(":")[0] for line in result.accuracy],
                          ["ACC-01 calibration", "ACC-01 holdout"])
-        self.assertIn("Accuracy: ACC-01 calibration: worst absolute error 0.0",
-                      check_excel_run.report(self.commit, result))
+        # The line names the threshold, which blocks, and the target, which is reported.
+        self.assertIn("Accuracy: ACC-01 calibration: worst absolute error 0.0, threshold 1e-06, "
+                      "no target\n", check_excel_run.report(self.commit, result))
 
     def test_the_repository_contracts_are_measured(self) -> None:
         # One line for each split of this repository's contracts that lists a case.

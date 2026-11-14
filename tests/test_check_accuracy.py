@@ -160,6 +160,37 @@ class RegistryTest(unittest.TestCase):
                            "min_holdout_cases is not a whole number of at least 1")
         self.assertFinding(findings({"schema_version": 2}), "envelope is not")
 
+    def test_a_target_no_larger_than_the_threshold_is_optional(self) -> None:
+        # Up to the threshold: 0.0001 for ACC-02, 0.000001 for ACC-01.
+        for target in (0, 0.00001, 0.0001):
+            with self.subTest(target=target):
+                self.assertEqual(findings(registry({**FROZEN, "target": target},
+                                                   {**ILLUSTRATIVE, "target": target / 100})),
+                                 [])
+        with repository(registry({**FROZEN, "target": 0.00001}, ILLUSTRATIVE)) as root:
+            read = check_accuracy.read_registry(root, None, Report(), "registry")
+        assert read is not None
+        self.assertEqual([contract.target for contract in read.contracts], [0.00001, None])
+
+    def test_a_malformed_or_larger_target_is_a_finding(self) -> None:
+        cases: list[tuple[Any, str]] = [
+            (-0.00001, "target is not a finite number of at least 0"),
+            ("0.00001", "target is not a finite number of at least 0"),
+            (True, "target is not a finite number of at least 0"),
+            (None, "target is not a finite number of at least 0"),
+            ([0.00001], "target is not a finite number of at least 0"),
+            (0.001, "target 0.001 is larger than the threshold 0.0001"),
+        ]
+        for target, text in cases:
+            with self.subTest(target=target):
+                found = findings(registry({**FROZEN, "target": target}))
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(f"ACC-02: {text}", found[0])
+        # A malformed threshold is its own finding, not a comparison with the target.
+        found = findings(registry({**FROZEN, "threshold": "x", "target": 0.001}))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("threshold is not a finite number of at least 0", found[0])
+
     def test_ids_and_names_are_whole_values_with_ascii_digits(self) -> None:
         cases: list[tuple[dict[str, Any], str]] = [
             ({"id": "ACC-02\n"}, "id is not ACC-<number>"),
@@ -233,7 +264,62 @@ class ResultsTest(unittest.TestCase):
         worst = [float(line.split(" error ")[1].split(",")[0]) for line in lines]
         self.assertAlmostEqual(worst[0], 5e-05, places=12)
         self.assertAlmostEqual(worst[1], 5e-06, places=12)
-        self.assertTrue(all(line.endswith("threshold 0.0001") for line in lines))
+        self.assertTrue(all(line.endswith("threshold 0.0001, no target") for line in lines),
+                        lines)
+
+    def measured(self, contract: dict[str, Any], **values: float) -> tuple[list[str], list[str]]:
+        with repository(registry(contract)) as root:
+            path = root / "results.json"
+            path.write_text(json.dumps(results(**values)), "utf-8")
+            found, _, lines = check_accuracy.check(root, path, CANDIDATE)
+        return found, lines
+
+    def test_a_worst_error_within_the_target_is_reported_as_met(self) -> None:
+        found, lines = self.measured({**FROZEN, "target": 0.00001}, demo_calibration=100.0004,
+                                     demo_holdout_1=200.001, demo_holdout_2=0)
+        self.assertEqual(found, [])
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(all(line.endswith(", threshold 0.0001, target 1e-05")
+                            for line in lines), lines)
+
+    def test_a_missed_target_within_the_threshold_passes_and_is_reported(self) -> None:
+        # Relative 5e-05 on the calibration: above the target 1e-05, within the threshold.
+        found, lines = self.measured({**FROZEN, "target": 0.00001}, demo_calibration=100.005,
+                                     demo_holdout_1=200.001, demo_holdout_2=0)
+        self.assertEqual(found, [])
+        self.assertTrue(lines[0].startswith("ACC-02 calibration: worst relative error 4.99"),
+                        lines)
+        self.assertTrue(lines[0].endswith(", threshold 0.0001, target 1e-05: target missed"),
+                        lines)
+        self.assertTrue(lines[1].endswith(", threshold 0.0001, target 1e-05"), lines)
+        # A target equal to 0 is missed by any error, and still blocks nothing.
+        found, lines = self.measured({**FROZEN, "target": 0}, demo_calibration=100.005,
+                                     demo_holdout_1=200, demo_holdout_2=0)
+        self.assertEqual(found, [])
+        self.assertEqual([line.endswith("target 0.0: target missed") for line in lines],
+                         [True, False])
+        with repository(registry({**FROZEN, "target": 0.00001})) as root, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            path = root / "results.json"
+            path.write_text(json.dumps(results(demo_calibration=100.005, demo_holdout_1=200,
+                                               demo_holdout_2=0)), "utf-8")
+            self.assertEqual(check_accuracy.main(["--root", str(root), "--results",
+                                                  str(path), "--commit", CANDIDATE]), 0)
+        self.assertIn("target 1e-05: target missed\n", output.getvalue())
+        self.assertIn("accuracy: PASS (1 contract(s); measured against the results)",
+                      output.getvalue())
+
+    def test_a_worst_error_above_the_threshold_fails_whatever_the_target(self) -> None:
+        # The case tolerance of 0.01 holds; the absolute threshold 0.001 does not.
+        loose = {**FROZEN, "metric": "absolute", "threshold": 0.001, "target": 0.0001}
+        found, lines = self.measured(loose, demo_calibration=100.0005,
+                                     demo_holdout_1=200.005, demo_holdout_2=0)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("over holdout cases exceeds the threshold 0.001", found[0])
+        self.assertTrue(lines[0].endswith("threshold 0.001, target 0.0001: target missed"),
+                        lines)
+        self.assertTrue(lines[1].endswith("threshold 0.001, target 0.0001: threshold exceeded"),
+                        lines)
 
     def test_a_result_outside_its_own_tolerance_fails(self) -> None:
         found = findings(registry(FROZEN), results(demo_calibration=100.02, demo_holdout_1=200,
@@ -354,6 +440,19 @@ class WideningTest(unittest.TestCase):
                             for item in widened), widened)
         self.assertEqual(self.tagged(FROZEN, {**FROZEN, "threshold": 0.001,
                                               "decision": "#2"}), [])
+
+    def test_a_change_of_target_needs_no_new_decision(self) -> None:
+        aimed = {**FROZEN, "target": 0.00001}
+        for before, now in ((FROZEN, aimed), (aimed, FROZEN),
+                            (aimed, {**FROZEN, "target": 0.0001}),
+                            (aimed, {**FROZEN, "target": 0})):
+            with self.subTest(before=before.get("target"), now=now.get("target")):
+                self.assertEqual(self.tagged(before, now), [])
+        # The threshold keeps its rules, whatever the target does.
+        widened = self.tagged(aimed, {**aimed, "threshold": 0.001})
+        self.assertTrue(any("ACC-02 threshold 0.001 is larger than 0.0001 at v1.0.0" in item
+                            for item in widened), widened)
+        self.assertEqual(self.tagged(aimed, {**aimed, "threshold": 0.00001}), [])
 
     def test_any_other_change_to_a_frozen_guarantee_needs_a_new_decision(self) -> None:
         changes: dict[str, dict[str, Any]] = {

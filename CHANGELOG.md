@@ -122,6 +122,17 @@ Use only the categories an entry needs.
   allowed restatements, with a reason. The installation guide, the harness
   guide, the VBA house style and the setup guide no longer restate these
   counts (#504).
+- An accuracy contract may declare an optional `target` beside its
+  `threshold`: a finite number of at least 0, no larger than the threshold,
+  that `tools/check_accuracy.py` reports but never blocks on. The threshold
+  stays the guarantee that fails a run, and a registry without a target keeps
+  `schema_version` 1. Each measurement line, which `tools/check_excel_run.py`
+  passes on as an `Accuracy:` line, now names the threshold and the target,
+  or `no target`, and ends with `target missed` when the worst error is above
+  the target but within the threshold, or `threshold exceeded` when it fails.
+  A malformed target, or one larger than the threshold, is a finding. A
+  frozen contract's target may change under the same decision; its threshold
+  keeps its rules. The illustrative `ACC-01` declares a target of 0 (#505).
 
 ### Changed
 
