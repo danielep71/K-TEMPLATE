@@ -2101,6 +2101,8 @@ class LexerTest(unittest.TestCase):
             "10: Rem note": "10:",
             "x = ['Sheet 1'!A1] ' note": "x = ['Sheet 1'!A1]",
             "x = [A1] ' note": "x = [A1]",
+            "x = [A1:Rem] ' note": "x = [A1:Rem]",
+            "x = [A1 : Rem + 1]: Rem note": "x = [A1 : Rem + 1]:",
             "x = 1: Remark = 2": "x = 1: Remark = 2",
             '"it\'s": GoTo Label': '"it\'s": GoTo Label',
         }

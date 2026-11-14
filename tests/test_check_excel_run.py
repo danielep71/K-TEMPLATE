@@ -923,6 +923,182 @@ class EquivalenceTest(unittest.TestCase):
                          set(check_excel_run.BUILD_TOOLS))
 
 
+# A class module of the carried-evidence fixture, beside the form and the test modules.
+CLASS_MODULE = (b"VERSION 1.0 CLASS\nBEGIN\n  MultiUse = -1  'True\nEND\n"
+                b'Attribute VB_Name = "CFixture"\nOption Explicit\n'
+                b"' A class of the fixture\nPublic Value As Double\n")
+
+
+def folder_state(folder: Path) -> dict[str, bytes]:
+    """Every file under ``folder``, by relative path, with its bytes."""
+    return {path.relative_to(folder).as_posix(): path.read_bytes()
+            for path in sorted(folder.rglob("*")) if path.is_file()}
+
+
+@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+class CarriedTest(unittest.TestCase):
+    """--carried-to: a run carried to a commit that changes VBA comments or layout only."""
+
+    root: ClassVar[Path]
+    built: ClassVar[str]
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.root, cls.built = make_repository(extra={"src/classes/CFixture.cls": CLASS_MODULE})
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        shutil.rmtree(cls.root, ignore_errors=True)
+
+    def read(self, path: str) -> bytes:
+        return subprocess.run(["git", "-C", str(self.root), "show", f"{self.built}:{path}"],
+                              capture_output=True, check=True).stdout
+
+    def run_main(self, *arguments: str) -> tuple[int, str]:
+        with evidence(root=self.root, commit=self.built) as folder, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            code = check_excel_run.main([str(folder), "--commit", self.built,
+                                         "--root", str(self.root), *arguments])
+        return code, output.getvalue()
+
+    def findings(self, target: str) -> list[str]:
+        with evidence(root=self.root, commit=self.built) as folder:
+            return check_excel_run.check(self.root, self.built, folder,
+                                         carried_to=target).findings
+
+    def comment_change(self) -> str:
+        """A commit that edits a comment of a .bas, a .cls and a .frm, and the layout
+        and the letter case of the .bas."""
+        harness = self.read(POLICY.harness)
+        self.assertIn(b"\n    Option Explicit\n", harness)
+        harness = harness.replace(b"\n    Option Explicit\n",
+                                  b"\noption   explicit   ' re-cased\n", 1)
+        form = next(name for name in FORM if name.endswith(".frm"))
+        return commit_change(self.root, self.built, {
+            POLICY.harness: harness + b"' A comment added after the run\n\n",
+            "src/classes/CFixture.cls": CLASS_MODULE.replace(
+                b"A class of the fixture", b"Another comment"),
+            form: FORM[form] + b"Rem A comment of the form\n"})
+
+    def test_a_comment_only_change_is_carried_and_labelled(self) -> None:
+        target = self.comment_change()
+        code, text = self.run_main("--carried-to", target)
+        self.assertEqual(code, 0, text)
+        changed = sorted([POLICY.harness, "src/classes/CFixture.cls",
+                          "src/forms/frmFixture.frm"])
+        tracked = subprocess.run(["git", "-C", str(self.root), "ls-tree", "-r", "--name-only",
+                                  self.built], capture_output=True, check=True,
+                                 text=True).stdout.split()
+        self.assertIn(f"Candidate commit: {target}", text)
+        self.assertIn(f"Run commit: {self.built} (the workbook was built from it)", text)
+        self.assertIn(f"Carried from {self.built[:12]}: {', '.join(changed)} differ only in "
+                      f"comments or layout; the other {len(tracked) - 3} run inputs are "
+                      "identical. Carried evidence never certifies a release", text)
+        self.assertIn(f"Note: {POLICY.harness}: 2 identifier(s) re-cased between", text)
+        self.assertNotIn("Equivalent:", text)
+        self.assertIn("excel-run: PASS", text)
+        # Blob identity still decides --equivalent-to: the same commit is refused there.
+        code, text = self.run_main("--equivalent-to", target)
+        self.assertEqual(code, 1)
+        self.assertIn(f"FAIL: run input {POLICY.harness}: differs between", text)
+        self.assertNotIn("Carried from", text)
+
+    def test_identical_run_inputs_are_carried_too(self) -> None:
+        target = commit_change(self.root, self.built, {"README.md": b"Documentation only.\n"})
+        code, text = self.run_main("--carried-to", target)
+        self.assertEqual(code, 0, text)
+        self.assertIn(f"Carried from {self.built[:12]}: no VBA component changed;", text)
+
+    def test_the_label_is_never_written(self) -> None:
+        target = self.comment_change()
+        with evidence(root=self.root, commit=self.built) as folder:
+            before = folder_state(folder)
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                code = check_excel_run.main([str(folder), "--commit", self.built,
+                                             "--root", str(self.root), "--carried-to", target])
+            self.assertEqual(code, 0, output.getvalue())
+            self.assertIn("Carried from", output.getvalue())
+            self.assertEqual(folder_state(folder), before)
+        status = subprocess.run(["git", "-C", str(self.root), "status", "--porcelain",
+                                 "--ignored"], capture_output=True, check=True, text=True)
+        self.assertEqual(status.stdout, "")
+
+    def test_a_changed_input_is_refused_and_named(self) -> None:
+        harness = self.read(POLICY.harness)
+        cls = CLASS_MODULE
+        policy = self.read(check_excel_run.POLICY)
+        changes: list[tuple[str, dict[str, bytes | None], list[str]]] = [
+            ("changed code", {"src/classes/CFixture.cls": cls.replace(b"As Double", b"As Long")},
+             ["run input src/classes/CFixture.cls: code changed: line 8 at the run, line 8 "
+              "now: 'Public Value As Double' became 'Public Value As Long'"]),
+            ("added statement", {POLICY.harness: harness + b"Private Const PROBE As Long = 1\n"},
+             [f"run input {POLICY.harness}: code changed: 1 statement(s) only in the current "
+              "version"]),
+            ("changed resource", {"src/forms/frmFixture.frx": FORM["src/forms/frmFixture.frx"]
+                                  + b"\x00"},
+             ["run input src/forms/frmFixture.frx: differs between"]),
+            ("changed policy", {check_excel_run.POLICY: policy + b"\n"},
+             [f"run input {check_excel_run.POLICY}: differs between"]),
+            ("added module", {"src/modules/MAdded.bas": b'Attribute VB_Name = "MAdded"\n'},
+             ["run input src/modules/MAdded.bas: only at"]),
+            ("removed module", {"src/classes/CFixture.cls": None},
+             [f"run input src/classes/CFixture.cls: only at {self.built[:12]}"]),
+            ("renamed module", {"src/classes/CFixture.cls": None,
+                                "src/classes/CRenamed.cls": cls},
+             ["run input src/classes/CFixture.cls: only at",
+              "run input src/classes/CRenamed.cls: only at"]),
+            # Brackets in a comment are comment.
+            ("bracket in a comment", {POLICY.harness: harness + b"' x = [A1]\n"}, []),
+            ("non-ASCII byte", {POLICY.harness: harness + b"' caf\xe9\n"},
+             [f"run input {POLICY.harness}: non-ASCII byte at offset"])]
+        for label, change, expected in changes:
+            with self.subTest(label):
+                target = commit_change(self.root, self.built, change)
+                found = self.findings(target)
+                for text in expected:
+                    self.assertTrue(any(text in item and f"is not carried to {target[:12]}"
+                                        in item for item in found), found)
+                self.assertEqual(len(found), len(expected), found)
+        # A [...] expression outside a string is refused, even in a module whose
+        # only change is a comment.
+        brackets = commit_change(self.root, self.built, {
+            "src/classes/CFixture.cls": cls + b"Public Function Cell() As Variant\n"
+                                              b"    Cell = [A1]\nEnd Function\n"})
+        edited = commit_change(self.root, brackets, {
+            "src/classes/CFixture.cls": cls.replace(b"A class of the fixture", b"edited")
+            + b"Public Function Cell() As Variant\n    Cell = [A1]\nEnd Function\n"})
+        with evidence(root=self.root, commit=brackets) as folder:
+            found = check_excel_run.check(self.root, brackets, folder,
+                                          carried_to=edited).findings
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("run input src/classes/CFixture.cls: code changed: the run version uses "
+                      "[ or ] outside a string at line 10, which is never carried", found[0])
+        target = commit_change(self.root, self.built, {
+            "src/classes/CFixture.cls": cls + b"Public Function Cell() As Variant\n"
+                                              b"    Cell = [A1]\nEnd Function\n"})
+        code, text = self.run_main("--carried-to", target)
+        self.assertEqual(code, 1)
+        self.assertNotIn("Carried from", text)
+        self.assertIn("excel-run: FAIL", text)
+
+    def test_the_options_are_checked(self) -> None:
+        target = self.comment_change()
+        for name in ("HEAD", target[:12], target.upper()):
+            with self.subTest(name=name):
+                code, text = self.run_main("--carried-to", name)
+                self.assertEqual(code, 1)
+                self.assertIn(f"--carried-to {name}: not a full lower-case commit SHA", text)
+        code, text = self.run_main("--carried-to", "0" * 40)
+        self.assertEqual(code, 1)
+        self.assertIn(f"commit {'0' * 40} not found", text)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            self.run_main("--carried-to", target, "--equivalent-to", target)
+        with evidence(root=self.root, commit=self.built) as folder, \
+                self.assertRaises(ValueError):
+            check_excel_run.check(self.root, self.built, folder, equivalent_to=target,
+                                  carried_to=target)
+
+
 # A synthetic calculation, declared after the working tree's calculation contracts,
 # and the draft accuracy contracts on synthetic cases of it that the measurement
 # tests use in place of this repository's contracts.

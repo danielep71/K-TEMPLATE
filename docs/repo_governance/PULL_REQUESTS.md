@@ -67,7 +67,12 @@ pull request still counts for the head when
 `tools/check_excel_run.py --equivalent-to` proves their
 [run inputs](../../INSTALLATION.md#a-run-for-another-commit) identical;
 record it as `run at <SHA>, equivalent`, with the report's `Equivalent:`
-line. A pull request that changes none of these files deletes the block.
+line. When the later commits change only comments or layout in VBA
+components, `--carried-to` carries the run to the head instead
+([carried evidence](../../INSTALLATION.md#carried-evidence)); record it as
+`run at <SHA>, carried`, with the report's `Carried from` line. Carried
+evidence counts for a pull request, never for a release. A pull request that
+changes none of these files deletes the block.
 
 ## 🌿 Release branches
 

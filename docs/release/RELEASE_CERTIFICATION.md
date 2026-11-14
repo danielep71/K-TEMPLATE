@@ -22,7 +22,7 @@ empty or marked `NOT RUN` is never a pass.
 | --- | --- |
 | Version | X.Y.Z |
 | Candidate commit | Full 40-character SHA of the integration merge commit |
-| Excel run commit | The candidate commit, or the full SHA of the earlier commit the workbook was built from, with the report's `Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)` line ([RELEASING.md step 4](../../RELEASING.md#4-certify-the-workbook)) |
+| Excel run commit | The candidate commit, or the full SHA of the earlier commit the workbook was built from, with the report's `Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)` line ([RELEASING.md step 4](../../RELEASING.md#4-certify-the-workbook)). A report with a `Carried from` line (`--carried-to`) does not certify a release |
 | Integration and sync pull requests | #N, #N |
 | Changelog section | `## [X.Y.Z] - YYYY-MM-DD`, matches the candidate: yes or no |
 | Clean checkout | `git status --short` printed nothing: yes or no |
