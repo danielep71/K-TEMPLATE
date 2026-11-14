@@ -88,6 +88,17 @@ Use only the categories an entry needs.
   needs a run of the candidate or one `--equivalent-to` proves identical.
   The VBA lexer no longer reads `Rem` or a colon inside a `[...]` expression
   as a comment or a statement separator (#499).
+- `python tools/format_vba.py --check` reads an optional baseline,
+  `tools/vba_layout_baseline.json`, that lists the modules not yet in
+  layout, so that a project importing existing modules can bring them into
+  layout one at a time. The check fails on an unlisted module out of layout,
+  on a listed module back in layout until its entry is removed, and on a
+  listed path that is not a tracked module; a missing or malformed baseline
+  is an error with exit status 2. `--baseline FILE` reads another file and
+  `--no-baseline` ignores it. `--write` says to re-import each rewritten
+  module and to remove its baseline entry. The template has no baseline,
+  since its modules are in layout; the house style describes how to create
+  one (#502).
 
 ### Changed
 
@@ -152,6 +163,10 @@ Use only the categories an entry needs.
   the evidence against the line. The **Release** workflow checks only the
   line's form: the evidence and `host.txt` stay on the machine of the run,
   so CI cannot check the run itself (#498).
+- `tools/format_vba.py`, run without paths, reads the modules that Git tracks
+  under the source directories; an untracked file there is no longer
+  formatted or checked, and a run outside a Git repository is an error with
+  exit status 2 (#502).
 
 ### Fixed
 
@@ -163,6 +178,11 @@ Use only the categories an entry needs.
   longer moves continuation text that looks like a label or an `End`
   statement. A folder named as a path is formatted, and a missing path is an
   error with exit status 2 instead of a traceback (#496).
+- `tools/format_vba.py` no longer moves a statement keyword followed by a
+  colon, such as `Else:` or `Loop:`, to column one as if it were a label. It
+  keeps a blank line that a continuation carries over, after an `End`
+  statement and at the end of the file too, so that no blank line is added
+  to or removed from a logical line (#502).
 
 ## [1.0.0] - 2026-11-11
 

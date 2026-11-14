@@ -124,7 +124,9 @@
       "files": [
         "tools/vba_code_identity.py",
         "tests/test_vba_code_identity.py",
-        "tools/vba_lexer.py"
+        "tools/vba_lexer.py",
+        "tools/format_vba.py",
+        "tests/test_format_vba.py"
       ]
     }
   ]
