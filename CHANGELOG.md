@@ -104,6 +104,11 @@ Use only the categories an entry needs.
   instead of a list of regimes, and show one formula for each (#492).
 - **Issue triage** reports each open issue in a cycle of open issues'
   dependency sections, which no finished work can unblock (#506).
+- An issue's *Resolution* names the merge commit, the Excel run with its
+  case and assertion counts when the change needed one, and any deviation
+  from the proposed fix. An issue closed through `release/X.Y.Z` goes into
+  milestone `vX.Y.Z`; the pull request guide, the closeout and the
+  maintenance audit say the same (#507).
 
 ### Fixed
 

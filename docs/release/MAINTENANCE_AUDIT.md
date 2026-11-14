@@ -46,7 +46,8 @@ and acceptance criteria are really met. Review:
 - the title and description;
 - the labels, including the priority and `blocked`;
 - the assignee: an actionable issue is assigned to me;
-- the milestone;
+- the milestone: an issue whose change merged into `release/X.Y.Z` belongs
+  to milestone `vX.Y.Z`;
 - the acceptance criteria and their checkboxes;
 - every comment, linked pull request and piece of evidence;
 - its dependencies and any follow-up it promised.

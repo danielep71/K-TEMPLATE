@@ -102,9 +102,11 @@ A blocked issue, for example:
 
 Close an issue as completed only when linked evidence meets its acceptance criteria, and check an acceptance box only when that evidence demonstrates it. When the issue is closed, add a **Resolution** section to its body with:
 
-- links to the change (pull request and commit);
-- the checks actually run, with their results;
-- what was not validated, and any accepted limitation.
+- the change: the pull request and the merge commit;
+- the checks actually run, with their results, including the Excel run and its case and assertion counts when the change touched VBA source, a workbook layout or a test case that runs in Excel ([Excel run](PULL_REQUESTS.md#-excel-run));
+- what was not validated, any deviation from the proposed fix, and any accepted limitation.
+
+An issue closed after its change merged into a release branch `release/X.Y.Z` goes into milestone `vX.Y.Z`, the version that contains it, whatever milestone it was planned in; say so in the Resolution when you move it.
 
 Close for another reason (duplicate, not planned, or superseded) only with an explicit explanation; the `duplicate`, `invalid`, and `wontfix` rows above say which label applies. Record material scope or policy decisions in the issue, pull request, or commit description.
 
