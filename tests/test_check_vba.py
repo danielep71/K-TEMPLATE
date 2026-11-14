@@ -405,6 +405,60 @@ CONDITIONAL_VALID = {
     Private Declare PtrSafe Function Modern Lib "kernel32" () As LongPtr
 #End If
 ''',
+    "module-const-false": '''#Const WRITE_STATUS_BAR = False
+Private Sub Status(ByVal Message As String)
+#If WRITE_STATUS_BAR Then
+        Application.StatusBar = Message
+#End If
+End Sub
+#If WRITE_STATUS_BAR Then
+Private Declare Function Bad Lib "kernel32" () As Long
+#End If
+''',
+    "module-const-expression": '''#Const LEGACY = Not VBA7
+#Const MODERN = Not LEGACY And (Win64 Or Win32) And -1 <> 0
+#If LEGACY Then
+    Private Declare Function Legacy Lib "kernel32" () As Long
+#ElseIf MODERN Then
+    Private Declare PtrSafe Function Modern Lib "kernel32" () As LongPtr
+#End If
+''',
+    "module-const-is-case-insensitive": '''#Const Write_Status_Bar = False
+#If WRITE_STATUS_BAR Then
+    Private Declare Function Bad Lib "kernel32" () As Long
+#End If
+''',
+    "module-const-per-environment": '''#If VBA7 Then
+    #Const HOST = True
+#Else
+    #Const HOST = False
+#End If
+#If HOST Then
+    Private Declare PtrSafe Function Modern Lib "kernel32" () As LongPtr
+#End If
+''',
+    # HOST exists only under VBA7; VBA6 never enters the outer branch, so it
+    # never evaluates the nested #If.
+    "const-used-within-its-defining-branch": '''#If VBA7 Then
+    #Const HOST = True
+    #If HOST Then
+        Private Declare PtrSafe Function Modern Lib "kernel32" () As LongPtr
+    #End If
+#Else
+    Private Declare Function Legacy Lib "kernel32" () As Long
+#End If
+''',
+    # LEGACY exists only under VBA6; under VBA7 the first branch is taken, so
+    # the #ElseIf is not evaluated there.
+    "elseif-not-evaluated-after-a-taken-branch": '''#If Not VBA7 Then
+    #Const LEGACY = True
+#End If
+#If VBA7 Then
+    Private Declare PtrSafe Function Modern Lib "kernel32" () As LongPtr
+#ElseIf LEGACY Then
+    Private Declare Function Legacy Lib "kernel32" () As Long
+#End If
+''',
 }
 CONDITIONAL_INVALID = {
     "declare-without-ptrsafe": ('''#If VBA7 And Win64 Then
@@ -431,7 +485,42 @@ CONDITIONAL_INVALID = {
 ''', "without PtrSafe in vba7-win32, vba7-win64"),
     "integer-literal": ("#If 2 Then\n#End If\n", "-1 and 0"),
     "missing-then": ("#If VBA7\n#End If\n", "must end with Then"),
-    "project-const": ("#Const FEATURE = True\n", "project #Const"),
+    "module-const-true-reaches-declare": ('''#Const ENABLED = True
+#If ENABLED Then
+    Private Declare Function Bad Lib "kernel32" () As Long
+#End If
+''', "without PtrSafe in vba7-win32, vba7-win64"),
+    "const-used-before-definition": ("#If LATER Then\n#End If\n#Const LATER = True\n",
+                                     "unsupported conditional-compilation symbol 'LATER'"),
+    "const-defined-in-one-environment-only": ("#If VBA7 Then\n#Const HOST = True\n#End If\n"
+                                              "#If HOST Then\n#End If\n",
+                                              "unsupported conditional-compilation symbol "
+                                              "'HOST'"),
+    # A #Const defined in an inactive branch does not leak: VBA6 reaches the
+    # #ElseIf (Win64 is False there) without HOST.
+    "elseif-uses-const-from-another-environment": ("#If VBA7 Then\n#Const HOST = True\n#End If\n"
+                                                   "#If Win64 Then\n#ElseIf HOST Then\n#End If\n",
+                                                   "indeterminate #ElseIf directive: unsupported "
+                                                   "conditional-compilation symbol 'HOST'"),
+    "nested-if-uses-const-outside-its-branch": ("#If VBA7 Then\n#Const HOST = True\n#End If\n"
+                                                "#If Not VBA7 Then\n#If HOST Then\n#End If\n"
+                                                "#End If\n",
+                                                "indeterminate #If directive: unsupported "
+                                                "conditional-compilation symbol 'HOST'"),
+    "const-redefines-compiler-constant": ("#Const Win64 = False\n",
+                                          "#Const Win64 redefines a compiler constant"),
+    "duplicate-const": ("#Const FLAG = True\n#Const FLAG = False\n",
+                        "#Const FLAG is defined twice in one environment"),
+    "duplicate-const-in-a-branch": ("#Const FLAG = True\n#If VBA7 Then\n#Const FLAG = False\n"
+                                    "#End If\n", "#Const FLAG is defined twice"),
+    "malformed-const-without-value": ("#Const FLAG\n", "malformed #Const"),
+    "malformed-const-without-name": ("#Const = True\n", "malformed #Const"),
+    "const-named-like-an-operator": ("#Const Not = True\n", "malformed #Const"),
+    "const-not-boolean": ("#Const LEVEL = 2\n", "indeterminate #Const LEVEL: only the Boolean"),
+    "const-without-expression": ("#Const FLAG =\n", "indeterminate #Const FLAG: empty"),
+    "const-unknown-symbol": ("#Const FLAG = PROJECT_ARG\n",
+                             "indeterminate #Const FLAG: unsupported conditional-compilation "
+                             "symbol 'PROJECT_ARG'"),
     "unclosed": ("#If VBA7 Then\n", "not closed"),
     "stray-elseif": ("#ElseIf VBA7 Then\n", "#ElseIf without #If"),
     "elseif-after-else": ("#If VBA7 Then\n#Else\n#ElseIf Win64 Then\n#End If\n",
@@ -466,6 +555,83 @@ class ConditionalTest(unittest.TestCase):
         self.assertEqual(findings, [])
         self.assertEqual(sources["vba7-win64"].split("\n"), ["A", "", "B", "", "", ""])
         self.assertEqual(sources["vba6-win32"].split("\n"), ["A", "", "", "", "C", ""])
+        sources, findings = check_vba_conditionals.reachable_sources(
+            "x.bas", "#Const ON = Win64\n#If ON Then\nB\n#End If")
+        self.assertEqual(findings, [])
+        self.assertEqual(sources["vba7-win64"].split("\n"), ["", "", "B", ""])
+        self.assertEqual(sources["vba7-win32"].split("\n"), ["", "", "", ""])
+
+    def test_module_const_false_blanks_its_branch_everywhere(self) -> None:
+        sources, findings = check_vba_conditionals.reachable_sources(
+            "x.bas", "A\n#Const WRITE_STATUS_BAR = False\n#If WRITE_STATUS_BAR Then\nB\n"
+                     "#End If\nC")
+        self.assertEqual(findings, [])
+        for name, source in sources.items():
+            with self.subTest(environment=name):
+                self.assertEqual(source.split("\n"), ["A", "", "", "", "", "C"])
+
+    def test_branch_local_const_selects_per_environment(self) -> None:
+        sources, findings = check_vba_conditionals.reachable_sources(
+            "x.bas", "#If VBA7 Then\n#Const HOST = True\n#If HOST Then\nB\n#End If\n#End If")
+        self.assertEqual(findings, [])
+        for name in ("vba7-win32", "vba7-win64"):
+            self.assertEqual(sources[name].split("\n")[3], "B")
+        self.assertEqual(sources["vba6-win32"].split("\n")[3], "")
+        sources, findings = check_vba_conditionals.reachable_sources(
+            "x.bas", "#If VBA7 Then\n#Const HOST = True\n#Else\n#Const HOST = False\n#End If\n"
+                     "#If HOST Then\nA\n#Else\nB\n#End If")
+        self.assertEqual(findings, [])
+        self.assertEqual(sources["vba7-win64"].split("\n")[6:9], ["A", "", ""])
+        self.assertEqual(sources["vba7-win32"].split("\n")[6:9], ["A", "", ""])
+        self.assertEqual(sources["vba6-win32"].split("\n")[6:9], ["", "", "B"])
+        sources, findings = check_vba_conditionals.reachable_sources(
+            "x.bas", "#If Not VBA7 Then\n#Const LEGACY = True\n#End If\n"
+                     "#If VBA7 Then\nA\n#ElseIf LEGACY Then\nB\n#End If")
+        self.assertEqual(findings, [])
+        self.assertEqual(sources["vba7-win64"].split("\n")[4:7], ["A", "", ""])
+        self.assertEqual(sources["vba6-win32"].split("\n")[4:7], ["", "", "B"])
+
+    def test_an_undefined_symbol_is_reported_once_with_its_line(self) -> None:
+        body, text = CONDITIONAL_INVALID["const-defined-in-one-environment-only"]
+        findings = run_check(check_vba_conditionals.check, standalone(module(body)))
+        self.assertEqual(findings, ["tests/modules/TEST_Fixture.bas:7: indeterminate #If directive: "
+                                    "unsupported conditional-compilation symbol 'HOST'; supported "
+                                    "are VBA6, VBA7, Win32, Win64 and a #Const defined earlier in "
+                                    "the module"])
+
+    def test_module_const_passes_the_checks_that_share_the_model(self) -> None:
+        # A module whose only conditional directives are a valid #Const and
+        # the #If that reads it.
+        body = ("#Const WRITE_STATUS_BAR = False\n\nPublic Sub Report(ByVal Message As String)\n"
+                "#If WRITE_STATUS_BAR Then\n        Application.StatusBar = Message\n#End If\n"
+                "End Sub\n")
+        files = standalone(module(body))
+        for check in (check_vba_conditionals.check, check_vba_identifiers.check,
+                      check_vba_jumps.check, check_vba_public_api.check,
+                      check_vba_errors.check, check_vba_calls.check):
+            with self.subTest(check=check.__module__):
+                self.assertEqual(run_check(check, files), [])
+        facade = API_FACADE + ("\n#Const WRITE_STATUS_BAR = False\n"
+                               "#If WRITE_STATUS_BAR Then\n"
+                               "Private Sub Status()\n        Application.StatusBar = False\n"
+                               "End Sub\n#End If\n")
+        self.assertEqual(run_check(check_vba_public_api.check, api_files(facade)), [])
+
+    def test_the_other_checks_read_the_branch_the_const_selects(self) -> None:
+        body = ("#Const KEEP_TOTAL = {}\n\nPublic Sub Run()\n#If KEEP_TOTAL Then\n"
+                "        Dim Total As Long\n#End If\n        Total = 1\nEnd Sub\n")
+        self.assertEqual(run_check(check_vba_identifiers.check,
+                                   standalone(module(body.format("True")))), [])
+        findings = run_check(check_vba_identifiers.check, standalone(module(body.format("False"))))
+        self.assertTrue(any("Total is assigned in Run but not declared" in item
+                            and "vba6-win32, vba7-win32, vba7-win64" in item
+                            for item in findings), findings)
+        jump = ("#Const USE_HANDLER = {}\n\nPublic Sub Run()\n        On Error GoTo Failed\n"
+                "        Exit Sub\n#If USE_HANDLER Then\nFailed:\n#End If\nEnd Sub\n")
+        self.assertEqual(run_check(check_vba_jumps.check,
+                                   standalone(module(jump.format("True")))), [])
+        self.assertNotEqual(run_check(check_vba_jumps.check,
+                                      standalone(module(jump.format("False")))), [])
 
 
 JUMPS_VALID = {
