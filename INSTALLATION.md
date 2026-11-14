@@ -451,7 +451,8 @@ accuracy contracts, as step 3 says.
    the commit, the host and the Git blob id of every imported component. When
    the commit holds accuracy contracts, an `Accuracy:` line gives each
    contract's worst error over its calibration and its holdout cases, with
-   its threshold and its target, and says when the target was missed. For
+   its threshold and its target, and says when the target was missed;
+   another gives what each invariant of the registry checked. For
    a workbook imported by hand, omit `--workbook` and `--require-binding`:
    the binding is then `UNVERIFIED`, which a release does not accept, and
    while the commit holds accuracy contracts the run fails, because its

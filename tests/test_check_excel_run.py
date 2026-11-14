@@ -192,23 +192,36 @@ def certification_log(name: str = "examples",
 
 def results_document(commit: str = COMMIT, root: Path = ROOT) -> dict[str, Any]:
     """The results file a correct normal run writes for the commit checked out in
-    ``root``: every output of its contracts' quantities in their cases, equal to its
-    expected value, and no result when it has no accuracy registry."""
+    ``root``: every output of its contracts' quantities in their cases, and of its
+    invariants' quantities in theirs, equal to its expected value, and no result when
+    it has no accuracy registry."""
     path = root / check_accuracy.REGISTRY
     registry = json.loads(path.read_text(encoding="utf-8")) if path.is_file() \
         else {"contracts": []}
-    results = []
-    for contract in registry["contracts"]:
-        for case in [*contract["calibration_cases"], *contract["holdout_cases"]]:
+    read: list[tuple[list[str], list[str]]] = [
+        ([*contract["calibration_cases"], *contract["holdout_cases"]], contract["quantities"])
+        for contract in registry["contracts"]]
+    for invariant in registry.get("invariants", []):
+        cases = invariant.get("cases") or [point["case"] for point in invariant["sequence"]]
+        names = [*invariant.get("parts", []), invariant.get("quantity"), invariant.get("total")]
+        read.append((cases, [name for name in names if isinstance(name, str)]))
+    # Each output once, though a contract and an invariant both read it.
+    results: dict[str, dict[str, Any]] = {}
+    for cases, quantities in read:
+        for case in cases:
             expected = json.loads((root / "tests/expected" / f"{case}.json")
                                   .read_text(encoding="utf-8"))
             groups = [(None, expected["outputs"])] if "outputs" in expected \
                 else sorted(expected["variants"].items())
-            results += [{"case": case, "variant": variant, "quantity": output["quantity"],
-                         "scope": output["scope"], "value": output["value"]}
-                        for variant, outputs in groups for output in outputs
-                        if output["quantity"] in contract["quantities"]]
-    return {"schema_version": 1, "kind": "test-results", "commit": commit, "results": results}
+            for variant, outputs in groups:
+                for output in outputs:
+                    if output["quantity"] not in quantities:
+                        continue
+                    item = {"case": case, "variant": variant, "quantity": output["quantity"],
+                            "scope": output["scope"]}
+                    results[json.dumps(item)] = {**item, "value": output["value"]}
+    return {"schema_version": 1, "kind": "test-results", "commit": commit,
+            "results": list(results.values())}
 
 
 def write_results(folder: Path, document: dict[str, Any], name: str = POLICY.results) -> None:
@@ -1178,9 +1191,11 @@ class ResultsTest(unittest.TestCase):
         # One line for each split of this repository's contracts that lists a case.
         registry = SOURCE / check_accuracy.REGISTRY
         if registry.is_file():
-            contracts = json.loads(registry.read_text(encoding="utf-8"))["contracts"]
-            expected = [f"{contract['id']} {split}" for contract in contracts
+            data = json.loads(registry.read_text(encoding="utf-8"))
+            expected = [f"{contract['id']} {split}" for contract in data["contracts"]
                         for split in ("calibration", "holdout") if contract[f"{split}_cases"]]
+            # Then one line for each invariant.
+            expected += [f"{item['id']} {item['kind']}" for item in data.get("invariants", [])]
         else:
             expected = ["not measured"]
         with evidence() as folder:

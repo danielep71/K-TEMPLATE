@@ -118,12 +118,14 @@ class RegistryTest(unittest.TestCase):
     def test_the_repository_registry_passes(self) -> None:
         # Whatever contracts this repository's registry holds, if it has one.
         registry = ROOT / check_accuracy.REGISTRY
-        count = len(json.loads(registry.read_text("utf-8"))["contracts"]) \
-            if registry.is_file() else 0
+        data = json.loads(registry.read_text("utf-8")) if registry.is_file() else {}
+        count = len(data.get("contracts", []))
+        invariants = len(data.get("invariants", []))
         self.assertEqual(check_accuracy.check(ROOT)[:2], ([], count))
         with contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(check_accuracy.main(["--root", str(ROOT)]), 0)
-        self.assertIn(f"accuracy: PASS ({count} contract(s); registry only", output.getvalue())
+        self.assertIn(f"accuracy: PASS ({count} contract(s), {invariants} invariant(s); "
+                      "registry only", output.getvalue())
 
     def test_valid_draft_and_frozen_contracts_pass(self) -> None:
         self.assertEqual(findings(registry(ILLUSTRATIVE, FROZEN)), [])
@@ -306,7 +308,8 @@ class ResultsTest(unittest.TestCase):
             self.assertEqual(check_accuracy.main(["--root", str(root), "--results",
                                                   str(path), "--commit", CANDIDATE]), 0)
         self.assertIn("target 1e-05: target missed\n", output.getvalue())
-        self.assertIn("accuracy: PASS (1 contract(s); measured against the results)",
+        self.assertIn("accuracy: PASS (1 contract(s), 0 invariant(s); measured against the "
+                      "results)",
                       output.getvalue())
 
     def test_a_worst_error_above_the_threshold_fails_whatever_the_target(self) -> None:
@@ -384,7 +387,8 @@ class ResultsTest(unittest.TestCase):
                                                demo_holdout_2=0)), "utf-8")
             self.assertEqual(check_accuracy.main(["--root", str(root), "--results",
                                                   str(path), "--commit", CANDIDATE]), 1)
-        self.assertIn("accuracy: FAIL (1 contract(s); measured against the results)",
+        self.assertIn("accuracy: FAIL (1 contract(s), 0 invariant(s); measured against the "
+                      "results)",
                       output.getvalue())
 
     def test_the_results_files_of_several_suites_are_measured_together(self) -> None:
@@ -403,7 +407,8 @@ class ResultsTest(unittest.TestCase):
             second.write_text(json.dumps(results(demo_calibration=100, demo_holdout_1=200,
                                                  demo_holdout_2=0)), "utf-8")
             found = check_accuracy.check(root, [first, second], CANDIDATE)[0]
-        self.assertIn("accuracy: PASS (1 contract(s); measured against the results)",
+        self.assertIn("accuracy: PASS (1 contract(s), 0 invariant(s); measured against the "
+                      "results)",
                       output.getvalue())
         self.assertEqual(found, [f"{second}: demo-calibration {QUANTITY} is also in {first}"])
 
@@ -526,6 +531,386 @@ class MalformedExpectedTest(unittest.TestCase):
         self.assertEqual([output.reference for output in reference], ["None"])
         self.assertEqual([output.reference for output in self.outputs({**base, "outputs": [item]})],
                          ["independent"])
+
+
+# Invariants on the CALC-02 cases: total_exposure_amount is 0 in demo-holdout-2,
+# 100 in demo-calibration and 200 in demo-holdout-1, each within 0.01.
+BOUNDS: dict[str, Any] = {
+    "id": "INV-01", "kind": "bounds", "calculation": "CALC-02", "basis": "Synthetic fixture",
+    "quantity": QUANTITY, "cases": ["demo-calibration", "demo-holdout-1", "demo-holdout-2"],
+    "minimum": 0, "maximum": None,
+}
+MONOTONE: dict[str, Any] = {
+    "id": "INV-02", "kind": "monotone", "calculation": "CALC-02", "basis": "Synthetic fixture",
+    "quantity": QUANTITY, "scope": None, "direction": "non-decreasing",
+    "sequence": [{"case": "demo-holdout-2", "variant": None},
+                 {"case": "demo-calibration", "variant": None},
+                 {"case": "demo-holdout-1", "variant": None}],
+}
+# demo-parts: part_a_amount 60 and part_b_amount 40, each within 0.01, add up to
+# total_exposure_amount 100, within 0.01, in the case and for its record P1.
+SUM: dict[str, Any] = {
+    "id": "INV-03", "kind": "sum", "calculation": "CALC-02", "basis": "Synthetic fixture",
+    "parts": ["part_a_amount", "part_b_amount"], "total": QUANTITY, "cases": ["demo-parts"],
+}
+PARTS = {"part_a_amount": 60.0, "part_b_amount": 40.0, QUANTITY: 100.0}
+RECORD = {"dataset": "DS-01", "record": "P1"}
+
+
+def parts_case(root: Path, values: dict[str, float] = PARTS) -> None:
+    """demo-parts, a CALC-02 case with ``values`` for the whole case and for record P1."""
+    demo_case(root, "demo-parts", 0.0)
+    path = root / "tests/expected/demo-parts.json"
+    expected = json.loads(path.read_text("utf-8"))
+    expected["outputs"] = [
+        {"quantity": quantity, "scope": scope, "rule": "CALC-02.1", "value": value,
+         "unit": "EUR", "tolerance": {"absolute": 0.01, "relative": 0},
+         "reference": {"class": "independent"}}
+        for scope in (None, RECORD) for quantity, value in values.items()]
+    path.write_text(json.dumps(expected), "utf-8")
+
+
+def variant_case(root: Path, values: dict[str, float]) -> None:
+    """demo-variants, a file-based CALC-02 case with one total per variant."""
+    folder = root / "tests/fixtures/demo-variants"
+    folder.mkdir()
+    (folder / "case.json").write_text(json.dumps({"calculation": "CALC-02"}), "utf-8")
+    expected = {"schema_version": 1, "kind": "test-expected", "fixture": "demo-variants",
+                "variants": {variant: [
+                    {"quantity": QUANTITY, "scope": None, "rule": "CALC-02.1", "value": value,
+                     "unit": "EUR", "tolerance": {"absolute": 0.01, "relative": 0},
+                     "reference": {"class": "independent"}}]
+                    for variant, value in values.items()}}
+    (root / "tests/expected/demo-variants.json").write_text(json.dumps(expected), "utf-8")
+
+
+def with_invariants(*invariants: dict[str, Any], contracts: tuple[dict[str, Any], ...] = ()
+                    ) -> dict[str, Any]:
+    return {**registry(*contracts), "invariants": [copy.deepcopy(item) for item in invariants]}
+
+
+def result(case: str, value: float, quantity: str = QUANTITY, variant: str | None = None,
+           scope: dict[str, str] | None = None) -> dict[str, Any]:
+    return {"case": case, "variant": variant, "quantity": quantity, "scope": scope,
+            "value": value}
+
+
+def results_of(*items: dict[str, Any]) -> dict[str, Any]:
+    return {"schema_version": 1, "kind": "test-results", "commit": CANDIDATE,
+            "results": list(items)}
+
+
+def parts_results(values: dict[str, float] = PARTS) -> list[dict[str, Any]]:
+    return [result("demo-parts", value, quantity, scope=scope)
+            for scope in (None, RECORD) for quantity, value in values.items()]
+
+
+def checked(content: dict[str, Any], document: dict[str, Any] | None = None,
+            parts: dict[str, float] | None = PARTS,
+            variants: dict[str, float] | None = None) -> tuple[list[str], list[str]]:
+    """The findings and the measurement lines of ``content``, with demo-parts and,
+    when given, demo-variants; measured on ``document`` when given."""
+    with repository(content) as root:
+        if parts is not None:
+            parts_case(root, parts)
+        if variants is not None:
+            variant_case(root, variants)
+        path = None
+        if document is not None:
+            path = root / "results.json"
+            path.write_text(json.dumps(document), "utf-8")
+        found, _, lines = check_accuracy.check(root, path, CANDIDATE)
+    return found, lines
+
+
+# A frozen contract on the CALC-02 cases whose threshold is their tolerance.
+ABSOLUTE: dict[str, Any] = {**FROZEN, "metric": "absolute", "threshold": 0.01}
+GOOD = results_of(result("demo-calibration", 100), result("demo-holdout-1", 200),
+                  result("demo-holdout-2", 0), *parts_results())
+
+
+class InvariantRegistryTest(unittest.TestCase):
+    def assertFinding(self, found: list[str], text: str) -> None:
+        self.assertTrue(any(text in item for item in found), found)
+
+    def test_declared_invariants_are_optional_and_pass_when_well_formed(self) -> None:
+        self.assertEqual(checked(registry(FROZEN))[0], [])
+        self.assertEqual(checked(with_invariants(contracts=(FROZEN,)))[0], [])
+        self.assertEqual(checked(with_invariants(BOUNDS, MONOTONE, SUM,
+                                                 contracts=(FROZEN,)))[0], [])
+        with repository(with_invariants(BOUNDS, MONOTONE, SUM)) as root:
+            parts_case(root)
+            read = check_accuracy.read_registry(root, None, Report(), "registry")
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(check_accuracy.main(["--root", str(root)]), 0)
+        assert read is not None
+        self.assertEqual([item.id for item in read.invariants], ["INV-01", "INV-02", "INV-03"])
+        self.assertIn("accuracy: PASS (0 contract(s), 3 invariant(s); registry only",
+                      output.getvalue())
+        # Every limit is optional, as long as one is stated; a constant may be the total.
+        for change in ({"minimum": None, "maximum": 300}, {"minimum": 0, "maximum": 200},
+                       {"minimum": -1.5, "maximum": None}):
+            with self.subTest(change=change):
+                self.assertEqual(checked(with_invariants({**BOUNDS, **change}))[0], [])
+        self.assertEqual(checked(with_invariants({**SUM, "total": 100}),
+                                 parts={"part_a_amount": 60, "part_b_amount": 40})[0], [])
+
+    def test_a_malformed_invariant_is_a_finding(self) -> None:
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({**BOUNDS, "id": "INV-1\n"}, "id is not INV-<number>"),
+            ({**BOUNDS, "calculation": 2}, "calculation is not a text"),
+            ({**BOUNDS, "basis": " "}, "basis is not a text"),
+            ({**BOUNDS, "quantity": "Total"}, "quantity is not a lower snake case name"),
+            ({**BOUNDS, "cases": []}, "cases is not a non-empty list of case IDs"),
+            ({**BOUNDS, "cases": ["demo-calibration"] * 2}, "cases lists a case twice"),
+            ({**BOUNDS, "minimum": "0"}, "minimum is not a finite number or null"),
+            ({**BOUNDS, "maximum": True}, "maximum is not a finite number or null"),
+            ({**BOUNDS, "minimum": None}, "minimum and maximum are both null"),
+            ({**BOUNDS, "minimum": 2, "maximum": 1}, "minimum 2 is larger than the maximum 1"),
+            ({**MONOTONE, "direction": "up"},
+             "direction is not non-decreasing or non-increasing"),
+            ({**MONOTONE, "scope": {"dataset": "DS-01"}}, "scope is not null or an object"),
+            ({**MONOTONE, "sequence": MONOTONE["sequence"][:1]},
+             "sequence is not a list of at least two points"),
+            ({**MONOTONE, "sequence": [{"case": "demo-calibration"}] * 2},
+             "sequence is not a list of at least two points"),
+            ({**MONOTONE, "sequence": [MONOTONE["sequence"][0]] * 2},
+             "sequence lists a point twice"),
+            ({**SUM, "parts": []}, "parts is not a non-empty list of lower snake case names"),
+            ({**SUM, "parts": ["part_a_amount"] * 2}, "parts lists a name twice"),
+            ({**SUM, "total": "part_a_amount"}, "total part_a_amount is also a part"),
+            ({**SUM, "total": None}, "total is not a lower snake case name or a finite number"),
+            ({**BOUNDS, "kind": "range"}, "is not an object whose kind is bounds, monotone or "
+                                          "sum"),
+            ({**BOUNDS, "direction": "non-decreasing"}, "keys of a bounds invariant are not"),
+            ({key: value for key, value in SUM.items() if key != "basis"},
+             "keys of a sum invariant are not"),
+        ]
+        for invariant, text in cases:
+            with self.subTest(text=text):
+                found = checked(with_invariants(invariant))[0]
+                self.assertEqual(len(found), 1, found)
+                self.assertIn(text, found[0])
+        self.assertFinding(checked(with_invariants(BOUNDS, BOUNDS))[0], "id appears twice")
+        self.assertFinding(checked({**registry(), "invariants": {}})[0],
+                           "invariants is not a list")
+        self.assertFinding(checked({**registry(), "invariant": []})[0],
+                           "envelope is not schema_version 1, kind 'accuracy-contracts', "
+                           "min_holdout_cases and contracts, and optionally invariants")
+
+    def test_an_unknown_calculation_case_or_quantity_is_a_finding(self) -> None:
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({**BOUNDS, "calculation": "CALC-09"},
+             "calculation CALC-09 is not declared by the calculation contracts"),
+            ({**BOUNDS, "cases": ["missing-case"]}, "case missing-case has no fixture"),
+            ({**BOUNDS, "cases": ["demo-illustrative-calibration"]},
+             "case demo-illustrative-calibration tests CALC-03, not CALC-02"),
+            ({**BOUNDS, "quantity": "other_amount"},
+             "case demo-calibration has no expected number for other_amount"),
+            ({**MONOTONE, "quantity": "other_amount"},
+             "point demo-holdout-2 other_amount has no expected number"),
+            ({**MONOTONE, "scope": RECORD},
+             "point demo-holdout-2 total_exposure_amount (DS-01/P1) has no expected number"),
+            ({**MONOTONE, "sequence": [*MONOTONE["sequence"],
+                                       {"case": "demo-calibration", "variant": "lf"}]},
+             "point demo-calibration[lf] total_exposure_amount has no expected number"),
+            ({**MONOTONE, "sequence": [*MONOTONE["sequence"],
+                                       {"case": "missing-case", "variant": None}]},
+             "case missing-case has no fixture"),
+            ({**SUM, "parts": ["part_a_amount", "part_c_amount"]},
+             "demo-parts has no expected number for part_c_amount"),
+            ({**SUM, "cases": ["demo-calibration"]},
+             "demo-calibration has no expected number for part_a_amount"),
+            ({**SUM, "cases": ["demo-calibration"], "total": 100},
+             "case demo-calibration has no expected number for part_a_amount, "
+             "part_b_amount"),
+        ]
+        for invariant, text in cases:
+            with self.subTest(text=text):
+                self.assertFinding(checked(with_invariants(invariant))[0], text)
+
+    def test_expected_values_that_break_an_invariant_are_a_finding(self) -> None:
+        # The declared invariant does not hold on the cases' own expected values.
+        cases: list[tuple[dict[str, Any], str]] = [
+            ({**BOUNDS, "minimum": 50},
+             "the expected values break it: demo-holdout-2 total_exposure_amount is 0.0, "
+             "below the minimum 50.0"),
+            ({**BOUNDS, "maximum": 150},
+             "the expected values break it: demo-holdout-1 total_exposure_amount is 200.0, "
+             "above the maximum 150.0"),
+            ({**MONOTONE, "direction": "non-increasing"},
+             "the expected values break it: total_exposure_amount increases from 0.0 at "
+             "demo-holdout-2 to 100.0 at demo-calibration, by 100.0, beyond the allowance "
+             "0.02"),
+            ({**SUM, "total": 99},
+             "the expected values break it: at demo-parts, part_a_amount + part_b_amount is "
+             "100.0 and the total is 99.0: the difference 1.0 is beyond the allowance 0.02"),
+        ]
+        for invariant, text in cases:
+            with self.subTest(text=text):
+                found = checked(with_invariants(invariant))[0]
+                self.assertTrue(found and all("INV-0" in item for item in found), found)
+                self.assertFinding(found, text)
+
+
+class InvariantResultsTest(unittest.TestCase):
+    def assertFinding(self, found: list[str], text: str) -> None:
+        self.assertTrue(any(text in item for item in found), found)
+
+    def changed(self, case: str, value: float, quantity: str = QUANTITY,
+                scope: dict[str, str] | None = None) -> dict[str, Any]:
+        """GOOD with one result changed."""
+        document = copy.deepcopy(GOOD)
+        for item in document["results"]:
+            if (item["case"], item["quantity"], item["scope"]) == (case, quantity, scope):
+                item["value"] = value
+        return document
+
+    def test_invariants_that_hold_are_reported(self) -> None:
+        found, lines = checked(with_invariants(BOUNDS, MONOTONE, SUM, contracts=(FROZEN,)),
+                               GOOD)
+        self.assertEqual(found, [])
+        self.assertEqual(lines[2:], [
+            "INV-01 bounds: 0.0 <= total_exposure_amount, 3 result(s) checked",
+            "INV-02 monotone: total_exposure_amount non-decreasing over 3 point(s), "
+            "2 step(s) checked, 0 reversal(s) within the allowance",
+            "INV-03 sum: part_a_amount + part_b_amount = total_exposure_amount, "
+            "2 group(s) checked"])
+        found, lines = checked(with_invariants({**BOUNDS, "minimum": None, "maximum": 1000},
+                                               {**SUM, "total": 100}),
+                               GOOD, parts={"part_a_amount": 60, "part_b_amount": 40})
+        self.assertEqual(found, [])
+        self.assertEqual(lines, ["INV-01 bounds: total_exposure_amount <= 1000.0, "
+                                 "3 result(s) checked",
+                                 "INV-03 sum: part_a_amount + part_b_amount = 100.0, "
+                                 "2 group(s) checked"])
+
+    def test_a_result_outside_the_bounds_fails_however_small(self) -> None:
+        # -0.001 is within the output's own tolerance of 0.01, but a domain rule
+        # applies before tolerance.
+        found, lines = checked(with_invariants(BOUNDS, contracts=(ABSOLUTE,)),
+                               self.changed("demo-holdout-2", -0.001))
+        self.assertEqual(found, ["tests/accuracy/contracts.json: INV-01: demo-holdout-2 "
+                                 "total_exposure_amount is -0.001, below the minimum 0.0"])
+        self.assertEqual(lines[2], "INV-01 bounds: 0.0 <= total_exposure_amount, "
+                                   "3 result(s) checked, 1 outside the bounds")
+        found = checked(with_invariants({**BOUNDS, "maximum": 200}),
+                        self.changed("demo-holdout-1", 200.005))[0]
+        self.assertEqual(found, ["tests/accuracy/contracts.json: INV-01: demo-holdout-1 "
+                                 "total_exposure_amount is 200.005, above the maximum 200.0"])
+
+    def test_a_break_fails_whatever_the_contract_status(self) -> None:
+        # A frozen contract, a draft one, and no contract at all over the cases.
+        draft = {**ABSOLUTE, "status": "draft", "decision": None}
+        for contracts in ((ABSOLUTE,), (draft,), ()):
+            with self.subTest(contracts=[item["status"] for item in contracts]):
+                found = checked(with_invariants(BOUNDS, contracts=contracts),
+                                self.changed("demo-holdout-2", -0.001))[0]
+                self.assertEqual(len(found), 1, found)
+                self.assertIn("INV-01: demo-holdout-2 total_exposure_amount is -0.001, below "
+                              "the minimum 0.0", found[0])
+
+    def variants(self, *values: float, direction: str = "non-decreasing"
+                 ) -> tuple[list[str], list[str]]:
+        """A monotone invariant over the variants of demo-variants, whose expected
+        values are 10, 10 and 20 within 0.01, measured on ``values``. No contract
+        covers the case, so only the invariant checks its results."""
+        expected = {"a-low": 10.0, "b-mid": 10.0, "c-high": 20.0}
+        sequence = [{"case": "demo-variants", "variant": name} for name in expected]
+        if direction == "non-increasing":
+            sequence.reverse()
+        document = results_of(*[result("demo-variants", value, variant=name)
+                                for name, value in zip(expected, values)])
+        return checked(with_invariants({**MONOTONE, "sequence": sequence,
+                                        "direction": direction}),
+                       document, parts=None, variants=expected)
+
+    def test_a_monotone_reversal_within_the_allowance_is_only_counted(self) -> None:
+        # From 10.008 to 9.993: back by 0.015, within the allowance 0.01 + 0.01.
+        found, lines = self.variants(10.008, 9.993, 20)
+        self.assertEqual(found, [])
+        self.assertEqual(lines, ["INV-02 monotone: total_exposure_amount non-decreasing over "
+                                 "3 point(s), 2 step(s) checked, 1 reversal(s) within the "
+                                 "allowance"])
+        found, lines = self.variants(10.008, 9.993, 20, direction="non-increasing")
+        self.assertEqual(found, [])
+        self.assertTrue(lines[0].endswith("1 reversal(s) within the allowance"), lines)
+
+    def test_a_monotone_reversal_beyond_the_allowance_fails(self) -> None:
+        # From 10.0099 to 9.9897: back by 0.0202, beyond the allowance 0.02.
+        found, lines = self.variants(10.0099, 9.9897, 20)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("INV-02: total_exposure_amount decreases from 10.0099 at "
+                      "demo-variants[a-low] to 9.9897 at demo-variants[b-mid], by 0.0202",
+                      found[0])
+        self.assertIn("beyond the allowance 0.02", found[0])
+        self.assertTrue(lines[0].endswith("2 step(s) checked, 0 reversal(s) within the "
+                                          "allowance, 1 reversal(s) beyond the allowance"),
+                        lines)
+        found = self.variants(10, 10, 9, direction="non-increasing")[0]
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("INV-02: total_exposure_amount increases from 9.0 at "
+                      "demo-variants[c-high] to 10.0 at demo-variants[b-mid], by 1.0, beyond "
+                      "the allowance 0.02", found[0])
+
+    def test_a_sum_beyond_the_allowance_fails(self) -> None:
+        # demo-parts is in no contract, so only the invariant checks its results.
+        def parts(**record: float) -> dict[str, Any]:
+            return results_of(*parts_results(), *[
+                result("demo-parts", value, quantity, scope=RECORD)
+                for quantity, value in record.items()])
+        record = {"part_a_amount": 60.009, "part_b_amount": 40.009, QUANTITY: 99.991}
+        document = parts(**record)
+        document["results"] = document["results"][:3] + document["results"][6:]
+        # 100.018 against 99.991: 0.027, within the allowance 0.03 of the three outputs.
+        self.assertEqual(checked(with_invariants(SUM), document)[0], [])
+        document["results"][3]["value"] = 60.02
+        document["results"][4]["value"] = 40.02
+        document["results"][5]["value"] = 100
+        found, lines = checked(with_invariants(SUM), document)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("INV-03: at demo-parts (DS-01/P1), part_a_amount + part_b_amount is "
+                      "100.04 and the total is 100.0: the difference 0.04", found[0])
+        self.assertIn("is beyond the allowance 0.03", found[0])
+        self.assertTrue(lines[0].endswith("2 group(s) checked, 1 beyond the allowance"), lines)
+        # A constant total has no tolerance of its own: the allowance is the parts'.
+        constant = {**SUM, "total": 100}
+        found = checked(with_invariants(constant), results_of(
+            result("demo-parts", 60.01, "part_a_amount"),
+            result("demo-parts", 40.011, "part_b_amount"),
+            result("demo-parts", 60, "part_a_amount", scope=RECORD),
+            result("demo-parts", 40, "part_b_amount", scope=RECORD)),
+            parts={"part_a_amount": 60, "part_b_amount": 40})[0]
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("INV-03: at demo-parts, part_a_amount + part_b_amount is 100.021 and "
+                      "the total is 100.0: the difference 0.0210", found[0])
+
+    def test_main_prints_the_invariant_lines(self) -> None:
+        with repository(with_invariants(BOUNDS)) as root, \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            path = root / "results.json"
+            path.write_text(json.dumps(results_of(result("demo-calibration", 100),
+                                                  result("demo-holdout-1", -1),
+                                                  result("demo-holdout-2", 0))), "utf-8")
+            self.assertEqual(check_accuracy.main(["--root", str(root), "--results", str(path),
+                                                  "--commit", CANDIDATE]), 1)
+        self.assertIn("INV-01 bounds: 0.0 <= total_exposure_amount, 3 result(s) checked, "
+                      "1 outside the bounds\n", output.getvalue())
+        self.assertIn("FAIL: tests/accuracy/contracts.json: INV-01: demo-holdout-1 "
+                      "total_exposure_amount is -1.0, below the minimum 0.0\n", output.getvalue())
+        self.assertIn("accuracy: FAIL (0 contract(s), 1 invariant(s); measured against the "
+                      "results)", output.getvalue())
+
+    def test_a_missing_result_of_an_invariant_is_a_finding(self) -> None:
+        document = copy.deepcopy(GOOD)
+        document["results"] = [item for item in document["results"]
+                               if item["case"] != "demo-parts" or item["scope"] != RECORD
+                               or item["quantity"] != "part_b_amount"]
+        found, lines = checked(with_invariants(SUM), document)
+        self.assertEqual(found, ["tests/accuracy/contracts.json: INV-03: no result for "
+                                 "demo-parts part_b_amount (DS-01/P1)"])
+        self.assertEqual(lines, ["INV-03 sum: part_a_amount + part_b_amount = "
+                                 "total_exposure_amount, 1 group(s) checked"])
 
 
 if __name__ == "__main__":

@@ -135,6 +135,13 @@ those cases, regime and host. A draft contract, and any contract on
 `illustrative` values, validates nothing. Record each contract's worst errors
 with the evidence, with its threshold and target.
 
+An [invariant](TEST_CASES.md#invariants) of the registry that the same run
+passes shows that, on that host, the results of its cases keep its bounds,
+its order or its sum, whatever the status of the contracts over them. It
+proves only what its `basis` states, on those cases, and holds for no other
+input. Record each invariant's line with the evidence, with the monotone
+reversals it counted within the allowance.
+
 <a id="host-behaviour"></a>
 
 ## Host behaviour

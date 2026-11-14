@@ -17,5 +17,17 @@
       "calibration_cases": ["illustrative-format-example"],
       "holdout_cases": ["illustrative-file-import-example"]
     }
+  ],
+  "invariants": [
+    {
+      "id": "INV-01",
+      "kind": "bounds",
+      "calculation": "CALC-01",
+      "basis": "Format example only: the illustrative total sums notional amounts, which the illustrative notional field of the data contract requires to be at least 0, so the total is never negative. Not a regulatory rule",
+      "quantity": "illustrative_total_notional_amount",
+      "cases": ["illustrative-format-example", "illustrative-file-import-example"],
+      "minimum": 0,
+      "maximum": null
+    }
   ]
 }

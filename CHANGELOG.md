@@ -133,6 +133,22 @@ Use only the categories an entry needs.
   A malformed target, or one larger than the threshold, is a finding. A
   frozen contract's target may change under the same decision; its threshold
   keeps its rules. The illustrative `ACC-01` declares a target of 0 (#505).
+- The accuracy registry may declare invariants in an optional `invariants`
+  list, and keeps `schema_version` 1 without it. A `bounds` invariant keeps a
+  quantity within a minimum, a maximum or both, with no tolerance; a
+  `monotone` one keeps a quantity from falling, or from rising, along an
+  ordered list of cases or variants by more than the two outputs' own
+  tolerances, and counts a smaller reversal without failing; a `sum` one
+  keeps declared parts adding up to another quantity, or to a constant, in
+  each case, variant and scope, within the sum of their tolerances.
+  `tools/check_accuracy.py` reports a malformed invariant, an unknown
+  calculation, case or quantity, and expected values that break an
+  invariant. With `--results`, a result that breaks one, or a missing result
+  it reads, fails whatever any contract's status, and each invariant prints a
+  line, which `tools/check_excel_run.py` passes on as an `Accuracy:` line.
+  The summary line counts the invariants beside the contracts. The template
+  declares one illustrative invariant, `INV-01`: the illustrative total is
+  at least 0 (#505).
 
 ### Changed
 

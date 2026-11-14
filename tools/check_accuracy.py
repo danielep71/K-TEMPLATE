@@ -7,7 +7,16 @@ quantities in two lists of cases: the calibration cases, which may be used to
 set the threshold, and the holdout cases, which never are. The registry is
 tests/accuracy/contracts.json. The threshold is the guarantee, which blocks;
 an optional target, no larger, is the accuracy aimed for, which is only
-reported.
+reported. The registry may also declare invariants: properties that the
+results of a calculation's cases always have, whatever any contract's status,
+and whether or not a contract covers them:
+- bounds: each number of a quantity is at least a minimum, at most a
+  maximum, or both, with no tolerance (a domain rule);
+- monotone: over an ordered list of cases or variants, a quantity does not
+  decrease (non-decreasing) or does not increase (non-increasing) by more
+  than the two outputs' own tolerances; a smaller reversal is only counted;
+- sum: within each case, variant and scope, declared quantities add up to
+  another quantity or to a constant, within the sum of their tolerances.
 
 Without a results file, the check reads the registry against the cases:
 - every contract is well formed, and its target, when it has one, is a finite
@@ -21,7 +30,10 @@ Without a results file, the check reads the registry against the cases:
 - a contract frozen at the newest vX.Y.Z tag that HEAD contains is still
   frozen, and keeps its guarantee unless it names another decision: the same
   calculation, regime and metric, a threshold no larger, and every quantity
-  and case it had. Its target may change under the same decision.
+  and case it had. Its target may change under the same decision;
+- every invariant is well formed, its calculation is declared, each of its
+  cases tests that calculation and has the expected numbers it needs, and the
+  expected values themselves keep it.
 
 With --results, a results file of an Excel run, it also fails; repeated, it
 measures the results files of several suites together:
@@ -31,10 +43,13 @@ measures the results files of several suites together:
 - an output with no result;
 - a result outside its expected output's own tolerance;
 - a contract whose worst error, among its calibration or among its holdout
-  outputs, exceeds its threshold.
+  outputs, exceeds its threshold;
+- an output an invariant reads with no result, and a result that breaks an
+  invariant.
 It prints, for each split, the worst error, the threshold and the target, and
 marks the target missed when the worst error is above the target but within
-the threshold: that passes.
+the threshold: that passes. It prints, for each invariant, what it checked,
+and for a monotone one the reversals within the allowance.
 
 The error is |a - e| for an absolute contract and |a - e| / |e| for a relative
 one; a relative error at e = 0 is 0 when a = 0 and infinite otherwise. A
@@ -50,7 +65,7 @@ import math
 import re
 import subprocess
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -70,16 +85,29 @@ FIXTURES = Path("tests/fixtures")
 EXPECTED = Path("tests/expected")
 MANIFEST = "case.json"
 REGISTRY_KEYS = frozenset({"schema_version", "kind", "min_holdout_cases", "contracts"})
+# Keys the registry may leave out: a registry without them keeps schema_version 1.
+OPTIONAL_REGISTRY_KEYS = frozenset({"invariants"})
 CONTRACT_KEYS = frozenset({"id", "calculation", "regime", "quantities", "metric", "threshold",
                            "provenance", "status", "decision", "calibration_cases",
                            "holdout_cases"})
 # Keys a contract may leave out: a registry without them keeps schema_version 1.
 OPTIONAL_CONTRACT_KEYS = frozenset({"target"})
+# An invariant's keys, by kind.
+INVARIANT_COMMON = frozenset({"id", "kind", "calculation", "basis"})
+INVARIANT_KEYS = {
+    "bounds": INVARIANT_COMMON | {"quantity", "cases", "minimum", "maximum"},
+    "monotone": INVARIANT_COMMON | {"quantity", "scope", "direction", "sequence"},
+    "sum": INVARIANT_COMMON | {"parts", "total", "cases"},
+}
+DIRECTIONS = frozenset({"non-decreasing", "non-increasing"})
+POINT_KEYS = frozenset({"case", "variant"})
+SCOPE_KEYS = frozenset({"dataset", "record"})
 RESULTS_KEYS = frozenset({"schema_version", "kind", "commit", "results"})
 RESULT_KEYS = frozenset({"case", "variant", "quantity", "scope", "value"})
 # Each pattern must match a whole value (fullmatch): "$" would also accept a
 # trailing line break. Digits are ASCII: \d would also accept other scripts' digits.
 CONTRACT_ID = re.compile(r"ACC-[0-9]+")
+INVARIANT_ID = re.compile(r"INV-[0-9]+")
 SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 INDEPENDENT = frozenset({"published", "independent"})
 METRICS = frozenset({"absolute", "relative"})
@@ -101,6 +129,10 @@ class Output:
     relative: float
     reference: str
 
+    def bound(self) -> float:
+        """How far a result may lie from the expected value: its own tolerance."""
+        return max(self.absolute, self.relative * abs(self.value))
+
 
 @dataclass
 class Contract:
@@ -119,15 +151,46 @@ class Contract:
 
 
 @dataclass
+class Invariant:
+    """A property the results of a calculation's cases always have; only the
+    fields of its kind are set."""
+
+    id: str
+    kind: str
+    calculation: str
+    # bounds and sum: the cases, in order; monotone: the cases of its points.
+    cases: list[str]
+    # bounds and monotone: the one quantity; sum: the parts, then a total quantity.
+    quantities: list[str]
+    minimum: float | None = None
+    maximum: float | None = None
+    direction: str | None = None
+    scope: str | None = None
+    # monotone: the ordered points, each a case and its variant.
+    sequence: list[tuple[str, str | None]] = field(default_factory=list)
+    parts: list[str] = field(default_factory=list)
+    # sum: a quantity name, or a constant.
+    total: str | float | None = None
+
+
+@dataclass
 class Registry:
     contracts: list[Contract] = field(default_factory=list)
     min_holdout: int = 1
+    invariants: list[Invariant] = field(default_factory=list)
 
 
 def scope_text(scope: object) -> str | None:
     if isinstance(scope, dict):
         return f"{scope.get('dataset')}/{scope.get('record')}"
     return None
+
+
+def place(key: Key) -> str:
+    """Where a result is: its case, variant and scope."""
+    case, variant, _, scope = key
+    where = case if variant is None else f"{case}[{variant}]"
+    return where + (f" ({scope})" if scope else "")
 
 
 def label(key: Key) -> str:
@@ -223,6 +286,144 @@ def contract_problems(data: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+def is_name_list(value: object) -> bool:
+    return isinstance(value, list) and bool(value) and \
+        all(isinstance(item, str) and SNAKE.fullmatch(item) for item in value)
+
+
+def case_list_problems(data: Mapping[str, Any]) -> list[str]:
+    cases = data.get("cases")
+    if not isinstance(cases, list) or not cases or \
+            not all(isinstance(item, str) for item in cases):
+        return ["cases is not a non-empty list of case IDs"]
+    if len(set(cases)) != len(cases):
+        return ["cases lists a case twice"]
+    return []
+
+
+def bound_problems(data: Mapping[str, Any]) -> list[str]:
+    """A bounds invariant's limits: numbers or null, at least one a number."""
+    problems = [f"{name} is not a finite number or null" for name in ("minimum", "maximum")
+                if data.get(name) is not None and not is_number(data[name])]
+    if problems:
+        return problems
+    minimum, maximum = data.get("minimum"), data.get("maximum")
+    if minimum is None and maximum is None:
+        return ["minimum and maximum are both null; a bounds invariant states at least one"]
+    if minimum is not None and maximum is not None and minimum > maximum:
+        return [f"minimum {minimum!r} is larger than the maximum {maximum!r}"]
+    return []
+
+
+def scope_problems(scope: object) -> list[str]:
+    if scope is None:
+        return []
+    if not isinstance(scope, dict) or set(scope) != SCOPE_KEYS or \
+            not all(isinstance(value, str) and value.strip() for value in scope.values()):
+        return ["scope is not null or an object with exactly a dataset and a record text"]
+    return []
+
+
+def sequence_problems(sequence: object) -> list[str]:
+    """A monotone invariant's ordered points: at least two, each a case and its
+    variant (null for a JSON fixture), none twice."""
+    if not isinstance(sequence, list) or len(sequence) < 2 or not all(
+            isinstance(item, dict) and set(item) == POINT_KEYS and
+            isinstance(item["case"], str) and isinstance(item["variant"], (str, type(None)))
+            for item in sequence):
+        return ["sequence is not a list of at least two points, each an object with a case "
+                "text and a variant text or null"]
+    points = [(item["case"], item["variant"]) for item in sequence]
+    if len(set(points)) != len(points):
+        return ["sequence lists a point twice"]
+    return []
+
+
+def invariant_problems(data: Mapping[str, Any]) -> list[str]:
+    """What is wrong with one invariant's own fields, its keys being those of its kind."""
+    problems = []
+    if not isinstance(data.get("id"), str) or not INVARIANT_ID.fullmatch(data["id"]):
+        problems.append("id is not INV-<number>")
+    if not isinstance(data.get("calculation"), str):
+        problems.append("calculation is not a text")
+    if not isinstance(data.get("basis"), str) or not data["basis"].strip():
+        problems.append("basis is not a text")
+    kind = data.get("kind")
+    if kind in ("bounds", "monotone") and \
+            (not isinstance(data.get("quantity"), str) or not SNAKE.fullmatch(data["quantity"])):
+        problems.append("quantity is not a lower snake case name")
+    if kind in ("bounds", "sum"):
+        problems += case_list_problems(data)
+    if kind == "bounds":
+        problems += bound_problems(data)
+    elif kind == "monotone":
+        problems += scope_problems(data.get("scope"))
+        if data.get("direction") not in DIRECTIONS:
+            problems.append("direction is not non-decreasing or non-increasing")
+        problems += sequence_problems(data.get("sequence"))
+    elif kind == "sum":
+        parts, total = data.get("parts"), data.get("total")
+        if not isinstance(parts, list) or not is_name_list(parts):
+            problems.append("parts is not a non-empty list of lower snake case names")
+        elif len(set(parts)) != len(parts):
+            problems.append("parts lists a name twice")
+        if isinstance(total, str) and SNAKE.fullmatch(total):
+            if isinstance(parts, list) and total in parts:
+                problems.append(f"total {total} is also a part")
+        elif not is_number(total):
+            problems.append("total is not a lower snake case name or a finite number")
+    return problems
+
+
+def read_invariant(item: Mapping[str, Any]) -> Invariant:
+    """An invariant from fields that invariant_problems() found well formed."""
+    kind = item["kind"]
+    if kind == "monotone":
+        sequence = [(point["case"], point["variant"]) for point in item["sequence"]]
+        return Invariant(item["id"], kind, item["calculation"],
+                         list(dict.fromkeys(case for case, _ in sequence)), [item["quantity"]],
+                         direction=item["direction"], scope=scope_text(item["scope"]),
+                         sequence=sequence)
+    if kind == "bounds":
+        return Invariant(item["id"], kind, item["calculation"], list(item["cases"]),
+                         [item["quantity"]],
+                         minimum=None if item["minimum"] is None else float(item["minimum"]),
+                         maximum=None if item["maximum"] is None else float(item["maximum"]))
+    total = item["total"]
+    return Invariant(item["id"], kind, item["calculation"], list(item["cases"]),
+                     list(item["parts"]) + ([total] if isinstance(total, str) else []),
+                     parts=list(item["parts"]),
+                     total=total if isinstance(total, str) else float(total))
+
+
+def read_invariants(items: list[Any], report: Report, where: str) -> list[Invariant]:
+    """The well-formed invariants; each malformed one is a finding."""
+    invariants = []
+    seen: set[str] = set()
+    for index, item in enumerate(items):
+        name = item.get("id") if isinstance(item, dict) else None
+        at = f"{where}: invariants[{index}]" + (f" {name}" if isinstance(name, str) else "")
+        kind = item.get("kind") if isinstance(item, dict) else None
+        if kind not in INVARIANT_KEYS:
+            report.add(at, "is not an object whose kind is bounds, monotone or sum")
+            continue
+        assert isinstance(item, dict)
+        if set(item) != INVARIANT_KEYS[kind]:
+            report.add(at, f"keys of a {kind} invariant are not "
+                           f"{', '.join(sorted(INVARIANT_KEYS[kind]))}")
+            continue
+        problems = invariant_problems(item)
+        if isinstance(item["id"], str):
+            if item["id"] in seen:
+                problems.append("id appears twice")
+            seen.add(item["id"])
+        for problem in problems:
+            report.add(at, problem)
+        if not problems:
+            invariants.append(read_invariant(item))
+    return invariants
+
+
 def read_registry(root: Path, text: str | None, report: Report, where: str) -> Registry | None:
     """The registry in ``text`` (the working tree's when None); None when absent or unusable."""
     if text is None:
@@ -237,10 +438,11 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
             return None
     if data is LOAD_FAILED:
         return None
-    if not isinstance(data, dict) or data.keys() != REGISTRY_KEYS or \
+    if not isinstance(data, dict) or \
+            not REGISTRY_KEYS <= data.keys() <= REGISTRY_KEYS | OPTIONAL_REGISTRY_KEYS or \
             data["schema_version"] != 1 or data["kind"] != "accuracy-contracts":
         report.add(where, "envelope is not schema_version 1, kind 'accuracy-contracts', "
-                          "min_holdout_cases and contracts")
+                          "min_holdout_cases and contracts, and optionally invariants")
         return None
     minimum = data["min_holdout_cases"]
     if not isinstance(minimum, int) or isinstance(minimum, bool) or minimum < 1:
@@ -248,6 +450,9 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
         return None
     if not isinstance(data["contracts"], list):
         report.add(where, "contracts is not a list")
+        return None
+    if not isinstance(data.get("invariants", []), list):
+        report.add(where, "invariants is not a list")
         return None
     registry = Registry(min_holdout=minimum)
     seen: set[str] = set()
@@ -275,6 +480,7 @@ def read_registry(root: Path, text: str | None, report: Report, where: str) -> R
             float(item["threshold"]), item["status"], item["decision"],
             list(item["calibration_cases"]), list(item["holdout_cases"]),
             float(item["target"]) if "target" in item else None))
+    registry.invariants = read_invariants(data.get("invariants", []), report, where)
     return registry
 
 
@@ -309,6 +515,168 @@ def contract_outputs(root: Path, contract: Contract, calculations: Mapping[str, 
                     report.add(where, f"case {case} has no expected number for {quantity}")
             splits[split] += mine
     return splits
+
+
+def invariant_cases(root: Path, invariant: Invariant, calculations: Mapping[str, bool],
+                    report: Report, where: str) -> dict[str, list[Output]]:
+    """Each case's expected outputs of the invariant's quantities, after checking its
+    calculation and that the case exists and tests it."""
+    if invariant.calculation not in calculations:
+        report.add(where, f"calculation {invariant.calculation} is not declared by the "
+                          "calculation contracts")
+    found: dict[str, list[Output]] = {}
+    for case in invariant.cases:
+        calculation, outputs = case_outputs(root, case, report)
+        if calculation is None:
+            report.add(where, f"case {case} has no fixture and expected file")
+            continue
+        if calculation != invariant.calculation:
+            report.add(where, f"case {case} tests {calculation}, not {invariant.calculation}")
+        found[case] = [output for output in outputs if output.key[2] in invariant.quantities]
+    return found
+
+
+def monotone_terms(invariant: Invariant, found: Mapping[str, list[Output]], report: Report,
+                   where: str) -> list[list[Output]]:
+    """Each two consecutive points of the sequence, both with an expected number."""
+    points: list[Output | None] = []
+    for case, variant in invariant.sequence:
+        key = (case, variant, invariant.quantities[0], invariant.scope)
+        point = next((output for output in found.get(case, []) if output.key == key), None)
+        if point is None and case in found:
+            report.add(where, f"point {label(key)} has no expected number")
+        points.append(point)
+    return [[before, after] for before, after in zip(points, points[1:])
+            if before is not None and after is not None]
+
+
+def sum_terms(invariant: Invariant, found: Mapping[str, list[Output]], report: Report,
+              where: str) -> list[list[Output]]:
+    """The parts, then a total quantity, at each variant and scope of each case where
+    one of them has an expected number; every one of them must have one there."""
+    terms = []
+    for case, outputs in found.items():
+        groups: dict[tuple[str | None, str | None], dict[str, Output]] = {}
+        for output in outputs:
+            groups.setdefault((output.key[1], output.key[3]), {})[output.key[2]] = output
+        if not groups:
+            report.add(where, f"case {case} has no expected number for "
+                              f"{', '.join(invariant.quantities)}")
+        for (variant, scope), group in groups.items():
+            missing = [name for name in invariant.quantities if name not in group]
+            for name in missing:
+                report.add(where, f"{place((case, variant, name, scope))} has no expected "
+                                  f"number for {name}")
+            if not missing:
+                terms.append([group[name] for name in invariant.quantities])
+    return terms
+
+
+def invariant_terms(root: Path, invariant: Invariant, calculations: Mapping[str, bool],
+                    report: Report, where: str) -> list[list[Output]]:
+    """The groups of expected outputs that the invariant relates, after checking its
+    cases: each output of a bounds invariant alone; each two consecutive points of a
+    monotone one; the parts, then a total quantity, of each case, variant and scope
+    of a sum."""
+    found = invariant_cases(root, invariant, calculations, report, where)
+    if invariant.kind == "monotone":
+        return monotone_terms(invariant, found, report, where)
+    if invariant.kind == "sum":
+        return sum_terms(invariant, found, report, where)
+    for case, outputs in found.items():
+        if not outputs:
+            report.add(where, f"case {case} has no expected number for "
+                              f"{invariant.quantities[0]}")
+    return [[output] for outputs in found.values() for output in outputs]
+
+
+def describe(invariant: Invariant) -> str:
+    """What the invariant states, for its measurement line."""
+    quantity = invariant.quantities[0]
+    if invariant.kind == "bounds":
+        low = "" if invariant.minimum is None else f"{invariant.minimum!r} <= "
+        high = "" if invariant.maximum is None else f" <= {invariant.maximum!r}"
+        return f"{low}{quantity}{high}"
+    if invariant.kind == "monotone":
+        scope = f" ({invariant.scope})" if invariant.scope else ""
+        return f"{quantity}{scope} {invariant.direction} over " \
+               f"{len(invariant.sequence)} point(s)"
+    total = invariant.total if isinstance(invariant.total, str) else repr(invariant.total)
+    return f"{' + '.join(invariant.parts)} = {total}"
+
+
+@dataclass
+class Verdict:
+    """What an invariant found on one set of values."""
+
+    missing: list[Output] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
+    checked: int = 0
+    # monotone: reversals within the allowance, which are only counted.
+    reversals: int = 0
+
+
+def evaluate(invariant: Invariant, terms: list[list[Output]],
+             value: Callable[[Output], float | None]) -> Verdict:
+    """The invariant on the values that ``value`` gives each output: the expected
+    values, or the results. A term with an output that has no value is not checked."""
+    verdict = Verdict()
+    for term in terms:
+        values = [value(output) for output in term]
+        absent = [output for output, number in zip(term, values) if number is None]
+        if absent:
+            verdict.missing += [output for output in absent if output not in verdict.missing]
+            continue
+        numbers = [number for number in values if number is not None]
+        verdict.checked += 1
+        if invariant.kind == "bounds":
+            (output,), (number,) = term, numbers
+            if invariant.minimum is not None and number < invariant.minimum:
+                verdict.violations.append(f"{label(output.key)} is {number!r}, below the "
+                                          f"minimum {invariant.minimum!r}")
+            if invariant.maximum is not None and number > invariant.maximum:
+                verdict.violations.append(f"{label(output.key)} is {number!r}, above the "
+                                          f"maximum {invariant.maximum!r}")
+        elif invariant.kind == "monotone":
+            (before, after), (first, second) = term, numbers
+            allowance = before.bound() + after.bound()
+            back = first - second if invariant.direction == "non-decreasing" else second - first
+            if back > allowance:
+                change = "decreases" if invariant.direction == "non-decreasing" \
+                    else "increases"
+                verdict.violations.append(
+                    f"{invariant.quantities[0]} {change} from {first!r} at "
+                    f"{place(before.key)} to {second!r} at {place(after.key)}, by {back!r}, "
+                    f"beyond the allowance {allowance!r}")
+            elif back > 0:
+                verdict.reversals += 1
+        else:
+            count = len(invariant.parts)
+            parts = math.fsum(numbers[:count])
+            total = numbers[count] if isinstance(invariant.total, str) \
+                else float(invariant.total or 0.0)
+            allowance = math.fsum(output.bound() for output in term)
+            difference = abs(parts - total)
+            if difference > allowance:
+                verdict.violations.append(
+                    f"at {place(term[0].key)}, {' + '.join(invariant.parts)} is {parts!r} and "
+                    f"the total is {total!r}: the difference {difference!r} is beyond the "
+                    f"allowance {allowance!r}")
+    return verdict
+
+
+def invariant_line(invariant: Invariant, verdict: Verdict) -> str:
+    """One invariant's measurement: what it states, what it checked, and what broke it."""
+    unit = {"bounds": "result(s)", "monotone": "step(s)", "sum": "group(s)"}[invariant.kind]
+    line = f"{invariant.id} {invariant.kind}: {describe(invariant)}, {verdict.checked} " \
+           f"{unit} checked"
+    if invariant.kind == "monotone":
+        line += f", {verdict.reversals} reversal(s) within the allowance"
+    if verdict.violations:
+        line += f", {len(verdict.violations)} " + {
+            "bounds": "outside the bounds", "monotone": "reversal(s) beyond the allowance",
+            "sum": "beyond the allowance"}[invariant.kind]
+    return line
 
 
 def frozen_problems(contract: Contract, holdout: list[Output], minimum: int) -> list[str]:
@@ -482,7 +850,7 @@ def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Map
             if actual is None:
                 report.add(where, f"no result for {label(output.key)}")
                 continue
-            bound = max(output.absolute, output.relative * abs(output.value))
+            bound = output.bound()
             if abs(actual - output.value) > bound:
                 report.add(where, f"{label(output.key)} is {actual!r}, expected "
                                   f"{output.value!r} within {bound!r}")
@@ -495,10 +863,28 @@ def measure(contract: Contract, splits: Mapping[str, list[Output]], results: Map
     return lines
 
 
+def check_invariant(root: Path, invariant: Invariant, calculations: Mapping[str, bool],
+                    results: Mapping[Key, float] | None, report: Report, where: str) -> list[str]:
+    """The invariant on the expected values, then on the results when there are any;
+    its measurement line. A break is a finding whatever any contract's status."""
+    terms = invariant_terms(root, invariant, calculations, report, where)
+    for violation in evaluate(invariant, terms, lambda output: output.value).violations:
+        report.add(where, f"the expected values break it: {violation}")
+    if results is None:
+        return []
+    verdict = evaluate(invariant, terms, lambda output: results.get(output.key))
+    for output in verdict.missing:
+        report.add(where, f"no result for {label(output.key)}")
+    for violation in verdict.violations:
+        report.add(where, violation)
+    return [invariant_line(invariant, verdict)]
+
+
 def check(root: Path, results_path: Path | Sequence[Path] | None = None,
           commit: str | None = None,
           widening: bool = True) -> tuple[list[str], int, list[str]]:
-    """The findings, the number of contracts and the measurement lines.
+    """The findings, the number of contracts and the measurement lines: those of the
+    contracts, then those of the invariants.
 
     ``results_path`` is one results file, or the files of several suites,
     measured together. ``commit`` is the candidate the results must be of;
@@ -529,6 +915,9 @@ def check(root: Path, results_path: Path | Sequence[Path] | None = None,
             report.add(at, problem)
         if results is not None:
             lines += measure(contract, splits, results, report, at)
+    for invariant in registry.invariants:
+        lines += check_invariant(root, invariant, calculations, results, report,
+                                 f"{where}: {invariant.id}")
     for problem in widening_problems(root, registry, report) if widening else []:
         report.add(where, problem)
     return report.findings, len(registry.contracts), lines
@@ -544,7 +933,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--commit",
                         help="full SHA of the candidate the results must be of (default: HEAD)")
     args = parser.parse_args(argv)
-    findings, contracts, lines = check(args.root.resolve(), args.results or (), args.commit)
+    root = args.root.resolve()
+    findings, contracts, lines = check(root, args.results or (), args.commit)
+    registry = read_registry(root, None, Report(), REGISTRY.as_posix())
+    invariants = len(registry.invariants) if registry is not None else 0
     for line in lines:
         print(line)
     for finding in findings:
@@ -552,7 +944,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     status = "FAIL" if findings else "PASS"
     measured = "measured against the results" if args.results else \
         "registry only, nothing measured without --results"
-    print(f"accuracy: {status} ({contracts} contract(s); {measured})")
+    print(f"accuracy: {status} ({contracts} contract(s), {invariants} invariant(s); "
+          f"{measured})")
     return 1 if findings else 0
 
 

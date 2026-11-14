@@ -53,7 +53,10 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   the commit's own test cases, so the results must be of the commit, held by
   one file only, cover every output of the contracts' cases, lie within each
   output's tolerance and within each contract's threshold. A contract's
-  target is only reported: its Accuracy line says when it was missed;
+  target is only reported: its Accuracy line says when it was missed. The
+  results must also cover every output the registry's invariants read and
+  keep each invariant, whatever any contract's status; each invariant has an
+  Accuracy line of its own;
 - with --workbook, the binding of the export to the workbook it came from:
   export-manifest.json (tools/devbuild/export_manifest.py) records the
   SHA-256 of the workbook and of every exported file, and the workbook's
