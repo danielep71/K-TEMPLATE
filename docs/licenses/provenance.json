@@ -124,7 +124,16 @@
       "files": [
         "tools/vba_code_identity.py",
         "tests/test_vba_code_identity.py",
-        "tools/vba_lexer.py"
+        "tools/vba_lexer.py",
+        "tools/check_vba_conditionals.py",
+        "tests/test_check_vba.py",
+        "tools/format_vba.py",
+        "tests/test_format_vba.py",
+        "tools/check_links.py",
+        "tests/test_check_links.py",
+        "tools/check_verification_depth.py",
+        "tools/verification_depth.json",
+        "tests/test_check_verification_depth.py"
       ]
     }
   ]

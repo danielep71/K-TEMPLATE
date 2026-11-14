@@ -79,7 +79,8 @@ changed ([running the harness](../../INSTALLATION.md#running-the-harness)).
 
 ## Modes and certification
 
-The example suite has three modes:
+The example suite runs in each of these modes, in the order of `modes` in the
+[evidence policy](#evidence-policy):
 
 | Mode | Log | Must end |
 | --- | --- | --- |
@@ -423,7 +424,7 @@ holds what an Excel run must leave as evidence:
   `RunSuite`, run in `NORMAL` mode after the example
   suite; empty in the template, and never a
   [volume benchmark](#volume-benchmarks);
-- `modes`: the three modes in run order, the log each one saves and whether
+- `modes`: the example suite's modes in run order, the log each one saves and whether
   it must pass (only `NORMAL`);
 - `evidence`: the names of the certification log, the export folder, the host
   record, the export manifest and the results file in the evidence folder;

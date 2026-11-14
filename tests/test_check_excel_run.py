@@ -192,23 +192,36 @@ def certification_log(name: str = "examples",
 
 def results_document(commit: str = COMMIT, root: Path = ROOT) -> dict[str, Any]:
     """The results file a correct normal run writes for the commit checked out in
-    ``root``: every output of its contracts' quantities in their cases, equal to its
-    expected value, and no result when it has no accuracy registry."""
+    ``root``: every output of its contracts' quantities in their cases, and of its
+    invariants' quantities in theirs, equal to its expected value, and no result when
+    it has no accuracy registry."""
     path = root / check_accuracy.REGISTRY
     registry = json.loads(path.read_text(encoding="utf-8")) if path.is_file() \
         else {"contracts": []}
-    results = []
-    for contract in registry["contracts"]:
-        for case in [*contract["calibration_cases"], *contract["holdout_cases"]]:
+    read: list[tuple[list[str], list[str]]] = [
+        ([*contract["calibration_cases"], *contract["holdout_cases"]], contract["quantities"])
+        for contract in registry["contracts"]]
+    for invariant in registry.get("invariants", []):
+        cases = invariant.get("cases") or [point["case"] for point in invariant["sequence"]]
+        names = [*invariant.get("parts", []), invariant.get("quantity"), invariant.get("total")]
+        read.append((cases, [name for name in names if isinstance(name, str)]))
+    # Each output once, though a contract and an invariant both read it.
+    results: dict[str, dict[str, Any]] = {}
+    for cases, quantities in read:
+        for case in cases:
             expected = json.loads((root / "tests/expected" / f"{case}.json")
                                   .read_text(encoding="utf-8"))
             groups = [(None, expected["outputs"])] if "outputs" in expected \
                 else sorted(expected["variants"].items())
-            results += [{"case": case, "variant": variant, "quantity": output["quantity"],
-                         "scope": output["scope"], "value": output["value"]}
-                        for variant, outputs in groups for output in outputs
-                        if output["quantity"] in contract["quantities"]]
-    return {"schema_version": 1, "kind": "test-results", "commit": commit, "results": results}
+            for variant, outputs in groups:
+                for output in outputs:
+                    if output["quantity"] not in quantities:
+                        continue
+                    item = {"case": case, "variant": variant, "quantity": output["quantity"],
+                            "scope": output["scope"]}
+                    results[json.dumps(item)] = {**item, "value": output["value"]}
+    return {"schema_version": 1, "kind": "test-results", "commit": commit,
+            "results": list(results.values())}
 
 
 def write_results(folder: Path, document: dict[str, Any], name: str = POLICY.results) -> None:
@@ -1170,16 +1183,19 @@ class ResultsTest(unittest.TestCase):
         self.assertEqual(result.findings, [])
         self.assertEqual([line.split(":")[0] for line in result.accuracy],
                          ["ACC-01 calibration", "ACC-01 holdout"])
-        self.assertIn("Accuracy: ACC-01 calibration: worst absolute error 0.0",
-                      check_excel_run.report(self.commit, result))
+        # The line names the threshold, which blocks, and the target, which is reported.
+        self.assertIn("Accuracy: ACC-01 calibration: worst absolute error 0.0, threshold 1e-06, "
+                      "no target\n", check_excel_run.report(self.commit, result))
 
     def test_the_repository_contracts_are_measured(self) -> None:
         # One line for each split of this repository's contracts that lists a case.
         registry = SOURCE / check_accuracy.REGISTRY
         if registry.is_file():
-            contracts = json.loads(registry.read_text(encoding="utf-8"))["contracts"]
-            expected = [f"{contract['id']} {split}" for contract in contracts
+            data = json.loads(registry.read_text(encoding="utf-8"))
+            expected = [f"{contract['id']} {split}" for contract in data["contracts"]
                         for split in ("calibration", "holdout") if contract[f"{split}_cases"]]
+            # Then one line for each invariant.
+            expected += [f"{item['id']} {item['kind']}" for item in data.get("invariants", [])]
         else:
             expected = ["not measured"]
         with evidence() as folder:
@@ -1220,8 +1236,10 @@ class ResultsTest(unittest.TestCase):
 
     def test_a_missing_or_wrong_result_fails(self) -> None:
         def drop(document: dict[str, Any]) -> None:
-            document["results"].pop()
-        self.assertIn("no result for", " ".join(self.changed(drop)))
+            # The calibration result: the holdout of a draft contract is sealed.
+            document["results"] = [item for item in document["results"]
+                                   if item["case"] != "synthetic-calibration"]
+        self.assertIn("no result for synthetic-calibration", " ".join(self.changed(drop)))
 
         def wrong(document: dict[str, Any]) -> None:
             document["results"][0]["value"] += 1
@@ -1257,6 +1275,63 @@ class ResultsTest(unittest.TestCase):
                                 check_accuracy.REGISTRY.as_posix()], check=True)
         self.assertEqual(after.findings, [])
         self.assertEqual(after.accuracy, before)
+
+
+def frozen_files() -> dict[str, bytes]:
+    """The files of a commit whose registry holds one frozen contract, ACC-01, on a
+    calculation that is not illustrative, with independent values."""
+    files = accuracy_files(EXAMPLE_CONTRACTS)
+    files[CALCULATIONS] = (SOURCE / CALCULATIONS).read_bytes() + \
+        f"\n### `{CALCULATION}` Synthetic total\n".encode()
+    registry = json.loads(files[check_accuracy.REGISTRY.as_posix()])
+    registry["contracts"][0].update(regime="CRR3", status="frozen", decision="#1")
+    files[check_accuracy.REGISTRY.as_posix()] = json.dumps(registry).encode()
+    for case in ("synthetic-calibration", "synthetic-holdout"):
+        name = f"tests/expected/{case}.json"
+        files[name] = files[name].replace(b'"illustrative"', b'"independent"')
+    return files
+
+
+@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+class HoldoutExposureTest(unittest.TestCase):
+    """A frozen contract's holdout is measured on an Excel run only once its first
+    exposure is recorded, and a run of a later candidate records nothing."""
+
+    def test_a_recorded_holdout_is_measured_and_not_counted_again(self) -> None:
+        root, first = make_repository(extra=frozen_files())
+        record = root / check_accuracy.EXPOSURES
+        try:
+            with evidence(None, root, first) as folder:
+                unrecorded = check_excel_run.check(root, first, folder)
+                recorded = check_accuracy.record_holdout(root, ["ACC-01"],
+                                                         [folder / POLICY.results], first)
+            for command in (["add", "-A"],
+                            ["-c", "user.name=Fixture", "-c",
+                             "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
+                             "commit", "-qm", "Record the holdout exposure"]):
+                subprocess.run(["git", "-C", str(root), *command], capture_output=True,
+                               check=True)
+            second = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                                    capture_output=True, check=True, text=True).stdout.strip()
+            before = record.read_bytes()
+            with evidence(None, root, second) as folder:
+                later = check_excel_run.check(root, second, folder)
+            after = record.read_bytes()
+            status = subprocess.run(["git", "-C", str(root), "status", "--porcelain"],
+                                    capture_output=True, check=True, text=True).stdout
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        self.assertEqual(len(unrecorded.findings), 1, unrecorded.findings)
+        self.assertIn("ACC-01: its holdout has no exposure recorded under decision #1",
+                      unrecorded.findings[0])
+        self.assertEqual(unrecorded.accuracy[1], "ACC-01 holdout: sealed until its exposure "
+                                                 "under decision #1 is recorded, exposures 0")
+        self.assertEqual(recorded[0], [])
+        self.assertEqual(later.findings, [])
+        self.assertEqual(later.accuracy[1], "ACC-01 holdout: worst absolute error 0.0, "
+                                            "threshold 1e-06, no target, exposures 1")
+        self.assertEqual((after, status), (before, ""))
+        self.assertEqual([item["commit"] for item in json.loads(after)["exposures"]], [first])
 
 
 @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")

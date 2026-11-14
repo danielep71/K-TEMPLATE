@@ -125,11 +125,32 @@ other than `PASS` only as evidence of that outcome.
 A frozen [accuracy contract](TEST_CASES.md#accuracy-contracts) whose results
 pass on an Excel run of the candidate shows that, on that host, the worst
 error of the calculation over its calibration and holdout cases stays within
-the threshold. The holdout cases played no part in setting the threshold,
-and their values are `published` or `independent`. It proves nothing outside
-those cases, regime and host. A draft contract, and any contract on
-`illustrative` values, validates nothing. Record each contract's worst errors
-with the evidence.
+the threshold. The threshold is the guarantee a release may publish. A
+target, when the contract declares one, is only reported: a worst error
+above it but within the threshold passes, marked `target missed`, and shows
+that the calculation is less accurate than aimed for, not that the guarantee
+fails. The holdout cases played no part in setting the threshold,
+and their values are `published` or `independent`. The evidence for the
+first is the [holdout exposure record](TEST_CASES.md#holdout-exposure-record):
+the holdout stays sealed while the contract is draft, and the record binds
+its first measurement under the contract's decision to the contract entry,
+its threshold, the holdout's fixtures and expected files, and the design
+document if any. The check fails when any of them changes, or the threshold
+is lowered, under the same decision. The record shows what was measured with
+the tools, not what someone computed by hand: a threshold is only as
+independent of its holdout as the people who set it kept it. It proves
+nothing outside those cases, regime and host. A draft contract, a frozen
+contract with no recorded exposure, and any contract on `illustrative`
+values, validate nothing. Record each contract's worst errors with the
+evidence, with its threshold, its target and the number of exposures of its
+holdout.
+
+An [invariant](TEST_CASES.md#invariants) of the registry that the same run
+passes shows that, on that host, the results of its cases keep its bounds,
+its order or its sum, whatever the status of the contracts over them. It
+proves only what its `basis` states, on those cases, and holds for no other
+input. Record each invariant's line with the evidence, with the monotone
+reversals it counted within the allowance.
 
 <a id="host-behaviour"></a>
 

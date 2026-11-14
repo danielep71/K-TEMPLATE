@@ -23,6 +23,7 @@ two forms:
 | `tests/expected/<case-id>.json` | Expected results, each with its provenance |
 | `tests/derivations/<name>.py` | Optional: a script that computes expected values from the documented method, separately from the code under test |
 | `tests/accuracy/contracts.json` | Optional: the [accuracy contracts](#accuracy-contracts), each stating the worst error a calculation guarantees over a set of cases |
+| `tests/accuracy/holdout_exposures.json` | Beside the contracts: the [holdout exposure record](#holdout-exposure-record), each first measurement of a frozen contract's holdout |
 | `tests/independent/adapters.json` | Optional: the [adapters](#independent-implementations) that run an independent implementation on the cases, with their scripts beside it |
 
 - Use a **JSON fixture** to test a calculation: its inputs are values, already
@@ -329,7 +330,8 @@ starting point:
 - **Near zero** the absolute bound governs: an expected `0` is matched within
   `absolute` only, so an `absolute` of 0 demands an exact zero.
 - **Domain rules apply before tolerance:** a quantity that must not be
-  negative fails if it is negative, however small.
+  negative fails if it is negative, however small. Declare such a rule as a
+  `bounds` [invariant](#invariants), which checks it on the results.
 - Results are compared unrounded, unless the contract rounds them.
 
 <a id="accuracy-contracts"></a>
@@ -339,7 +341,10 @@ starting point:
 A case's tolerance decides whether that case passes. An accuracy contract
 states the guarantee a calculation gives for one regime: the worst error
 allowed over the outputs of its quantities in a set of cases. It is what a
-release may publish as the calculation's accuracy.
+release may publish as the calculation's accuracy. The contract's
+`threshold` is that guarantee, and blocks. An optional `target`, no larger,
+is the worst error the project aims for: it is measured and reported, never
+blocks, and so can be tighter than what a release may promise.
 `tests/accuracy/contracts.json` holds the contracts:
 
 ```json
@@ -355,7 +360,8 @@ release may publish as the calculation's accuracy.
       "quantities": ["illustrative_total_notional_amount"],
       "metric": "absolute",
       "threshold": 0.000001,
-      "provenance": "Why the threshold is what it is",
+      "target": 0,
+      "provenance": "Why the threshold and the target are what they are",
       "status": "draft",
       "decision": null,
       "calibration_cases": ["illustrative-format-example"],
@@ -371,11 +377,13 @@ release may publish as the calculation's accuracy.
 | `calculation` | A `CALC-` ID declared by the calculation contracts; every case of the contract tests it |
 | `regime` | A free text label, such as the regulation or its version |
 | `quantities` | The outputs the contract covers; every case has an expected number for each |
-| `metric`, `threshold` | `absolute`: the absolute difference between the result and the expected value; `relative`: that difference divided by the expected value's magnitude, which is 0 at an expected 0 only when the result is 0 too. The threshold is a finite number of at least 0 |
-| `provenance` | Why the threshold is what it is |
+| `metric`, `threshold` | `absolute`: the absolute difference between the result and the expected value; `relative`: that difference divided by the expected value's magnitude, which is 0 at an expected 0 only when the result is 0 too. The threshold, the guarantee, is a finite number of at least 0 |
+| `target` | Optional: the worst error aimed for, in the same metric, a finite number of at least 0 and no larger than the threshold. Only reported; leave it out for no target. No rule derives the threshold from it: declare each one |
+| `provenance` | Why the threshold, and the target if any, are what they are |
 | `status`, `decision` | `draft`, with `decision` `null`, or `frozen`, with the issue or record that froze it |
 | `calibration_cases` | The cases that may be used to set the threshold, each listed once |
 | `holdout_cases` | The cases that never are, each listed once; no case is in both lists |
+| `design` | Optional: the committed design or preregistration document of the contract, a path under `docs/methodology/` or `tests/accuracy/`, where `tools/check_excel_run.py` copies it from; later amendments only append to it. Leave it out when the project keeps none |
 
 - **Frozen.** A contract may be frozen only with at least `min_holdout_cases`
   holdout cases, and only when every expected value of its quantities in
@@ -386,7 +394,9 @@ release may publish as the calculation's accuracy.
   same `decision`, it may only get stricter: a lower threshold, or added
   quantities and cases. A change of calculation, regime or metric, a larger
   threshold, or a dropped quantity or case needs a new `decision`. The check
-  compares with the newest `vX.Y.Z` tag of the branch.
+  compares with the newest `vX.Y.Z` tag of the branch. The target is not
+  part of the guarantee: it may be added, changed or removed under the same
+  `decision`, within the threshold.
 - **Measured on the workbook.** The contracts measure the workbook's results,
   which exist only after an Excel run. `python tools/check_accuracy.py`, which
   **Repository integrity** runs, checks the registry against the cases. With
@@ -399,7 +409,23 @@ release may publish as the calculation's accuracy.
   - an output without a result;
   - a result outside its own tolerance;
   - a worst error above the threshold, which it computes separately for the
-    calibration and the holdout cases.
+    calibration and the holdout cases; the holdout only once its
+    [exposure is recorded](#holdout-exposure-record);
+  - a frozen contract whose holdout has no exposure recorded under its
+    decision;
+  - an output that an [invariant](#invariants) reads without a result, and a
+    result that breaks an invariant.
+
+  For each split it prints the worst error, the threshold and the target, or
+  `no target`, and for the holdout the number of its exposures. A worst
+  error above the target but within the threshold passes, and its line ends
+  with `target missed`; one above the threshold ends with
+  `threshold exceeded` and fails:
+
+  ```text
+  ACC-02 calibration: worst relative error 4e-06, threshold 0.0001, target 1e-05
+  ACC-02 holdout: worst relative error 5e-05, threshold 0.0001, target 1e-05, exposures 1: target missed
+  ```
 
 ```json
 {
@@ -424,6 +450,218 @@ commit of the workbook's build stamp
 `tools/check_excel_run.py` then measures the commit's contracts on all these
 files together, and fails the run when they do not hold. A contract whose
 outputs a project suite computes is therefore measured on that suite's file.
+
+<a id="holdout-exposure-record"></a>
+
+### Holdout exposure record
+
+A holdout shows how the calculation does on cases that played no part in
+setting the threshold only if nobody saw its errors while the threshold could
+still change. The record `tests/accuracy/holdout_exposures.json` is the
+evidence: it lists each time a frozen contract's holdout was first measured
+under a decision. A repository with a registry keeps the record, with an
+empty `exposures` list until a holdout is first measured; the check fails
+when it is missing, and nothing ever resets it.
+
+- **Sealed while draft.** With `--results`, a draft contract's calibration
+  cases are measured; its holdout is not compared, not printed and needs no
+  result. Its line says it is sealed. The harness still asserts each case
+  within its own tolerance, and the [invariants](#invariants) still read
+  every case they name: sealing hides the contract's worst error over the
+  holdout, the number a threshold could be tuned to.
+- **Sealed until recorded.** A frozen contract's holdout is sealed in the same
+  way until its exposure under its current `decision` is recorded, and with
+  `--results` that is a finding:
+
+  ```text
+  ACC-01 holdout: sealed while the contract is draft, exposures 0
+  ACC-02 holdout: sealed until its exposure under decision #N is recorded, exposures 0
+  FAIL: tests/accuracy/contracts.json: ACC-02: its holdout has no exposure recorded under decision #N, so it was not measured: measure it once with tools/check_accuracy.py --record-holdout ACC-02
+  ```
+
+- **The first exposure.** Freeze the contract, run Excel on a commit that
+  holds it frozen, then record the exposure from a checkout of that commit,
+  with the results files of the run:
+
+  ```sh
+  python tools/check_accuracy.py --results <folder>/results.json --commit <commit> --record-holdout ACC-02
+  ```
+
+  It writes the exposure into the record first, then measures as `--results`
+  does, holdout included, and prints a `Recorded:` line. Commit the record:
+  it is part of what [validates](VALIDATION_PLAN.md#what-an-accuracy-contract-proves)
+  the contract. The exposure is recorded even when the holdout then fails:
+  its errors were seen.
+- **Refusals.** `--record-holdout` writes and measures nothing, and ends
+  `accuracy: REFUSED`, for a draft contract, a contract already exposed under
+  its decision (a second first exposure), a missing, malformed or
+  inconsistent record, any finding of the check without results, and
+  results that are unusable or lack an output of the holdout:
+
+  ```text
+  REFUSED: second first exposure of ACC-02 refused: its holdout was exposed under decision #N with the results of commit 3f2c1e0a9b8d (exposures 1). Another exposure needs a new decision that states the earlier exposures
+  accuracy: REFUSED (nothing measured; tests/accuracy/holdout_exposures.json not written)
+  ```
+
+- **Regression, not exposure.** Every later measurement of a recorded
+  holdout, such as `tools/check_excel_run.py` on a later candidate, measures
+  it as a regression of a threshold already fixed, prints the number of
+  exposures and writes nothing.
+
+Each exposure holds:
+
+| Field | Holds |
+| --- | --- |
+| `contract`, `decision` | The contract's ID and the decision it was frozen under |
+| `exposures` | The number of exposures of the contract's holdout, this one included: earlier exposures under other decisions count |
+| `commit`, `results` | The commit the results are of, and each results file's name and SHA-256 |
+| `entry_sha256`, `threshold` | The SHA-256 of the contract's entry, written as JSON with sorted keys, no white space and UTF-8, and its threshold |
+| `holdout` | Each holdout case with the SHA-256 of its fixture and of its expected file. A file-based fixture's is the SHA-256 of a listing of its folder: one line per file, sorted by path, with the file's SHA-256, two spaces and its path |
+| `design` | `null`, or the contract's `design` document: its path, its length in bytes and their SHA-256 |
+
+The record is checked with or without results. The check fails on an
+exposure that is malformed, numbered out of order, or a second one of a
+contract under the same decision; on an exposure whose contract is no longer
+in the registry; and on a record that no longer starts with the exposures
+recorded at the newest `vX.Y.Z` tag. It fails on a frozen contract whose
+`decision` is that of an earlier exposure but not of its last: a decision
+used again after a later one cannot state the exposures since, and
+`--record-holdout` refuses it. For a frozen contract whose `decision` is
+still that of its last exposure, it also fails on:
+
+- an entry that differs from the one recorded, the target included;
+- a threshold lower than the one recorded: a threshold lowered after the
+  holdout errors were seen was set with them;
+- a holdout fixture or expected file that differs from the one recorded;
+- a design document that no longer begins with the bytes recorded: an
+  amendment appends, never rewrites.
+
+```text
+FAIL: tests/accuracy/contracts.json: ACC-02: its entry changed since its holdout was exposed under decision #N (exposure 1, results of commit 3f2c1e0a9b8d): a change after an exposure needs a new decision that states the earlier exposures
+FAIL: tests/accuracy/contracts.json: ACC-02: threshold 5e-05 is lower than 0.0001, the threshold when its holdout was exposed: a threshold lowered after an exposure needs a new decision
+FAIL: tests/accuracy/contracts.json: ACC-02: the expected file of holdout case portfolio-large changed since its holdout was exposed under decision #N (exposure 1, results of commit 3f2c1e0a9b8d)
+```
+
+To change a frozen contract after an exposure, name a new `decision` and
+state in it the earlier exposures that the record lists. The comparisons
+then stop, and the holdout is sealed again until its exposure under the new
+decision is recorded, which counts the earlier ones. A contract returned to
+draft keeps its exposures; it is sealed and prints them.
+
+A contract measured before the record existed is recorded once, with its
+next run; its decision should state that the holdout was measured before.
+The template's record holds no exposure: its only contract, `ACC-01`, is
+illustrative, so it stays draft and its holdout stays sealed. A repository
+generated from the template starts with the same empty record and records
+its first exposure when it freezes its first contract.
+
+<a id="invariants"></a>
+
+### Invariants
+
+An invariant is a property that the results of a calculation's cases always
+have, such as a quantity that is never negative, or parts that add up to
+their total. Unlike a contract it has no threshold and no status: a result
+that breaks it fails, whatever the status of any contract over the same
+cases, and whether or not a contract covers them. Declare invariants in an
+optional `invariants` list of the registry, beside `contracts`; a registry
+without it keeps `schema_version` 1. The example shows one invariant of each
+kind; `INV-02` and `INV-03` are on a calculation `CALC-02` and cases the
+template does not have:
+
+```json
+"invariants": [
+  {
+    "id": "INV-01",
+    "kind": "bounds",
+    "calculation": "CALC-01",
+    "basis": "The domain rule that makes it hold",
+    "quantity": "illustrative_total_notional_amount",
+    "cases": ["illustrative-format-example", "illustrative-file-import-example"],
+    "minimum": 0,
+    "maximum": null
+  },
+  {
+    "id": "INV-02",
+    "kind": "monotone",
+    "calculation": "CALC-02",
+    "basis": "Why the quantity cannot fall along the sequence",
+    "quantity": "total_exposure_amount",
+    "scope": null,
+    "direction": "non-decreasing",
+    "sequence": [
+      {"case": "portfolio-small", "variant": null},
+      {"case": "portfolio-large", "variant": null}
+    ]
+  },
+  {
+    "id": "INV-03",
+    "kind": "sum",
+    "calculation": "CALC-02",
+    "basis": "Why the parts add up to the total",
+    "parts": ["secured_exposure_amount", "unsecured_exposure_amount"],
+    "total": "total_exposure_amount",
+    "cases": ["portfolio-small", "portfolio-large"]
+  }
+]
+```
+
+| Field | Rule |
+| --- | --- |
+| `id` | `INV-` and a number, unique among the invariants |
+| `kind` | `bounds`, `monotone` or `sum`; it decides the other fields, and no other field is allowed |
+| `calculation` | A `CALC-` ID declared by the calculation contracts; every case of the invariant tests it |
+| `basis` | The domain rule, or the property of the calculation, that makes the invariant hold |
+| `quantity` | `bounds` and `monotone`: the quantity checked |
+| `cases` | `bounds` and `sum`: the cases checked, each listed once |
+| `minimum`, `maximum` | `bounds`: the limits, inclusive, each a finite number or `null` for none; at least one is a number, and the minimum is no larger than the maximum |
+| `scope`, `direction`, `sequence` | `monotone`: the scope of the quantity, `null` or a `dataset` and a `record` as in the expected file; `non-decreasing` or `non-increasing`; at least two points in order, each a `case` and its `variant`, `null` for a JSON fixture, none listed twice |
+| `parts`, `total` | `sum`: the quantities that add up, each named once; the quantity they add up to, which is not one of the parts, or a constant number |
+
+- **`bounds`:** each number of the quantity, in every variant and scope of
+  each case, lies within the limits exactly, with no tolerance: this is how
+  a domain rule applies before tolerance.
+- **`monotone`:** from each point to the next, the quantity does not move
+  against the direction by more than the two outputs' own tolerances added
+  together. A smaller reversal is counted in the measurement line, and fails
+  nothing.
+- **`sum`:** in each case, at every variant and scope where one of the
+  quantities has an expected number, every one of them has one, and the
+  parts differ from the total by no more than the tolerances of all these
+  outputs added together; a constant total has no tolerance of its own.
+
+Without `--results`, the check reads each invariant against the cases: a
+calculation that is not declared, a case that does not exist or tests another
+calculation, a case or point with no expected number for a quantity the
+invariant reads, and expected values that themselves break the invariant are
+findings. With `--results`, it also checks the invariant on the results, and
+an output it reads without a result is a finding. It prints a line for each
+invariant, after the lines of the contracts:
+
+```text
+INV-01 bounds: 0.0 <= illustrative_total_notional_amount, 3 result(s) checked
+INV-02 monotone: total_exposure_amount non-decreasing over 2 point(s), 1 step(s) checked, 1 reversal(s) within the allowance
+INV-03 sum: secured_exposure_amount + unsecured_exposure_amount = total_exposure_amount, 2 group(s) checked, 1 beyond the allowance
+```
+
+On results that break them, each break is a `FAIL` line, and the
+invariant's line ends with the number of breaks: `outside the bounds`,
+`reversal(s) beyond the allowance` or `beyond the allowance`:
+
+```text
+FAIL: tests/accuracy/contracts.json: INV-01: illustrative-format-example illustrative_total_notional_amount is -0.5, below the minimum 0.0
+FAIL: tests/accuracy/contracts.json: INV-02: total_exposure_amount decreases from 120.0 at portfolio-small to 100.0 at portfolio-large, by 20.0, beyond the allowance 0.02
+FAIL: tests/accuracy/contracts.json: INV-03: at portfolio-large, secured_exposure_amount + unsecured_exposure_amount is 100.5 and the total is 100.0: the difference 0.5 is beyond the allowance 0.03
+```
+
+An invariant does not repeat the per-case check: every output of a contract's
+cases already fails outside its own tolerance. When the expected values keep
+a `monotone` or `sum` invariant exactly, results within their own tolerances
+keep it too, so such an invariant adds most for the outputs that no contract
+measures. A `bounds` invariant is stricter than any tolerance. The template's
+registry declares only the illustrative `INV-01`: the illustrative total is a
+sum of notional amounts, which the illustrative data contract requires to be
+at least 0. Like the contract on the same cases, it validates nothing.
 
 <a id="categories"></a>
 

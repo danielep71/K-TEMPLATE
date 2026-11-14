@@ -198,8 +198,9 @@ each failed restoration, and a primary and cleanup failure together.
   by hand.
 
 `python tools/format_vba.py --write` applies the mechanical part of these
-rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
-`examples/modules/`, or to the modules and folders you name:
+rules to the `.bas`, `.cls` and `.frm` files that Git tracks under `src/`,
+`tests/modules/` and `examples/modules/`, or to the modules and folders you
+name:
 
 - CRLF line endings and one final line ending;
 - no trailing white space, and four spaces for each indentation tab;
@@ -208,17 +209,53 @@ rules to the `.bas`, `.cls` and `.frm` files under `src/`, `tests/modules/` and
 - two blank lines after each procedure's `End` statement.
 
 It never changes a string literal, and it keeps the `VERSION`, `BEGIN`, `END`,
-`Object` and `Attribute` lines that the VBE writes. A line that ends with a
-space or tab and `_` continues on the next one, in a comment as in code: the
-lines that continue it stay where they are, and the blank lines after an
-`End` statement follow the end of what it continues. **Repository integrity**
-runs it with `--check`. Re-import a module it rewrote into the VBE before
-committing, so that the workbook and the source stay the same. It neither
-compiles nor checks the other rules of this guide.
+`Object` and `Attribute` lines that the VBE writes. A statement keyword and a
+colon, such as `Else:` or `Loop:`, is not a label and keeps its indentation.
+A line that ends with a space or tab and `_` continues on the next one, in a
+comment as in code. No blank line is added to or removed from one logical
+line: each line a continuation carries over stays as it is, blank or not, the
+blank lines after an `End` statement follow the end of what it continues, and
+a blank line that ends a continuation at the end of the file stays. It
+neither compiles nor checks the other rules of this guide.
+
+**Repository integrity** runs it with `--check`. Re-import a module it
+rewrote into the VBE before committing, so that the workbook and the source
+stay the same; where Excel evidence is bound to the module, the rewrite also
+needs a new run.
+
+A project that imports existing modules can adopt the check one module at a
+time with a baseline, `tools/vba_layout_baseline.json`, which lists the
+modules not yet in layout. Without that file, every module must be in layout.
+To create it, run `python tools/format_vba.py --check --no-baseline`, and
+list each module it reports, by its path from the repository root with `/`
+separators, sorted and without duplicates:
+
+```json
+{
+  "schema_version": 1,
+  "files": [
+    "src/modules/PROJ_Imported.bas"
+  ]
+}
+```
+
+`--check` then reports each listed module as baselined, and fails on:
+
+- a module out of layout that the baseline does not list;
+- a listed module that is in layout, until you remove its entry;
+- a listed path that is not a tracked module under the source directories.
+
+To bring a listed module into layout, run
+`python tools/format_vba.py --write src/modules/PROJ_Imported.bas`,
+re-import it, and remove its entry in the same commit; delete the file once
+its list is empty. `--baseline FILE` reads another file, and `--no-baseline`
+ignores it. A missing `--baseline` file, a malformed one, or an entry that is
+absolute, uses `\` or `..`, or breaks the order is an error with exit status
+2, distinct from the exit status 1 of a layout finding.
 
 ## Static checks
 
-**Repository integrity** runs nine static checks on every tracked `.bas`,
+**Repository integrity** runs the static checks below on every tracked `.bas`,
 `.cls` and `.frm` file. Each also runs on its own, for example
 `python tools/check_vba_source.py`; with no VBA source, each passes and says
 it examined no component. The call check is advisory: **Repository
@@ -227,7 +264,7 @@ integrity** reports its findings as a warning, not a failure.
 | Check | Enforces |
 | --- | --- |
 | `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`; no tab or trailing white space, except in a form's VBE header; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
-| `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe` |
+| `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe`. A module-level `#Const Name = <value>` defines `Name` from its line on, in each environment that reaches the line, so a `#Const` inside an `#If` branch exists only where that branch is active; its value is `True`, `False`, `-1`, `0` or an expression over the compiler constants `VBA6`, `VBA7`, `Win32` and `Win64` and the module's earlier `#Const` names, with `Not`, `And`, `Or`, `=`, `<>` and parentheses. A condition is not evaluated in an environment that cannot enter its branch. A finding, so that the check fails closed: any other symbol, such as a project's conditional-compilation argument or a `#Const` used before or outside its definition; a `#Const` without a name or `=`, with a value that is not Boolean, such as `2`, that redefines a compiler constant, or defined twice in one environment |
 | `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target, and the line number in `If x Then 100`, is a label of the same procedure, in each environment; no label is defined twice in a procedure; no `Err.Raise` or `Error` statement follows a `Resume <label>` while one of the procedure's own `On Error GoTo <label>` handlers is enabled |
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match the `[supported]` tier of [PUBLIC_API.txt](PUBLIC_API.txt), and every other public declaration under `src/` its `[project-public]` tier, one to one, with normalized signatures; no declaration listed in the wrong tier; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
 | `tools/check_vba_dependencies.py` | The [dependency direction](REPOSITORY_STRUCTURE.md#dependencies): core and classes have no Excel object model, file, registry or process access, dynamic call or reference to a component above them; core has no module-level or `Static` state; examples use only the facade |

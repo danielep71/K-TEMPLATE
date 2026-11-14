@@ -88,6 +88,87 @@ Use only the categories an entry needs.
   needs a run of the candidate or one `--equivalent-to` proves identical.
   The VBA lexer no longer reads `Rem` or a colon inside a `[...]` expression
   as a comment or a statement separator (#499).
+- `python tools/format_vba.py --check` reads an optional baseline,
+  `tools/vba_layout_baseline.json`, that lists the modules not yet in
+  layout, so that a project importing existing modules can bring them into
+  layout one at a time. The check fails on an unlisted module out of layout,
+  on a listed module back in layout until its entry is removed, and on a
+  listed path that is not a tracked module; a missing or malformed baseline
+  is an error with exit status 2. `--baseline FILE` reads another file and
+  `--no-baseline` ignores it. `--write` says to re-import each rewritten
+  module and to remove its baseline entry. The template has no baseline,
+  since its modules are in layout; the house style describes how to create
+  one (#502).
+- **Repository integrity** runs a new check, `verification-depth`, which
+  fails while a check that can fail the run lacks an executable negative
+  proof. `tools/verification_depth.json` lists each such check with what it
+  runs, the unittest ids of the tests that show it rejecting a bad input, or
+  its probe, the violations they show rejected and a state from a closed
+  list. The checks come from `tools/check_repository.py` as CI runs them,
+  less the advisory ones, so a pull request that adds a check without an
+  entry, renames or deletes a proof test, or leaves an entry for a removed
+  check fails. New tests prove that the `tests` check fails on a failing or
+  unimportable test, and that the three label checks fail on a defective
+  script or catalogue (#503).
+- The **Repository integrity** check `restated-counts` runs the new
+  `tools/check_restated_counts.py`. It fails when a tracked Markdown file
+  other than this changelog states, outside a generated block, a count that
+  has a single source: the example suite's cases, assertions, modes and
+  failure entry points, the integrity checks and the static checks of VBA
+  source, the data contract's datasets and the validator's finding codes. It
+  matches a count in digits or in words before the phrase that names the
+  source, whatever its value, so a stale copy fails too, and names the file,
+  line, phrase and source. A reviewed restatement stays only in its list of
+  allowed restatements, with a reason. The installation guide, the harness
+  guide, the VBA house style and the setup guide no longer restate these
+  counts (#504).
+- An accuracy contract may declare an optional `target` beside its
+  `threshold`: a finite number of at least 0, no larger than the threshold,
+  that `tools/check_accuracy.py` reports but never blocks on. The threshold
+  stays the guarantee that fails a run, and a registry without a target keeps
+  `schema_version` 1. Each measurement line, which `tools/check_excel_run.py`
+  passes on as an `Accuracy:` line, now names the threshold and the target,
+  or `no target`, and ends with `target missed` when the worst error is above
+  the target but within the threshold, or `threshold exceeded` when it fails.
+  A malformed target, or one larger than the threshold, is a finding. A
+  frozen contract's target may change under the same decision; its threshold
+  keeps its rules. The illustrative `ACC-01` declares a target of 0 (#505).
+- The accuracy registry may declare invariants in an optional `invariants`
+  list, and keeps `schema_version` 1 without it. A `bounds` invariant keeps a
+  quantity within a minimum, a maximum or both, with no tolerance; a
+  `monotone` one keeps a quantity from falling, or from rising, along an
+  ordered list of cases or variants by more than the two outputs' own
+  tolerances, and counts a smaller reversal without failing; a `sum` one
+  keeps declared parts adding up to another quantity, or to a constant, in
+  each case, variant and scope, within the sum of their tolerances.
+  `tools/check_accuracy.py` reports a malformed invariant, an unknown
+  calculation, case or quantity, and expected values that break an
+  invariant. With `--results`, a result that breaks one, or a missing result
+  it reads, fails whatever any contract's status, and each invariant prints a
+  line, which `tools/check_excel_run.py` passes on as an `Accuracy:` line.
+  The summary line counts the invariants beside the contracts. The template
+  declares one illustrative invariant, `INV-01`: the illustrative total is
+  at least 0 (#505).
+- `tests/accuracy/holdout_exposures.json` records each first measurement of
+  a frozen accuracy contract's holdout under its decision: the contract, the
+  decision, the number of exposures, the commit and SHA-256 of each results
+  file, the SHA-256 of the canonical contract entry and its threshold, the
+  SHA-256 of each holdout case's fixture and expected file, and the length
+  and SHA-256 of an optional `design` document the contract may name. With
+  `--results`, `tools/check_accuracy.py` no longer measures or prints a draft
+  contract's holdout, and seals a frozen contract's holdout, as a finding,
+  until `--record-holdout ACC-NN` records its exposure; that mode refuses a
+  draft contract, a second first exposure under the same decision, a
+  missing, malformed or inconsistent record, a failing registry check and
+  incomplete results, and writes nothing then. The check fails on a
+  malformed record, an exposed contract that is removed, exposures recorded
+  at the newest tag that are dropped, and, under the decision of the last
+  exposure, a changed entry, a lower threshold, a changed holdout fixture or
+  expected file, or a design document that was rewritten rather than
+  appended to. Holdout lines print the number of exposures;
+  `tools/check_excel_run.py` measures a recorded holdout as a regression and
+  records nothing. The template ships an empty record: its illustrative
+  `ACC-01` stays draft, so its holdout stays sealed (#505).
 
 ### Changed
 
@@ -152,6 +233,38 @@ Use only the categories an entry needs.
   the evidence against the line. The **Release** workflow checks only the
   line's form: the evidence and `host.txt` stay on the machine of the run,
   so CI cannot check the run itself (#498).
+- `tools/check_vba_conditionals.py` accepts a module-level `#Const`, such as
+  `#Const WRITE_STATUS_BAR = False`, instead of rejecting every `#Const`. Its
+  value is `True`, `False`, `-1`, `0` or an expression with `Not`, `And`,
+  `Or`, `=`, `<>` and parentheses over `VBA6`, `VBA7`, `Win32`, `Win64` and
+  the module's earlier `#Const` names. It is defined from its line on in each
+  compilation environment that reaches it, and a condition is not evaluated
+  where its branch cannot be entered. The VBA checks that read each
+  environment's source, such as `vba-identifiers`, `vba-jumps` and
+  `vba-public-api`, read the branch the `#Const` selects. Any other symbol,
+  such as a project's conditional-compilation argument or a `#Const` used
+  before its definition, stays a finding, as does a malformed, non-Boolean or
+  duplicate `#Const` or one that redefines a compiler constant. Static check
+  only; nothing was compiled or run in Excel (#500).
+- `tools/check_links.py` reads Markdown the way GitHub renders it. Text in
+  code spans that continue over line breaks, in indented code blocks and in
+  HTML comments is no longer read as a link, nor is escaped text such as
+  `\[text](path)`. Backslash escapes and character references, such as
+  `&amp;`, are decoded in destinations, `href` and `src` values and
+  `<a id>` anchors. Fences, headings, setext underlines and thematic breaks
+  are recognised inside blockquotes and list items, a closing fence may have
+  nothing after its run, and a heading's anchor drops the `_` runs of its
+  emphasis, while the anchor that keeps them is still accepted. A wrong
+  report can be listed with its reason in the optional
+  `.github/link-check-exclusions.json`; **Repository integrity** fails while
+  the file is malformed or an entry matches no report, and a plain `http://`
+  link cannot be listed. With `--external`, a link to a page of this
+  repository's wiki is requested as the page's raw Markdown while the
+  repository answers anonymous requests, and skipped otherwise (#501).
+- `tools/format_vba.py`, run without paths, reads the modules that Git tracks
+  under the source directories; an untracked file there is no longer
+  formatted or checked, and a run outside a Git repository is an error with
+  exit status 2 (#502).
 
 ### Fixed
 
@@ -163,6 +276,11 @@ Use only the categories an entry needs.
   longer moves continuation text that looks like a label or an `End`
   statement. A folder named as a path is formatted, and a missing path is an
   error with exit status 2 instead of a traceback (#496).
+- `tools/format_vba.py` no longer moves a statement keyword followed by a
+  colon, such as `Else:` or `Loop:`, to column one as if it were a label. It
+  keeps a blank line that a continuation carries over, after an `End`
+  statement and at the end of the file too, so that no blank line is added
+  to or removed from a logical line (#502).
 
 ## [1.0.0] - 2026-11-11
 

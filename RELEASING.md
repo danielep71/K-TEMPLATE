@@ -202,6 +202,22 @@ consistent with it. This check is a release gate, not a
 candidate. If a case or the check fails, fix it through a task pull request
 and start again at step 2.
 
+When the candidate freezes an accuracy contract, or names a new decision for
+one, its holdout has no exposure recorded under that decision: the check
+prints the holdout as sealed and fails. Its first measurement is not a
+release gate but an exposure, recorded once
+([holdout exposure record](docs/methodology/TEST_CASES.md#holdout-exposure-record)).
+From a clean checkout of the run's commit, with the run's results files:
+
+```sh
+python tools/check_accuracy.py --results test-results/excel-run/results.json --commit RUN_SHA --record-holdout ACC-NN
+```
+
+Commit `tests/accuracy/holdout_exposures.json` through a task pull request,
+and start again at step 2. The record is a run input, so the new candidate
+needs its own run, which then measures the holdout as a regression and
+records nothing.
+
 A run made on an earlier commit certifies the candidate only when every run
 input of the candidate has the same Git blob as at the run's commit, for
 example when the candidate adds only a fix to a workflow or a guide outside

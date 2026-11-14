@@ -163,6 +163,15 @@ Mozilla Public License 2.0:
 tools/vba_code_identity.py
 tests/test_vba_code_identity.py
 tools/vba_lexer.py
+tools/check_vba_conditionals.py
+tests/test_check_vba.py
+tools/format_vba.py
+tests/test_format_vba.py
+tools/check_links.py
+tests/test_check_links.py
+tools/check_verification_depth.py
+tools/verification_depth.json
+tests/test_check_verification_depth.py
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications compare commit with commit for the Excel-run check instead of
@@ -170,4 +179,24 @@ a recorded digest, cover class and form modules as well as standard modules,
 compare the letter case of code as the export comparison does, report the
 line of each version of the first changed statement, and turn the tests into
 unit tests with neutral module names. The VBA lexer takes from it only the
-reading of a colon and Rem inside a [...] expression.
+reading of a colon and Rem inside a [...] expression. The conditional-
+compilation check takes from it the evaluation of a module-level #Const,
+without its Win16 and Mac constants, and also rejects a #Const named like an
+operator of the expression grammar; its tests take the #Const fixtures with
+neutral names. The VBA formatter takes from it the layout baseline and its
+ratchet, the handling of lines that a continuation carries over and of
+statement keywords followed by a colon, and the tests of these; it keeps its
+own source directories, folder and outside paths, output and exit status 2
+for every error, and its tests compare logical lines with this repository's
+lexer. The link checker takes from it the reading of Markdown as GitHub
+renders it, the reviewed exclusions of wrong reports and the request of wiki
+pages as raw Markdown; it keeps its HTTPS requirement and expiring
+exceptions, moves the exclusions file under .github/ with stricter
+validation, requests wiki pages only while the repository answers anonymous
+requests, ends a fence with its list item and reads lazy continuation lines
+only where they do not start a block. The verification-depth inventory and
+its check take the checks that need an entry from tools/check_repository.py
+instead of a fixed list, compare each entry with what its check runs, accept
+unittest ids or the check's probe as proofs and require each test to be
+collected by the tests check instead of listed in a runner, and are tested
+with unit tests on fixtures.

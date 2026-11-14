@@ -217,8 +217,8 @@ TEST_Examples.RunExampleTests "C:\path\to\checkout\tests\fixtures"
 
 It runs the example suite through `TEST_Harness` and writes one record per
 line. One case reads the illustrative test cases from that folder and
-records their totals as results. The two entry points below take the same
-argument. A passing run ends with:
+records their totals as results. The entry points below that show the
+failure paths take the same argument. A passing run ends with:
 
 <!-- BEGIN generated: example-suite-results -->
 ```text
@@ -450,7 +450,13 @@ accuracy contracts, as step 3 says.
    It must end with `Binding: VERIFIED` and `excel-run: PASS`. It prints
    the commit, the host and the Git blob id of every imported component. When
    the commit holds accuracy contracts, an `Accuracy:` line gives each
-   contract's worst error over its calibration and its holdout cases. For
+   contract's worst error over its calibration and its holdout cases, with
+   its threshold and its target, and says when the target was missed; the
+   holdout line gives the number of its exposures, or says that the holdout
+   is sealed: while the contract is draft, or until its first exposure is
+   [recorded](docs/methodology/TEST_CASES.md#holdout-exposure-record), which
+   fails the run for a frozen contract;
+   another gives what each invariant of the registry checked. For
    a workbook imported by hand, omit `--workbook` and `--require-binding`:
    the binding is then `UNVERIFIED`, which a release does not accept, and
    while the commit holds accuracy contracts the run fails, because its

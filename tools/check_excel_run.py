@@ -52,7 +52,17 @@ holds it, and docs/methodology/TEST_HARNESS.md describes them:
   tools/check_accuracy.py measures them on all these files together, against
   the commit's own test cases, so the results must be of the commit, held by
   one file only, cover every output of the contracts' cases, lie within each
-  output's tolerance and within each contract's threshold;
+  output's tolerance and within each contract's threshold. A contract's
+  target is only reported: its Accuracy line says when it was missed. A
+  holdout is measured only once its first exposure is in the commit's
+  tests/accuracy/holdout_exposures.json: a draft contract's holdout is
+  sealed, and a frozen contract's with no exposure under its decision is
+  sealed and fails the run (tools/check_accuracy.py --record-holdout records
+  it). This measurement of a recorded holdout is a regression and records
+  nothing; its Accuracy line gives the number of exposures. The
+  results must also cover every output the registry's invariants read and
+  keep each invariant, whatever any contract's status; each invariant has an
+  Accuracy line of its own;
 - with --workbook, the binding of the export to the workbook it came from:
   export-manifest.json (tools/devbuild/export_manifest.py) records the
   SHA-256 of the workbook and of every exported file, and the workbook's
