@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="t d">
 <title id="t">K-TEMPLATE</title>
-<desc id="d">K-TEMPLATE: the starting point for regulatory risk calculation workbooks in Excel VBA, for SA-CCR, SFT, FRTB, LCR and NSFR.</desc>
+<desc id="d">K-TEMPLATE: the starting point for regulatory risk calculation workbooks in Excel VBA, across market, credit, operational, counterparty, IRRBB and liquidity risk.</desc>
 <defs>
 <linearGradient id="gb" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22D39A"/><stop offset="1" stop-color="#3B7BFF"/></linearGradient>
 <linearGradient id="gbv" x1="0" y1="1" x2="0" y2="0"><stop offset="0" stop-color="#22D39A"/><stop offset="1" stop-color="#3B7BFF"/></linearGradient>
@@ -1431,16 +1431,18 @@
 <text x="70" y="262" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="100" font-weight="900" letter-spacing="1" fill="url(#title)">K-TEMPLATE</text>
 <text x="72" y="318" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="31" font-weight="600" fill="#2BE3A6">The starting point for regulatory risk</text>
 <text x="72" y="356" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="31" font-weight="600" fill="#2BE3A6">calculation workbooks in Excel VBA</text>
-<rect x="72" y="380" width="112" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
-<text x="128.0" y="407" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700" fill="#E6EEF9">SA-CCR</text>
-<rect x="196" y="380" width="70" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
-<text x="231.0" y="407" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700" fill="#E6EEF9">SFT</text>
-<rect x="278" y="380" width="86" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
-<text x="321.0" y="407" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700" fill="#E6EEF9">FRTB</text>
-<rect x="376" y="380" width="70" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
-<text x="411.0" y="407" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700" fill="#E6EEF9">LCR</text>
-<rect x="458" y="380" width="88" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
-<text x="502.0" y="407" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="700" fill="#E6EEF9">NSFR</text>
+<rect x="72" y="380" width="92" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
+<text x="118.0" y="406" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="17" font-weight="700" fill="#E6EEF9">Market</text>
+<rect x="174" y="380" width="84" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
+<text x="216.0" y="406" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="17" font-weight="700" fill="#E6EEF9">Credit</text>
+<rect x="268" y="380" width="130" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
+<text x="333.0" y="406" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="17" font-weight="700" fill="#E6EEF9">Operational</text>
+<rect x="408" y="380" width="146" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
+<text x="481.0" y="406" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="17" font-weight="700" fill="#E6EEF9">Counterparty</text>
+<rect x="564" y="380" width="84" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
+<text x="606.0" y="406" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="17" font-weight="700" fill="#E6EEF9">IRRBB</text>
+<rect x="658" y="380" width="106" height="40" rx="20" fill="#0A1626" stroke="url(#gb)" stroke-width="2"/>
+<text x="711.0" y="406" text-anchor="middle" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="17" font-weight="700" fill="#E6EEF9">Liquidity</text>
 <polygon points="116.8,464.0 116.8,488.0 96.0,500.0 75.2,488.0 75.2,464.0 96.0,452.0" fill="none" stroke="#22D39A" stroke-width="2.5" filter="url(#soft)"/>
 <text x="96" y="483" text-anchor="middle" font-family="JetBrains Mono, Consolas, monospace" font-size="19" font-weight="700" fill="#2BE3A6">{ }</text>
 <text x="136" y="469" font-family="Inter, 'Segoe UI', Arial, sans-serif" font-size="20" fill="#E6EEF9">Exported VBA source, reproducible builds,</text>
