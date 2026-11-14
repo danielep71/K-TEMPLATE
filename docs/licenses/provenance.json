@@ -130,7 +130,10 @@
         "tools/format_vba.py",
         "tests/test_format_vba.py",
         "tools/check_links.py",
-        "tests/test_check_links.py"
+        "tests/test_check_links.py",
+        "tools/check_verification_depth.py",
+        "tools/verification_depth.json",
+        "tests/test_check_verification_depth.py"
       ]
     }
   ]
