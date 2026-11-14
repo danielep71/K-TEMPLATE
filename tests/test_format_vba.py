@@ -280,18 +280,30 @@ def deform(text: str) -> str:
     return "\n".join(out) + "\n\n\n"                    # LF endings, blank lines at the end
 
 
+def baselined(root: Path) -> set[str]:
+    """The modules the root's default layout baseline lists; none without the file."""
+    path = root / format_vba.BASELINE
+    return set(format_vba.load_baseline(path, format_vba.BASELINE)) if path.exists() else set()
+
+
 class TrackedModuleTest(unittest.TestCase):
     """The formatter on the text of this repository's tracked modules, read only."""
 
     modules: dict[str, str]
+    baseline: set[str]
 
     @classmethod
     def setUpClass(cls) -> None:
         cls.modules = {name: format_vba.read(ROOT / name)
                        for name in format_vba.tracked_modules(ROOT)}
+        cls.baseline = baselined(ROOT)
 
     def test_modules_are_in_layout(self) -> None:
+        # A baselined module may stay out of layout; the CLI's ratchet, run on this
+        # repository by MainTest.test_repository_passes, fails it once it is in layout.
         for name, text in self.modules.items():
+            if name in self.baseline:
+                continue
             with self.subTest(name):
                 self.assertEqual(format_vba.format_text(text), text)
 
@@ -398,6 +410,13 @@ class MainTest(unittest.TestCase):
         self.assertIn("baselined: src/A.bas: not in house-style layout, listed in "
                       "tools/vba_layout_baseline.json", printed)
         self.assertIn("vba-format: PASS (2 file(s), 1 baselined", printed)
+
+    def test_tracked_module_test_reads_the_baseline(self) -> None:
+        self.assertEqual(baselined(self.root), set())
+        self.track({"src/A.bas": self.BAD, "src/B.bas": self.GOOD})
+        self.baseline(["src/A.bas"])
+        self.assertEqual(baselined(self.root), {"src/A.bas"})
+        self.assertEqual(self.run_main("--check")[0], 0)
 
     def test_unlisted_module_out_of_layout_fails(self) -> None:
         self.track({"src/A.bas": self.BAD, "src/B.bas": self.BAD})
