@@ -128,7 +128,9 @@
         "tools/check_vba_conditionals.py",
         "tests/test_check_vba.py",
         "tools/format_vba.py",
-        "tests/test_format_vba.py"
+        "tests/test_format_vba.py",
+        "tools/check_links.py",
+        "tests/test_check_links.py"
       ]
     }
   ]
