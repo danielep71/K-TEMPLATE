@@ -305,7 +305,7 @@ inherited policies may impose additional restrictions.
 | `tools/make_mutant.py`, `tests/test_make_mutant.py` | **Keep** | Writes a mutant, a copy of a source file with one text replaced, under the ignored `test-results/mutants/` at the source's relative path, for the [negative control](../../CONTRIBUTING.md#-negative-controls) of a defect fix. It refuses unless the text occurs exactly once, keeps every other byte, CRLF line endings and `Attribute VB_Name` included, and prints the changed lines and the SHA-256 of the source and of the mutant. It never writes over a source file or into a folder that Git does not ignore. |
 | `tools/render_docs.py`, `tests/test_render_docs.py` | **Keep and evolve** | Renders the documentation blocks between `BEGIN generated` and `END generated` markers, such as the list of **Repository integrity** checks and the example suite's expected results; **Repository integrity** fails while one is stale. Add a renderer for each fact the project's code already knows, and run `--write` after changing it. A count written by hand outside a block fails `restated-counts`; render it instead. |
 | `tools/check_restated_counts.py`, `tests/test_check_restated_counts.py` | **Keep and adapt** | Fails, in **Repository integrity**, when a tracked Markdown file other than `CHANGELOG.md` states, outside a generated block, a count that has a single source: the example suite's cases, assertions, modes and failure entry points in `.github/excel-evidence-policy.json`, the **Repository integrity** checks and the static checks of VBA source that `tools/check_repository.py` lists, the data contract's datasets and the validator's finding codes. It matches a declared noun phrase, such as `cases` or `modes`, after a count in digits or in words, whatever the value, and names the file, line, phrase and source. Declare the project's own counted records in `SOURCES`, and keep a reviewed restatement only in `ALLOWED`, with its reason. |
-| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link: relative links, anchors and HTTPS in **Repository integrity**, external links weekly, with optional expiring exceptions in `.github/link-exceptions.json` ([maintain the baseline](#-maintain-the-baseline)). |
+| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link, read the way GitHub renders Markdown: relative links, anchors and HTTPS in **Repository integrity**, with reviewed exclusions of wrong reports in `.github/link-check-exclusions.json`; external links weekly, the wiki's pages as raw Markdown while the repository is public, with optional expiring exceptions in `.github/link-exceptions.json` ([maintain the baseline](#-maintain-the-baseline)). |
 | `tools/check_doc_commands.py`, `tests/test_check_doc_commands.py` | **Keep** | Checks, in **Repository integrity**, that each `python tools/...` command and repository `python -m` command in the tracked Markdown runs a tracked script, and that its subcommands and options exist in the script's `argparse` parser, read from its source without running it. A parser it cannot read is a failure, not a pass. Commands of a **Remove once run** tool are skipped once its file is deleted. Keep each tool's parser literal so it stays readable. |
 | `docs/repo_governance/README.md` | **Keep and adapt** | The index of the governance guides and the repository controls. Update its links when you add, retire or move a guide. |
 | `docs/repo_governance/PULL_REQUESTS.md` | **Keep and adapt** | Final-head review procedure that the pull request template refers to. Adapt it if the project uses another automated reviewer. |
@@ -446,9 +446,28 @@ mypy
 The tests already check every relative link and anchor, and that every
 external link uses HTTPS: a plain `http://` link in a Markdown link, a
 reference definition, an autolink or an HTML attribute fails **Repository
-integrity**; text in code spans and fenced blocks is not checked. To also
-request the external links, over HTTPS only, as the weekly **Link check**
-workflow does:
+integrity**. Markdown is read the way GitHub renders it: text in code spans,
+code blocks and HTML comments is not checked, nor is escaped text such as
+`\[text](path)`, and backslash escapes and character references such as
+`&amp;` are decoded before a path is looked up. If the checker reports a link
+wrongly, list the report in `.github/link-check-exclusions.json`, which the
+template does not ship:
+
+```json
+{
+  "schema_version": 1,
+  "exclusions": [
+    {"path": "docs/guide.md", "link": "notes.md#part", "reason": "GitHub renders this text as code"}
+  ]
+}
+```
+
+The `path` is the Markdown file and the `link` is the link as the report
+prints it. **Repository integrity** fails while the file is malformed or an
+entry matches no report; a plain `http://` link cannot be excluded.
+
+To also request the external links, over HTTPS only, as the weekly **Link
+check** workflow does:
 
 ```sh
 python tools/check_links.py --external
@@ -456,7 +475,10 @@ python tools/check_links.py --external
 
 Links into this repository itself are skipped, locally as in the workflow: the
 repository is read from `GITHUB_REPOSITORY`, else from the `origin` remote.
-A 403, 429 or 5xx answer, or no answer, is a warning, because the site may
+Links to pages of its wiki are the exception: while the repository's page
+answers an anonymous request, each is requested as the page's raw Markdown,
+which fails when the page does not exist; for a private repository they are
+skipped too. A 403, 429 or 5xx answer, or no answer, is a warning, because the site may
 only be busy or refuse automated requests. To keep such a link while you
 review it again later, list it in `.github/link-exceptions.json`, which the
 template does not ship; create it with the first exception:

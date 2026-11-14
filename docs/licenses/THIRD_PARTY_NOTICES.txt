@@ -167,6 +167,8 @@ tools/check_vba_conditionals.py
 tests/test_check_vba.py
 tools/format_vba.py
 tests/test_format_vba.py
+tools/check_links.py
+tests/test_check_links.py
 
 The license text is included in MPL-2.0.txt in this directory.
 Modifications compare commit with commit for the Excel-run check instead of
@@ -183,4 +185,10 @@ ratchet, the handling of lines that a continuation carries over and of
 statement keywords followed by a colon, and the tests of these; it keeps its
 own source directories, folder and outside paths, output and exit status 2
 for every error, and its tests compare logical lines with this repository's
-lexer.
+lexer. The link checker takes from it the reading of Markdown as GitHub
+renders it, the reviewed exclusions of wrong reports and the request of wiki
+pages as raw Markdown; it keeps its HTTPS requirement and expiring
+exceptions, moves the exclusions file under .github/ with stricter
+validation, requests wiki pages only while the repository answers anonymous
+requests, ends a fence with its list item and reads lazy continuation lines
+only where they do not start a block.

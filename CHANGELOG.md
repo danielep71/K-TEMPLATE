@@ -188,6 +188,21 @@ Use only the categories an entry needs.
   before its definition, stays a finding, as does a malformed, non-Boolean or
   duplicate `#Const` or one that redefines a compiler constant. Static check
   only; nothing was compiled or run in Excel (#500).
+- `tools/check_links.py` reads Markdown the way GitHub renders it. Text in
+  code spans that continue over line breaks, in indented code blocks and in
+  HTML comments is no longer read as a link, nor is escaped text such as
+  `\[text](path)`. Backslash escapes and character references, such as
+  `&amp;`, are decoded in destinations, `href` and `src` values and
+  `<a id>` anchors. Fences, headings, setext underlines and thematic breaks
+  are recognised inside blockquotes and list items, a closing fence may have
+  nothing after its run, and a heading's anchor drops the `_` runs of its
+  emphasis, while the anchor that keeps them is still accepted. A wrong
+  report can be listed with its reason in the optional
+  `.github/link-check-exclusions.json`; **Repository integrity** fails while
+  the file is malformed or an entry matches no report, and a plain `http://`
+  link cannot be listed. With `--external`, a link to a page of this
+  repository's wiki is requested as the page's raw Markdown while the
+  repository answers anonymous requests, and skipped otherwise (#501).
 - `tools/format_vba.py`, run without paths, reads the modules that Git tracks
   under the source directories; an untracked file there is no longer
   formatted or checked, and a run outside a Git repository is an error with
