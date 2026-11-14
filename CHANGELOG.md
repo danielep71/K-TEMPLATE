@@ -102,6 +102,8 @@ Use only the categories an entry needs.
 - The social preview and README banner name the risk areas the template
   is for, market, credit, operational, counterparty, IRRBB and liquidity,
   instead of a list of regimes, and show one formula for each (#492).
+- **Issue triage** reports each open issue in a cycle of open issues'
+  dependency sections, which no finished work can unblock (#506).
 
 ### Fixed
 
