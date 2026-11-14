@@ -108,6 +108,11 @@ Use only the categories an entry needs.
 - `tools/initialize_repository.py` writes no file when it only lists the
   changes, not even the bytecode of the tools it imports, as the README says
   (#464).
+- `tools/format_vba.py` no longer splits a comment that continues with ` _`
+  after an `End` statement, which turned its continuation into code, and no
+  longer moves continuation text that looks like a label or an `End`
+  statement. A folder named as a path is formatted, and a missing path is an
+  error with exit status 2 instead of a traceback (#496).
 
 ## [1.0.0] - 2026-11-11
 
