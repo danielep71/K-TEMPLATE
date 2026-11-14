@@ -115,6 +115,17 @@
       "files": [
         ".github/workflows/pr-milestones.yml"
       ]
+    },
+    {
+      "repository": "https://github.com/danielep71/VBA-PROBABILITY-DISTRIBUTIONS",
+      "license": "MPL-2.0",
+      "revision": "723be583f17963da532ff07cc0bc4d74062b7760",
+      "revision_note": "The main branch as inspected when the files were adapted",
+      "files": [
+        "tools/vba_code_identity.py",
+        "tests/test_vba_code_identity.py",
+        "tools/vba_lexer.py"
+      ]
     }
   ]
 }

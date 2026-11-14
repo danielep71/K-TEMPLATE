@@ -86,7 +86,8 @@ A version may be published only when:
    [recorded](INSTALLATION.md#recording-an-excel-run) from a workbook built
    from the candidate, or from an earlier commit whose run inputs are
    identical ([step 4](#4-certify-the-workbook)), and passes
-   `tools/check_excel_run.py` with a `VERIFIED` binding, and the result is in
+   `tools/check_excel_run.py` with a `VERIFIED` binding, never on carried
+   evidence, and the result is in
    the [release certification](docs/release/RELEASE_CERTIFICATION.md);
 5. the [distribution review](docs/repo_governance/DISTRIBUTION.md) for the
    release is recorded and closed;
@@ -215,7 +216,12 @@ python tools/check_excel_run.py test-results/excel-run --commit RUN_SHA \
 It must also print
 `Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)`. The
 certification record names both commits. Any other earlier run does not
-count.
+count. In particular, carried evidence does not certify a candidate: a run
+that `--carried-to` accepts because the candidate's VBA components differ
+from the run's only in comments or layout
+([carried evidence](INSTALLATION.md#carried-evidence)), and a report with a
+`Carried from` line, are evidence for a pull request only. After such a
+change, record a new run of the candidate.
 
 If the repository keeps a [user manual](#user-manual), build its PDF from the
 candidate as that section describes, and record it, with the PDF tool and its

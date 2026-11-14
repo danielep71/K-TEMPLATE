@@ -484,6 +484,7 @@ also rebuilds the commit in a temporary Git worktree:
 | With `--require-binding`, no manifest or no `--workbook` | The binding is `UNVERIFIED` |
 | The commit holds `tests/accuracy/contracts.json`, and `results.json` or the results file a project suite names is missing or names another commit, a build with local changes or, for a workbook imported by hand, no commit; or two files hold the same result, the files together lack a result, a result lies outside its output's tolerance, or a contract's worst error exceeds its threshold | The run did not measure the contracts, or they do not hold ([accuracy contracts](docs/methodology/TEST_CASES.md#accuracy-contracts)) |
 | With `--equivalent-to`, a [run input](#a-run-for-another-commit) has another Git blob at the two commits, or exists at only one of them | The run does not show what the other commit would run |
+| With `--carried-to`, a VBA component differs in code, holds a non-ASCII byte or uses `[` or `]` outside a string, or another run input has another Git blob at the two commits or exists at only one of them ([carried evidence](#carried-evidence)) | The run does not show what the other commit would run |
 
 It cannot see Excel: the host record, from the operator to the outcome, is
 the runner's own record. A PASS says the evidence is consistent
@@ -527,6 +528,57 @@ run commit, and adds
 `Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)`. Any
 difference is a `FAIL` line that names the path; record a new run for that
 commit instead. Record both commits wherever you cite the run.
+
+#### Carried evidence
+
+A comment does not change what Excel runs. For a pull request, a run also
+counts for a later commit whose VBA components differ from the run's only in
+comments or layout, when you check it with `--carried-to` in place of
+`--equivalent-to`:
+
+```sh
+python tools/check_excel_run.py test-results/excel-run --commit RUN_SHA \
+  --carried-to CANDIDATE_SHA \
+  --workbook test-results/build/Workbook-development.xlsm --require-binding
+```
+
+The evidence and the binding are checked against `RUN_SHA`, and every run
+input must have the same Git blob at both commits, as above, with one
+exception: a VBA component (`.bas`, `.cls`, `.frm`) at both commits may
+differ, if `tools/vba_code_identity.py` finds the same code in both. It reads
+each version with the lexer of the VBA source checks and compares their
+logical lines without comments:
+
+- comments are dropped: from an apostrophe outside a string, from `Rem` where
+  a statement starts, after a colon too, and the lines of a comment continued
+  with ` _`;
+- continuation lines are joined, and blank lines are dropped;
+- conditional-compilation directives (`#If`, `#Const`) are kept, so a
+  changed directive, or a changed statement inside an `#If` block, is a code
+  change;
+- outside string literals, a run of white space counts as one space and the
+  letter case does not count, because the VBE re-cases names
+  ([HB-01](docs/methodology/VALIDATION_PLAN.md#host-behaviour)); each
+  re-cased identifier is reported on a `Note:` line. White space between two
+  tokens is never added or removed: `a=1` and `a = 1` are different code.
+
+Anything else is a code change, and a `FAIL` line names the component and its
+first changed statement, with its line at both commits. The check fails
+closed: a non-ASCII byte, a component that uses `[` or `]` outside a string
+literal (changed or not), a component added, removed or renamed, a form's
+`.frx` that differs by one byte, or any other run input that differs is a
+`FAIL`. The report then adds
+
+`Carried from RUN_SHA: COMPONENTS differ only in comments or layout; the
+other N run inputs are identical. Carried evidence never certifies a release`
+
+with the 12-character `RUN_SHA`. The check derives this line each time it
+runs and never writes it into the evidence folder, which stays the record of
+`RUN_SHA`. Cite the run as `run at <SHA>, carried`, with that line.
+
+Carried evidence is not evidence of the candidate itself. A release candidate
+needs a run of its exact commit, or one that `--equivalent-to` proves
+identical ([releasing](RELEASING.md#4-certify-the-workbook)).
 
 ## 🔄 Upgrading to a new revision
 

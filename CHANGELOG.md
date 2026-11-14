@@ -73,6 +73,21 @@ Use only the categories an entry needs.
   each finding names the commit, the keyword as written and the issue. It
   reads issue states with the workflow token and is not a required check
   (#497).
+- `tools/check_excel_run.py --carried-to SHA` carries the evidence of an
+  Excel run to a later commit whose VBA components differ from the run's
+  only in comments or layout, so that correcting a comment no longer needs a
+  new Excel run for a pull request. The new `tools/vba_code_identity.py`
+  compares the components' logical lines without comments, with each run of
+  white space outside strings read as one space and the letter case of code
+  ignored, and keeps conditional-compilation directives. It refuses non-ASCII input and any
+  component that uses `[` or `]` outside a string. Every other run input,
+  each form's `.frx` included, must keep its Git blob. The report labels the
+  result `Carried from <run commit>`, with the components carried, and
+  writes nothing into the evidence folder. Carried evidence never certifies
+  a release: `--equivalent-to` keeps its blob identity, and a release still
+  needs a run of the candidate or one `--equivalent-to` proves identical.
+  The VBA lexer no longer reads `Rem` or a colon inside a `[...]` expression
+  as a comment or a statement separator (#499).
 
 ### Changed
 
