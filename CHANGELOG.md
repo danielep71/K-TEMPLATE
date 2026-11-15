@@ -293,6 +293,15 @@ Use only the categories an entry needs.
 - **Issue triage** reports a milestone without a due date together with a
   missing or invalid target end date, in the same run, instead of only after
   the date is fixed (#530).
+- The plan digest of `tools/setup_repository.py` binds the rules of each
+  live ruleset that covers a configured one, so an approval goes stale and
+  apply refuses it when a covering ruleset changes while it still covers.
+  A plan in which no ruleset is covered keeps its earlier digest; preview
+  again before applying a plan in which one is (#532).
+- `tools/setup_repository.py --apply` refuses before any write when a
+  managed Actions setting that applies to the destination cannot be read,
+  naming each one as unknown, instead of making every write and then asking
+  you to set a value it never saw. `--check` is unchanged (#533).
 
 ## [1.0.0] - 2026-11-11
 

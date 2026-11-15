@@ -90,8 +90,11 @@ is `differs` and is replaced whatever other rulesets enforce. Otherwise the name
 ruleset is `matches`, `missing` or `unknown`, as the `DIFF` lines show.
 
 The plan ends with its digest, `PLAN SHA-256: <hex>`: the SHA-256 of the
-repository name, the configuration's SHA-256, every observed managed value and
-the exact planned writes. The same unchanged repository and configuration give the
+repository name, the configuration's SHA-256, every observed managed value, the
+definition of each live ruleset that covers a configured one, and the exact
+planned writes. A covering ruleset that changes while it still covers, for
+example by gaining a rule, changes the digest; a ruleset that covers none does
+not. The same unchanged repository and configuration give the
 same digest; `--check` prints it too, and `--report` and `--evidence` record it.
 Apply needs it.
 
@@ -129,7 +132,10 @@ merged pull request cannot delete a release branch before its deletion rule exis
 Apply refuses before any write when the plan's digest differs from the approved
 one, the journal path exists, you lack administrator access, the destination
 is archived or disabled, its visibility differs from a `visibility` the
-configuration sets, or a managed general setting, security feature or ruleset is unknown.
+configuration sets, or a managed general setting, security feature, ruleset or
+Actions setting is unknown. An Actions setting that does not apply to the
+destination, such as the fork pull request approval policy of a private
+repository, is never unknown.
 It never changes visibility: follow the
 [distribution review](../repo_governance/DISTRIBUTION.md) first.
 
