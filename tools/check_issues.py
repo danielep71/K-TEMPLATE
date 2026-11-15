@@ -36,6 +36,8 @@ ROME_SUFFIX = re.compile(r"\s*\(Europe/Rome\)$", re.I)
 DEPENDENCY_STATUS_WORDS = re.compile(r"block|ready|waiting|depend|on[ -]hold|prerequisite", re.I)
 HEADING = re.compile(r"^#{2,3}\s+(.*)$")
 EXTERNAL = re.compile(r"^\s*(?:[-*]\s*)?external condition:\s*\S", re.I)
+# What GitHub writes for an issue form field left empty.
+NO_RESPONSE = "_No response_"
 API = "https://api.github.com"
 
 
@@ -122,12 +124,17 @@ def iso_date(text: str | None) -> dt.date | None:
 def target_date_findings(issue: Issue) -> list[Finding]:
     """The target end date must be a real ISO date before the milestone's due date."""
     target = iso_date(target_end_date(issue.body))
+    due = iso_date(issue.milestone_due)
     if target is None:
-        return [Finding(issue.number, "target-date",
-                        "needs a valid ISO YYYY-MM-DD target end date (Europe/Rome)")]
+        # Report the milestone's missing due date too, so that one pass shows both.
+        findings = [Finding(issue.number, "target-date",
+                            "needs a valid ISO YYYY-MM-DD target end date (Europe/Rome)")]
+        if issue.milestone and due is None:
+            findings.append(Finding(issue.number, "milestone-due",
+                                    f"milestone {issue.milestone!r} has no due date"))
+        return findings
     if not issue.milestone:
         return []  # already reported by the milestone rule
-    due = iso_date(issue.milestone_due)
     if due is None:
         return [Finding(issue.number, "milestone-due",
                         f"milestone {issue.milestone!r} has no due date, so the target end "
@@ -165,6 +172,10 @@ def dependency_findings(issue: Issue, states: Mapping[int, str], repository: str
     section = dependency_section(issue.body)
     if section is None:
         return [Finding(issue.number, "dependencies", "has no dependency section")]
+    if not any(line.strip() not in ("", NO_RESPONSE) for line in section):
+        return [Finding(issue.number, "dependencies",
+                        "has an empty dependency section: write None, link each prerequisite "
+                        "or add an External condition: line")]
     named = references(section, repository, issue.number)
     missing = sorted(n for n in named if n not in states and n not in pulls)
     open_prerequisites = sorted(n for n in named if states.get(n) == "open")
