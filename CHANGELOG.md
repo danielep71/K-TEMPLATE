@@ -188,9 +188,11 @@ Use only the categories an entry needs.
   Open XML package says about where it was saved and by whom: a OneDrive or
   SharePoint path or URL, an absolute path under a user profile, a network
   share, a `file:` URL or any `x15ac:absPath`, in any XML part or in the
-  text of the VBA project, stored or compressed; a person or organization in
+  text of the VBA project, stored or compressed, in its declared code page
+  or as UTF-16LE, for profile names in any alphabet; a person or organization in
   the document properties, `fileSharing`, threaded-comment people, comment
-  authors and shared-workbook revisions; a Microsoft Purview sensitivity
+  authors and shared-workbook revisions, each part found by its usual path
+  or by its content type; a Microsoft Purview sensitivity
   label (`MSIP_Label_*` properties, `docMetadata/` parts); and SharePoint
   library properties and schemas (`docProps/custom.xml`, `customXml/`). Each
   finding names the file, the part, the kind and a hint, never the value. It

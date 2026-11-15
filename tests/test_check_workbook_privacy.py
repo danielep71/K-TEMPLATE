@@ -50,7 +50,10 @@ CUSTOM = ('<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2
 PROPERTY = ('<property fmtid="{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}" pid="2" name="{name}">'
             '<vt:lpwstr>{value}</vt:lpwstr></property>')
 LABEL_GUID = "0e5f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
-SECRETS = ("avery", "contoso", LABEL_GUID)
+# A name that starts with a letter outside ASCII, as a Windows profile folder can.
+ACCENTED = "\u00c1very"
+SECRETS = ("avery", "contoso", LABEL_GUID, ACCENTED.lower(), "\u044f\u0440\u043e\u0441\u043b\u0430\u0432")
+TYPES = "application/vnd.openxmlformats-officedocument.spreadsheetml."
 
 
 def package(parts: dict[str, str | bytes] | None = None, extra_types: str = "") -> bytes:
@@ -199,6 +202,48 @@ class ScanTest(unittest.TestCase):
                          ["xl/vbaProject.bin: path or URL (VBA project text holds a SharePoint "
                           "URL)"])
 
+    def test_a_profile_name_outside_ascii_in_the_vba_project_fails(self) -> None:
+        expected = ["xl/vbaProject.bin: path or URL (VBA project text holds an absolute path "
+                    "under a user profile)"]
+        # Module source, compressed and stored in the project's code page, cp1252.
+        compressed = vba_with(f'Const INPUTS = "C:\\Users\\{ACCENTED}\\Documents\\Inputs.xlsx"')
+        self.assertEqual(self.findings({"xl/vbaProject.bin": compressed}), expected)
+        # Text stored as is: UTF-16LE with a Latin or a Cyrillic first letter, and
+        # cp1252 right after a byte that reads as a letter.
+        path = "C:\\Users\\{}\\AppData\\Roaming\\Tools.xlam"
+        for name, stored in (
+                (ACCENTED, path.format(ACCENTED).encode("utf-16-le")),
+                ("cyrillic", path.format("\u042f\u0440\u043e\u0441\u043b\u0430\u0432")
+                 .encode("utf-16-le")),
+                ("cp1252", b"\xc9" + path.format(ACCENTED).encode("cp1252"))):
+            with self.subTest(name=name):
+                blob = vba_with("Option Base 0") + b"\x00\x13" + stored + b"\x00\x00"
+                self.assertEqual(self.findings({"xl/vbaProject.bin": blob}), expected)
+        # The exemptions still hold, whatever follows them.
+        for public in ("Public", "Default", "All Users"):
+            with self.subTest(public=public):
+                project = vba_with(f'Const SHARED = "C:\\Users\\{public}\\{ACCENTED}.xlsx"')
+                self.assertEqual(self.findings({"xl/vbaProject.bin": project}), [])
+
+    def test_the_dir_stream_is_read_in_the_declared_code_page(self) -> None:
+        def record(number: int, payload: bytes) -> bytes:
+            return number.to_bytes(2, "little") + len(payload).to_bytes(4, "little") + payload
+
+        cyrillic = "\u042f\u0440\u043e\u0441\u043b\u0430\u0432"
+        reference = f"*\\G{{00000000-0000-0000-0000-000000000000}}#1.0#0#C:\\Users\\{cyrillic}\\Tools.xlam#Tools"
+        directory = (record(0x0003, (1251).to_bytes(2, "little"))
+                     + record(0x000D, reference.encode("cp1251"))
+                     + record(0x003E, "Tools".encode("utf-16-le"))
+                     + record(0x001A, f"M{cyrillic}".encode("cp1251"))
+                     + record(0x0031, (0).to_bytes(4, "little")))
+        found = privacy.read_directory(directory)
+        self.assertEqual(found.code_page, "cp1251")
+        self.assertIn(reference, found.texts)
+        self.assertIn("Tools", found.texts)
+        self.assertEqual(found.offsets, {f"m{cyrillic.lower()}": 0})
+        unknown = privacy.read_directory(record(0x0003, (9999).to_bytes(2, "little")))
+        self.assertEqual(unknown.code_page, "cp1252")
+
     def test_system_library_references_in_the_vba_project_pass(self) -> None:
         # The build references stdole under C:\\Windows and the Office library under
         # C:\\Program Files, as every VBA project does.
@@ -223,6 +268,49 @@ class ScanTest(unittest.TestCase):
                           "(person@displayName is not blank)",
                           "xl/persons/person.xml: person or organization "
                           "(person@userId is not blank)"])
+
+    def test_parts_are_found_by_content_type_wherever_they_are(self) -> None:
+        comments = ('<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/'
+                    'main"><authors><author>Avery</author></authors></comments>')
+        hint = "person or organization (author is not blank)"
+        # The layout that openpyxl writes, found by its path even without an override.
+        self.assertEqual(self.findings({"xl/comments/comment1.xml": comments}),
+                         [f"xl/comments/comment1.xml: {hint}"])
+        cases = {
+            "xl/notes/note1.xml": (f"{TYPES}comments+xml", comments, hint),
+            "xl/people/people.xml": (
+                "application/vnd.ms-excel.person+xml",
+                '<personList><person displayName="Avery"/></personList>',
+                "person or organization (person@displayName is not blank)"),
+            "xl/changes/users.xml": (
+                f"{TYPES}userNames+xml",
+                '<users><userInfo guid="{00000000-0000-0000-0000-000000000002}" '
+                'name="Avery"/></users>',
+                "person or organization (userInfo@name is not blank)"),
+            "props/core.xml": (
+                "application/vnd.openxmlformats-package.core-properties+xml",
+                CORE.format(inner="<dc:creator>Avery</dc:creator>"),
+                "person or organization (creator is not blank)"),
+            "props/extended.xml": (
+                "application/vnd.openxmlformats-officedocument.extended-properties+xml",
+                APP.format(inner="<Company>Contoso</Company>"),
+                "person or organization (Company is not blank)"),
+            "props/custom.xml": (
+                "application/vnd.openxmlformats-officedocument.custom-properties+xml",
+                CUSTOM.format(inner=PROPERTY.format(name="ContentTypeId", value="0x0101")),
+                "SharePoint metadata (property ContentTypeId is a SharePoint library "
+                "property)"),
+            "labels/info.xml": (
+                "application/vnd.ms-office.classificationlabels+xml", "<labelList/>",
+                "sensitivity label (a Purview sensitivity label part)"),
+        }
+        for part, (content_type, text, expected) in cases.items():
+            override = f'<Override PartName="/{part.upper()}" ContentType="{content_type}"/>'
+            with self.subTest(part=part):
+                found = self.findings({part: text}, extra_types=override)
+                self.assertIn(f"{part}: {expected}", found)
+        # Without its content type, a part at another path is not one of these.
+        self.assertEqual(self.findings({"xl/notes/note1.xml": comments}), [])
 
     def test_comment_authors_and_revision_users_fail(self) -> None:
         comments = ('<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/'
