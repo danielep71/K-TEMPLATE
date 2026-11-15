@@ -234,24 +234,31 @@ def origin_has_branch(root: Path, branch: str) -> bool:
     return any(line.split("\t")[-1] == ref for line in asked.stdout.splitlines())
 
 
+# The workflows whose branch filters must name the default branch.
+DEFAULT_BRANCH_WORKFLOWS = (".github/workflows/codeql.yml",
+                            ".github/workflows/repository-integrity.yml")
+
+
 def codeql_default_branch(context: Context) -> list[Finding]:
-    """codeql.yml lists the default branch, which branch filters cannot name."""
-    path = ".github/workflows/codeql.yml"
-    if not (context.root / path).is_file():
+    """codeql.yml and repository-integrity.yml list the default branch, which branch filters
+    cannot name."""
+    paths = [path for path in DEFAULT_BRANCH_WORKFLOWS if (context.root / path).is_file()]
+    if not paths:
         return []
     sys.path.insert(0, str(context.root / "tests"))
     try:
         strict_yaml: Any = importlib.import_module("strict_yaml")
     finally:
         sys.path.pop(0)
-    document = strict_yaml.load((context.root / path).read_text(encoding="utf-8")) or {}
-    triggers = document.get("on", document.get(True)) or {}
     findings = []
-    for event in ("push", "pull_request"):
-        branches = (triggers.get(event) or {}).get("branches")
-        if branches is not None and context.default_branch not in branches:
-            findings.append((path, f"{event} branches {branches} omit the default branch "
-                                   f"{context.default_branch}; add it."))
+    for path in paths:
+        document = strict_yaml.load((context.root / path).read_text(encoding="utf-8")) or {}
+        triggers = document.get("on", document.get(True)) or {}
+        for event in ("push", "pull_request"):
+            branches = (triggers.get(event) or {}).get("branches")
+            if branches is not None and context.default_branch not in branches:
+                findings.append((path, f"{event} branches {branches} omit the default branch "
+                                       f"{context.default_branch}; add it."))
     return findings
 
 

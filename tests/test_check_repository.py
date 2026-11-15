@@ -155,6 +155,16 @@ class FileCheckTest(RepositoryTest):
         self.assertEqual(len(findings), 2)
         self.assertIn("omit the default branch trunk", findings[0][1])
 
+    @NEEDS_YAML
+    def test_integrity_push_branches_name_the_default_branch(self) -> None:
+        integrity = ".github/workflows/repository-integrity.yml"
+        self.write({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
+                    integrity: "on:\n  pull_request:\n  push:\n    branches: [main, 'release/**']\n"})
+        self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
+        self.assertEqual(check_repository.codeql_default_branch(self.context(default_branch="trunk")),
+                         [(integrity, "push branches ['main', 'release/**'] omit the default "
+                                      "branch trunk; add it.")])
+
     def test_secret_files(self) -> None:
         failing = {".env": ".env", "config/.env.local": ".env.*", ".ENV.production": ".env.*",
                    "certs/server.pem": "*.pem", "tls.key": "*.key", "client.p12": "*.p12",
