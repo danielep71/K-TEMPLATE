@@ -184,6 +184,24 @@ Use only the categories an entry needs.
   template-only section of `AGENTS.md`; the reviewed uses that stay, such as
   "the template's" meaning the workbook template, are listed with their
   reasons, and one that matches nothing fails the check (#491).
+- `python tools/check_workbook_privacy.py FILE...` reports what an Office
+  Open XML package says about where it was saved and by whom: a OneDrive or
+  SharePoint path or URL, an absolute path under a user profile, a network
+  share, a `file:` URL or any `x15ac:absPath`, in any XML part or in the
+  text of the VBA project, stored or compressed; a person or organization in
+  the document properties, `fileSharing`, threaded-comment people, comment
+  authors and shared-workbook revisions; a Microsoft Purview sensitivity
+  label (`MSIP_Label_*` properties, `docMetadata/` parts); and SharePoint
+  library properties and schemas (`docProps/custom.xml`, `customXml/`). Each
+  finding names the file, the part, the kind and a hint, never the value. It
+  exits with 1 on a finding and 2 on a file it cannot read. **Repository
+  integrity** now fails a committed Office package with any finding, through
+  `tools/check_binaries.py`, except the regulatory source copies, and an XML
+  part that declares a DTD is no longer parsed. `tools/release.py
+  verify-published` fails when an attached `--asset` that is an Office
+  package, or is named like one, has a finding, whatever its SHA-256. A
+  committed or attached workbook that carries such data fails until it is
+  cleaned (#546).
 
 ### Changed
 

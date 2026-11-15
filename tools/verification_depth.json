@@ -114,10 +114,11 @@
         "tests.test_check_binaries.BinaryCheckTest.test_binary_types_fail",
         "tests.test_check_binaries.BinaryCheckTest.test_an_office_package_with_macros_fails",
         "tests.test_check_binaries.BinaryCheckTest.test_an_office_package_with_personal_metadata_fails",
+        "tests.test_check_binaries.BinaryCheckTest.test_an_office_package_with_private_data_fails",
         "tests.test_check_binaries.BinaryCheckTest.test_nul_byte_late_in_a_text_file_fails",
         "tests.test_check_binaries.BinaryCheckTest.test_allowlisted_file_replaced_by_text_still_fails"
       ],
-      "negative_claim": "binary files outside the approved paths, Office packages with macros or personal metadata, a late NUL byte and a changed allowlisted file are rejected",
+      "negative_claim": "binary files outside the approved paths, Office packages with macros, personal metadata, a OneDrive or user-profile path, a threaded-comment person, a Purview label part or a SharePoint schema, a late NUL byte and a changed allowlisted file are rejected",
       "state": "green"
     },
     {
