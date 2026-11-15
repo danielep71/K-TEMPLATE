@@ -177,6 +177,14 @@ Use only the categories an entry needs.
 
 ### Changed
 
+- **Repository integrity** runs on every pull request and on pushes to `main`
+  and `release/**` only, no longer a second time on each push to a task
+  branch. The `codeql-default-branch` check also fails while the workflow's
+  push branches omit the default branch (#538).
+- A sync pull request whose head is the integration merge commit, with an
+  empty diff against the release branch and a tree the integration's
+  final-head review covered, needs no new automated review;
+  **Repository integrity** still runs on it (#539).
 - While a release branch is active, commit messages, squash messages and task
   pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
   guide and the pull request template now say: a closing keyword in a commit
@@ -222,6 +230,10 @@ Use only the categories an entry needs.
   instead of a list of regimes, and show one formula for each (#492).
 - **Issue triage** reports each open issue in a cycle of open issues'
   dependency sections, which no finished work can unblock (#506).
+- **Issue triage** reports an empty dependency section, one with nothing but
+  blank lines or `_No response_`, as a `dependencies` finding: write `None`,
+  link each prerequisite or add an `External condition:` line. An open issue
+  with such a section now fails triage until it is filled in (#531).
 - An issue's *Resolution* names the merge commit, the Excel run with its
   case and assertion counts when the change needed one, and any deviation
   from the proposed fix. An issue closed through `release/X.Y.Z` goes into
@@ -270,6 +282,14 @@ Use only the categories an entry needs.
   under the source directories; an untracked file there is no longer
   formatted or checked, and a run outside a Git repository is an error with
   exit status 2 (#502).
+- The **Sync issue labels** dry run names, for each deletion a real run would
+  refuse, up to ten of the issues and pull requests that still use the label,
+  in number order, and adds `and others` when more do, such as
+  `used by #3, #7 and others`; the refusal of a real run names them too. A
+  plain name still costs one request, now a page of eleven; a name with a
+  comma collects the numbers from every page it reads. An item without a
+  valid number stops the run. A real run refuses the same deletions as
+  before (#534).
 
 ### Fixed
 
@@ -286,6 +306,18 @@ Use only the categories an entry needs.
   keeps a blank line that a continuation carries over, after an `End`
   statement and at the end of the file too, so that no blank line is added
   to or removed from a logical line (#502).
+- **Issue triage** reports a milestone without a due date together with a
+  missing or invalid target end date, in the same run, instead of only after
+  the date is fixed (#530).
+- The plan digest of `tools/setup_repository.py` binds the rules of each
+  live ruleset that covers a configured one, so an approval goes stale and
+  apply refuses it when a covering ruleset changes while it still covers.
+  A plan in which no ruleset is covered keeps its earlier digest; preview
+  again before applying a plan in which one is (#532).
+- `tools/setup_repository.py --apply` refuses before any write when a
+  managed Actions setting that applies to the destination cannot be read,
+  naming each one as unknown, instead of making every write and then asking
+  you to set a value it never saw. `--check` is unchanged (#533).
 
 ## [1.0.0] - 2026-11-11
 
