@@ -16,7 +16,8 @@ environment that no sheet shows. For each package given, a .xlsx, .xlsm,
   or not. The VBA project (vbaProject.bin) is read for the same paths and URLs
   only: its dir stream and module source decompressed and decoded in the
   code page the project declares (cp1252 when it declares none), and its
-  bytes as stored, as text of that code page and as UTF-16LE. A reference to a
+  bytes as stored, as text of that code page, multi-byte ones such as cp936
+  included, and as UTF-16LE in any script. A reference to a
   library under C:\\Windows or C:\\Program Files is not a finding: every VBA
   project holds one;
 - person or organization: the author and last editor in docProps/core.xml,
@@ -33,12 +34,14 @@ environment that no sheet shows. For each package given, a .xlsx, .xlsm,
   docMetadata/LabelInfo.xml, and a content type or relationship that refers
   to such a part;
 - SharePoint metadata: a document-library property in docProps/custom.xml,
-  or in any part of the custom-properties namespace, such as ContentTypeId, _dlc_DocId, MediaServiceImageTags or a taxonomy
-  field, and any element or reference in a SharePoint metadata namespace,
+  or in any part of the custom-properties namespace, such as ContentTypeId,
+  _dlc_DocId, MediaServiceImageTags or a taxonomy field, and any element or reference in a SharePoint metadata namespace,
   such as the property schemas that customXml/item*.xml parts hold;
-- unreadable: an XML part (a .xml or .rels part) that is not well-formed,
-  declares a DTD or cannot be read from the package. It cannot be checked,
-  so it is a finding too.
+- unreadable: an XML part that is not well-formed, declares a DTD or cannot
+  be read from the package. It cannot be checked, so it is a finding too. A
+  part is XML when its name ends in .xml or .rels, its declared content type
+  ends in +xml or /xml, or it has one of the roles above; a VML or binary
+  part is not read, unless it is declared XML.
 
 A finding names the part, the kind and a hint, never the value it found:
 
@@ -150,11 +153,13 @@ ROLE_PATHS = (
 )
 # The author Excel writes for the legacy copy of a threaded comment.
 THREADED_AUTHOR = re.compile(r"tc=\{[0-9a-f-]+\}", re.I)
-# Text in a binary part: printable bytes of a single-byte code page, or UTF-16LE
-# code units of printable ASCII, Latin-1 and Latin Extended, Greek or Cyrillic
-# letters (U+00A0 to U+04FF), so that a name such as "Ávery" stays in its run.
+# Text in a binary part, as stored: runs of printable bytes, read in the
+# project's code page, single-byte or multi-byte such as cp936 or cp932; and
+# UTF-16LE read at both byte alignments and split at control characters, so that
+# a name in any script, a surrogate pair included, stays in its string. A
+# finding still needs the ASCII anchors of a path or URL.
 BYTE_RUN = re.compile(rb"[\x20-\x7e\x80-\xff]{4,}")
-UTF16_RUN = re.compile(rb"(?:[\x20-\x7e\xa0-\xff]\x00|[\x00-\xff][\x01-\x04]){4,}")
+UTF16_BREAK = re.compile("[\x00-\x1f\x7f-\x9f\ufffd\ufffe\uffff]+")
 # The code page of a VBA project that declares none or an unknown one.
 DEFAULT_CODE_PAGE = "cp1252"
 # dir stream records whose text is UTF-16LE; the others are in the project's code page.
@@ -263,9 +268,14 @@ def content_types(data: bytes | None) -> dict[str, str]:
     return types
 
 
+def declared_type(part: str, types: dict[str, str]) -> str:
+    """The part's content type: its Override, else the Default of its extension."""
+    return types.get(f"/{part}".lower()) or types.get(part.rpartition(".")[2].lower(), "")
+
+
 def roles(part: str, types: dict[str, str]) -> frozenset[str]:
     """The roles of the part: by its content type, or by its usual path."""
-    declared = types.get(f"/{part}".lower()) or types.get(part.rpartition(".")[2].lower(), "")
+    declared = declared_type(part, types)
     found = {role for pattern, role in ROLE_PATHS if pattern.fullmatch(part)}
     if declared in ROLE_TYPES:
         found.add(ROLE_TYPES[declared])
@@ -514,11 +524,20 @@ def project_texts(blob: bytes) -> tuple[str, list[str]]:
     return directory.code_page, texts
 
 
+def utf16_strings(data: bytes) -> Iterator[str]:
+    """The UTF-16LE strings of at least four characters in the data, at either
+    alignment; a lone surrogate ends a string like a control character."""
+    for start in (0, 1):
+        chunk = data[start:]
+        text = chunk[:len(chunk) // 2 * 2].decode("utf-16-le", "replace")
+        yield from (piece for piece in UTF16_BREAK.split(text) if len(piece) >= 4)
+
+
 def binary_hints(data: bytes) -> Iterator[tuple[str, str]]:
     """Paths and URLs in the text of a VBA project, decompressed and as stored."""
     code_page, texts = project_texts(data)
     texts += [run.group().decode(code_page, "replace") for run in BYTE_RUN.finditer(data)]
-    texts += [run.group().decode("utf-16-le", "replace") for run in UTF16_RUN.finditer(data)]
+    texts += utf16_strings(data)
     for text in texts:
         for line in text.splitlines():
             found = describe(line)
@@ -559,14 +578,21 @@ def is_package(data: bytes) -> bool:
     return True
 
 
-def part_hints(name: str, data: bytes | None,
-               part_roles: frozenset[str]) -> Iterator[tuple[str, str]]:
+def is_xml(name: str, content_type: str, part_roles: frozenset[str]) -> bool:
+    """Whether the part is read as XML: by its suffix, its declared content type or
+    its role. VML and binary parts are not, unless declared XML."""
+    return (name.lower().endswith((".xml", ".rels"))
+            or content_type.endswith(("+xml", "/xml")) or bool(part_roles))
+
+
+def part_hints(name: str, data: bytes | None, part_roles: frozenset[str],
+               content_type: str = "") -> Iterator[tuple[str, str]]:
     lower = name.lower()
     if LABEL_INFO in part_roles:
         yield LABEL, "a Purview sensitivity label part"
     if data is None:
         yield UNREADABLE, "cannot be read from the package, so it cannot be checked"
-    elif lower.endswith((".xml", ".rels")):
+    elif is_xml(name, content_type, part_roles):
         yield from xml_hints(part_roles, data)
     elif lower.endswith("vbaproject.bin"):
         yield from binary_hints(data)
@@ -578,7 +604,8 @@ def scan(data: bytes) -> list[Finding]:
     types = content_types(parts[CONTENT_TYPES])
     return list(dict.fromkeys(Finding(name, kind, hint)
                               for name, content in parts.items()
-                              for kind, hint in part_hints(name, content, roles(name, types))))
+                              for kind, hint in part_hints(name, content, roles(name, types),
+                                                           declared_type(name, types))))
 
 
 def scan_file(path: Path) -> list[Finding]:

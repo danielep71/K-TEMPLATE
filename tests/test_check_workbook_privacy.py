@@ -6,6 +6,7 @@ test can check that no finding repeats a value it found.
 
 from __future__ import annotations
 
+import codecs
 import contextlib
 import io
 import shutil
@@ -52,7 +53,14 @@ PROPERTY = ('<property fmtid="{{D5CDD505-2E9C-101B-9397-08002B2CF9AE}}" pid="2" 
 LABEL_GUID = "0e5f1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b"
 # A name that starts with a letter outside ASCII, as a Windows profile folder can.
 ACCENTED = "\u00c1very"
-SECRETS = ("avery", "contoso", LABEL_GUID, ACCENTED.lower(), "\u044f\u0440\u043e\u0441\u043b\u0430\u0432")
+# Names in Chinese characters, one outside the Basic Multilingual Plane (a
+# surrogate pair in UTF-16).
+CJK = "\u5f20\u4f1f"
+CJK_SUPPLEMENTARY = "\U00020000\u4f1f"
+# A name that both cp936 and cp932 can store.
+KANJI = "\u5c71\u7530"
+SECRETS = ("avery", "contoso", LABEL_GUID, ACCENTED.lower(),
+           "\u044f\u0440\u043e\u0441\u043b\u0430\u0432", CJK, CJK_SUPPLEMENTARY, KANJI)
 TYPES = "application/vnd.openxmlformats-officedocument.spreadsheetml."
 
 
@@ -85,6 +93,29 @@ def vba_with(source_line: str) -> bytes:
                                           f"{source_line}\r\n")
     return vba_project.build_vba_project([vba_project.document_module("ThisWorkbook", True),
                                           module])
+
+
+def vba_in_code_page(code_page: int, source_line: str) -> bytes:
+    """A VBA project like vba_with()'s, but declaring another code page in its dir
+    stream and storing its module source in that code page, written with the
+    parts of tools/devbuild/vba_project.py."""
+    module = vba_project.Module("MPaths", 'Attribute VB_Name = "MPaths"\r\nOption Explicit\r\n'
+                                          f"{source_line}\r\n")
+    modules = [vba_project.document_module("ThisWorkbook", True), module]
+    record = b"\x03\x00\x02\x00\x00\x00"  # PROJECTCODEPAGE, 2 bytes
+    directory = vba_project.build_dir("VBAProject", modules)
+    assert directory.count(record + (1252).to_bytes(2, "little")) == 1
+    directory = directory.replace(record + (1252).to_bytes(2, "little"),
+                                  record + code_page.to_bytes(2, "little"))
+    encoding = codecs.lookup(f"cp{code_page}").name
+    vba = {"_VBA_PROJECT": bytes([0xCC, 0x61, 0xFF, 0xFF, 0x00, 0x00, 0x00]),
+           "dir": vba_project.compress(directory)}
+    for item in modules:
+        vba[item.name] = vba_project.compress(item.source.encode(encoding))
+    project_id = "{00000000-0000-0000-0000-000000000005}"
+    return vba_project.write_cfb({"PROJECT": vba_project.build_project_text(project_id, modules),
+                                  "PROJECTwm": vba_project.build_projectwm(modules),
+                                  "VBA": vba})
 
 
 class ScanTest(unittest.TestCase):
@@ -244,6 +275,28 @@ class ScanTest(unittest.TestCase):
         unknown = privacy.read_directory(record(0x0003, (9999).to_bytes(2, "little")))
         self.assertEqual(unknown.code_page, "cp1252")
 
+    def test_a_cjk_profile_name_in_the_vba_project_fails(self) -> None:
+        expected = ["xl/vbaProject.bin: path or URL (VBA project text holds an absolute path "
+                    "under a user profile)"]
+        base = vba_with("Option Base 0")
+        # Stored as UTF-16LE, at an even and an odd offset, with a name in the Basic
+        # Multilingual Plane and one that needs a surrogate pair.
+        for label, name in (("BMP", CJK), ("surrogate pair", CJK_SUPPLEMENTARY)):
+            stored = f"C:\\Users\\{name}\\Documents\\Inputs.xlsx".encode("utf-16-le")
+            for padding in (b"\x00\x13", b"\x07"):
+                with self.subTest(name=label, padding=padding):
+                    blob = base + padding + stored + b"\x00\x00"
+                    self.assertEqual(self.findings({"xl/vbaProject.bin": blob}), expected)
+        # Module source in a multi-byte code page that the project declares.
+        for code_page in (936, 932):
+            with self.subTest(code_page=code_page):
+                project = vba_in_code_page(
+                    code_page, f'Const INPUTS = "C:\\Users\\{KANJI}\\Documents\\Inputs.xlsx"')
+                self.assertEqual(self.findings({"xl/vbaProject.bin": project}), expected)
+        # CJK text without the anchors of a path is not a finding.
+        text = f"{CJK}\\{CJK}: Users {CJK}".encode("utf-16-le")
+        self.assertEqual(self.findings({"xl/vbaProject.bin": base + text}), [])
+
     def test_system_library_references_in_the_vba_project_pass(self) -> None:
         # The build references stdole under C:\\Windows and the Office library under
         # C:\\Program Files, as every VBA project does.
@@ -311,6 +364,38 @@ class ScanTest(unittest.TestCase):
                 self.assertIn(f"{part}: {expected}", found)
         # Without its content type, a part at another path is not one of these.
         self.assertEqual(self.findings({"xl/notes/note1.xml": comments}), [])
+
+    def test_xml_parts_without_an_xml_suffix_are_read(self) -> None:
+        core = CORE.format(inner="<dc:creator>Avery</dc:creator>")
+        cases = {
+            "props/core.dat": ("application/vnd.openxmlformats-package.core-properties+xml",
+                               core, "person or organization (creator is not blank)"),
+            "data/settings.bin": ("application/xml",
+                                  '<settings path="C:\\Users\\avery\\Documents\\"/>',
+                                  "path or URL (settings@path holds an absolute path under a "
+                                  "user profile)"),
+            "xl/extra/item.dat": ("application/vnd.example.settings+xml", "<settings>",
+                                  "unreadable (is not well-formed XML, so it cannot be "
+                                  "checked)"),
+        }
+        for part, (content_type, text, expected) in cases.items():
+            override = f'<Override PartName="/{part}" ContentType="{content_type}"/>'
+            with self.subTest(part=part):
+                self.assertEqual(self.findings({part: text}, extra_types=override),
+                                 [f"{part}: {expected}"])
+        # A part with a role by its path is read whatever its suffix.
+        self.assertEqual(self.findings({"docMetadata/LabelInfo.dat": "<labelList>"}),
+                         ["docMetadata/LabelInfo.dat: sensitivity label (a Purview "
+                          "sensitivity label part)",
+                          "docMetadata/LabelInfo.dat: unreadable (is not well-formed XML, so "
+                          "it cannot be checked)"])
+        # VML and binary parts are not parsed unless declared XML.
+        vml = ('<Default Extension="vml" ContentType="application/vnd.openxmlformats-'
+               'officedocument.vmlDrawing"/><Default Extension="bin" ContentType="application/'
+               'vnd.openxmlformats-officedocument.spreadsheetml.printerSettings"/>')
+        self.assertEqual(self.findings({"xl/drawings/vmlDrawing1.vml": "<xml><v:shape><br>",
+                                        "xl/printerSettings/printerSettings1.bin": b"\x00\x01"},
+                                       extra_types=vml), [])
 
     def test_comment_authors_and_revision_users_fail(self) -> None:
         comments = ('<comments xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/'
