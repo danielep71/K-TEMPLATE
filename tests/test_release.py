@@ -14,6 +14,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, ClassVar
@@ -585,6 +586,26 @@ def sums(content: bytes, name: str = BUNDLE_NAME) -> bytes:
     return f"{hashlib.sha256(content).hexdigest()}  {name}\n".encode()
 
 
+def office_package(parts: dict[str, str] | None = None) -> bytes:
+    """A minimal Office Open XML package with the given extra parts."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        archive.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/'
+                                                'package/2006/content-types"/>')
+        archive.writestr("xl/workbook.xml", "<workbook/>")
+        for name, text in (parts or {}).items():
+            archive.writestr(name, text)
+    return buffer.getvalue()
+
+
+# A workbook last saved to a OneDrive for Business folder, with a threaded-comment person.
+PRIVATE_WORKBOOK = office_package({
+    "xl/workbook.xml": ('<workbook xmlns:x15ac="http://schemas.microsoft.com/office/spreadsheetml/'
+                        '2010/11/ac"><x15ac:absPath url="https://contoso-my.sharepoint.com/'
+                        'personal/avery_contoso_com/Documents/"/></workbook>'),
+    "xl/persons/person.xml": '<personList><person displayName="Avery Contoso"/></personList>'})
+
+
 def asset(name: str, number: int) -> dict[str, object]:
     return {"name": name,
             "apiUrl": f"https://api.github.com/repos/{REPOSITORY}/releases/assets/{number}",
@@ -763,7 +784,7 @@ class VerifyPublishedTest(unittest.TestCase):
 
     def test_other_assets_are_expected_with_their_recorded_digests(self) -> None:
         assert self.gh.release is not None
-        workbook = b"the production workbook"
+        workbook = office_package()
         self.gh.release["assets"] = [asset(BUNDLE_NAME, 1), asset("SHA256SUMS", 2),
                                      asset("Workbook.xlsm", 4)]
         self.gh.files["4"] = workbook
@@ -774,6 +795,58 @@ class VerifyPublishedTest(unittest.TestCase):
         self.assertEqual(self.failures(), ["asset Workbook.xlsm is not an expected asset"])
         self.assertIn("asset Manual.pdf is missing from the release",
                       self.failures(extra={"Workbook.xlsm": digest, "Manual.pdf": "1" * 64}))
+
+    def attach(self, name: str, content: bytes) -> str:
+        """Attach another asset to the release; its SHA-256."""
+        assert self.gh.release is not None
+        self.gh.release["assets"] = [asset(BUNDLE_NAME, 1), asset("SHA256SUMS", 2),
+                                     asset(name, 4)]
+        self.gh.files["4"] = content
+        return hashlib.sha256(content).hexdigest()
+
+    def test_an_attached_workbook_is_checked_for_private_data(self) -> None:
+        digest = self.attach("Workbook.xlsm", office_package())
+        self.assertIn(("PASS", "Workbook.xlsm has no finding of tools/check_workbook_privacy.py"),
+                      self.facts(extra={"Workbook.xlsm": digest}))
+
+    def test_an_attached_workbook_with_private_data_fails_whatever_its_digest(self) -> None:
+        digest = self.attach("Workbook.xlsm", PRIVATE_WORKBOOK)
+        private = ["Workbook.xlsm carries private data: 2 finding(s) of "
+                   "tools/check_workbook_privacy.py",
+                   "Workbook.xlsm: xl/workbook.xml: path or URL (x15ac:absPath holds a OneDrive "
+                   "for Business URL)",
+                   "Workbook.xlsm: xl/persons/person.xml: person or organization "
+                   "(person@displayName is not blank)"]
+        self.assertEqual(self.failures(extra={"Workbook.xlsm": digest}), private)
+        self.assertEqual(self.failures(extra={"Workbook.xlsm": "0" * 64}),
+                         [f"Workbook.xlsm has SHA-256 {digest}, not the recorded {'0' * 64}",
+                          *private])
+        for _, text in self.facts(extra={"Workbook.xlsm": digest}):
+            with self.subTest(text=text):
+                self.assertNotIn("avery", text.lower())
+                self.assertNotIn("contoso", text.lower())
+
+    def test_an_asset_named_like_a_package_must_be_one(self) -> None:
+        digest = self.attach("Workbook.xlsx", b"an encrypted workbook")
+        [failure] = self.failures(extra={"Workbook.xlsx": digest})
+        self.assertTrue(failure.startswith("Workbook.xlsx cannot be checked for private data: "
+                                           "it is not a ZIP"), failure)
+        digest = self.attach("Manual.pdf", b"%PDF-1.7 C:\\Users\\avery\\Manual.pdf")
+        facts = self.facts(extra={"Manual.pdf": digest})
+        self.assertEqual([text for status, text in facts if status == "FAIL"], [])
+        self.assertFalse([text for _, text in facts if "check_workbook_privacy" in text], facts)
+
+    def test_main_fails_on_an_attached_workbook_with_private_data(self) -> None:
+        digest = self.attach("Workbook.xlsm", PRIVATE_WORKBOOK)
+        arguments = ["verify-published", "v1.2.0", "--repository", REPOSITORY,
+                     "--asset", f"Workbook.xlsm={digest}"]
+        with mock.patch("release.run_gh", self.gh), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(release.main(arguments), 1)
+        lines = output.getvalue().splitlines()
+        self.assertIn("FAIL: Workbook.xlsm carries private data: 2 finding(s) of "
+                      "tools/check_workbook_privacy.py", lines)
+        self.assertEqual(lines[-1], "release-verify-published: FAIL (v1.2.0)")
 
     def test_a_failed_attestation_fails(self) -> None:
         self.gh.attested = False

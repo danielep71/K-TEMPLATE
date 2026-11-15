@@ -379,8 +379,19 @@ the draft release that the **Release** workflow created. Title it
 `vX.Y.Z - <milestone title>`, and add the evidence summary to its notes.
 Attach any other artifact the certification record lists, such as the
 production workbook built from the candidate or the
-[user manual](#user-manual) PDF, with its SHA-256. Then publish it, and
-check the published release with `gh` signed in:
+[user manual](#user-manual) PDF, with its SHA-256. Before you attach a
+workbook or another Office file, check it for private data:
+
+```sh
+python tools/check_workbook_privacy.py FILE
+```
+
+It must end with `workbook-privacy: PASS`. It reports, by part and kind but
+never by value, a OneDrive or SharePoint path or URL, an absolute path under
+a user profile, a person or organization, a Microsoft Purview sensitivity
+label and SharePoint metadata; a workbook with a finding is cleaned and
+rebuilt, not attached. Then publish the release, and check it with `gh`
+signed in:
 
 ```sh
 python tools/release.py verify-published vX.Y.Z --repository OWNER/REPOSITORY \
@@ -398,6 +409,11 @@ and ends with `release-verify-published: PASS (vX.Y.Z)` only when:
 - its assets are exactly `<repository>-X.Y.Z-source.tar.gz`, `SHA256SUMS`
   and each `--asset`; the bundle's SHA-256 is the one `SHA256SUMS` records,
   and each `--asset` has its recorded SHA-256;
+- each `--asset` that is an Office Open XML package, or is named like one,
+  such as a `.xlsm` workbook, has no finding of
+  `tools/check_workbook_privacy.py`, whatever its SHA-256; each finding is
+  printed with the asset, part and kind. A file named like a package that is
+  not one, such as an encrypted workbook, cannot be checked and fails;
 - `gh attestation verify` passes on the bundle, as built by the **Release**
   workflow at the tag. When the notes state that the bundle is not attested,
   the command prints a `NOTE` instead: record the absence as a deviation;
@@ -412,8 +428,10 @@ When the release attaches a workbook, check it as a user gets it, and record
 the results in the *Published workbook* section of the
 [release certification](docs/release/RELEASE_CERTIFICATION.md). Give the
 workbook and the manual to `verify-published` in step 7 as `--asset`, so that
-it compares their published bytes with the record. It cannot download them as
-a user does, unblock them or open them in Excel; these checks stay manual:
+it compares their published bytes with the record and runs
+`tools/check_workbook_privacy.py` on the published workbook. It cannot
+download them as a user does, unblock them or open them in Excel; these
+checks stay manual:
 
 - **Binding.** The attached workbook is the production build of the
   candidate, as the development workbook is bound in step 4. Its build stamp

@@ -52,8 +52,9 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
   image for the documentation, review it and add its path, SHA-256 and reason
   to `.github/binary-allowlist.json`; a later change to the file fails until
   the entry is updated. An Office Open XML package outside
-  `docs/methodology/sources/` also fails while it carries macros or personal
-  document metadata.
+  `docs/methodology/sources/` also fails while it carries macros or any
+  finding of `tools/check_workbook_privacy.py`: a OneDrive or SharePoint
+  path, a user name, a sensitivity label or SharePoint metadata.
 - **Forms.** A form's `.frx` stays beside its `.frm`.
 
 ## Dependencies
