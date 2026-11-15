@@ -296,7 +296,7 @@ def baselined(root: Path) -> set[str]:
 
 
 class DeformTest(unittest.TestCase):
-    """The drift helper on module shapes a generated repository may track."""
+    """The drift helper on module shapes the project may track."""
 
     CLASS = ("VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  'True\r\nEND\r\n"
              'Attribute VB_Name = "CResult"\r\nOption Explicit\r\n\r\n'

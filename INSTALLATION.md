@@ -357,7 +357,7 @@ accuracy contracts, as step 3 says.
    checked, not the binding of steps 7 and 9. Such a workbook has no
    `build_commit` stamp, so `SaveResults` writes an empty commit, which the
    [accuracy check](docs/methodology/TEST_HARNESS.md#results) rejects: while
-   the commit holds `tests/accuracy/contracts.json`, as the template does, the
+   the commit holds `tests/accuracy/contracts.json`, as it does from the start, the
    run of a workbook imported by hand ends `excel-run: FAIL` with *commit is
    not a full lower-case commit SHA*, whatever else it shows.
 4. **Compile** with **Debug → Compile VBAProject**.
@@ -495,8 +495,8 @@ also rebuilds the commit in a temporary Git worktree:
 It cannot see Excel: the host record, from the operator to the outcome, is
 the runner's own record. A PASS says the evidence is consistent
 with the commit. It validates a calculation only as far as its accuracy
-contracts and their reference values do; the template's illustrative
-contract validates none.
+contracts and their reference values do; an illustrative contract, such as
+`ACC-01`, validates none.
 
 ### A run for another commit
 

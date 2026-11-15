@@ -5,7 +5,7 @@
 #   Provide the editing baseline for the repository.
 #
 # POLICY
-#   These defaults also cover file types used by generated repositories.
+#   These defaults also cover file types the repository may not use yet.
 #   - Exported VBA source uses CRLF and 4-space indentation.
 #   - Documentation, GitHub configuration, and cross-platform tooling use LF.
 #   - YAML, JSON, XML, and JavaScript use 2-space indentation.

@@ -156,7 +156,7 @@ class DerivationTest(unittest.TestCase):
     def test_main_reports_the_verdict(self) -> None:
         with contextlib.redirect_stdout(io.StringIO()) as printed:
             self.assertEqual(check_derivations.main(["--root", str(ROOT)]), 0)
-        # Any number of named scripts, so a generated repository may change its cases.
+        # Any number of named scripts, so that the project may change its cases.
         self.assertIn("derivations: PASS (", printed.getvalue())
         with tempfile.TemporaryDirectory() as empty, \
                 contextlib.redirect_stdout(io.StringIO()) as printed:

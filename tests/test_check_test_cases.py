@@ -98,8 +98,8 @@ class ValidCasesTest(unittest.TestCase):
         self.assertEqual(run(), [])
 
     def test_repository_cases_pass(self) -> None:
-        # Any number of cases, none included: a generated repository removes
-        # the illustrative case and adds its own.
+        # Any number of cases, none included: the project removes the
+        # illustrative case and adds its own.
         self.assertEqual(check_test_cases.check(ROOT)[0], [])
 
     def test_no_cases_pass_without_reading_the_guides(self) -> None:

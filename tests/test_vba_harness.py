@@ -157,8 +157,8 @@ class ExampleSuiteTest(unittest.TestCase):
 
 
 class RelationSuiteTest(unittest.TestCase):
-    """The relation suite, read when its tests run: a generated repository may
-    delete the module, and its tests are then skipped."""
+    """The relation suite, read when its tests run: the project may delete the
+    module, and its tests are then skipped."""
 
     path: ClassVar[Path] = RELATIONS
     text: ClassVar[str]

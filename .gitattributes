@@ -5,7 +5,7 @@
 #   Define Git behavior for the repository.
 #
 # POLICY
-#   These defaults also cover file types used by generated repositories.
+#   These defaults also cover file types the repository may not use yet.
 #   - Exported VBA source is normalized in Git and checked out as CRLF.
 #   - Repository text and cross-platform tooling are checked out as LF.
 #   - Office packages, UserForm binaries, archives, and media remain binary.

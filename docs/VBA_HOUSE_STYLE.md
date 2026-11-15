@@ -4,10 +4,10 @@ These conventions apply to every VBA component of the workbook. The
 [repository structure](REPOSITORY_STRUCTURE.md) says where each kind of
 component lives and which may call which; the
 [installation guide](../INSTALLATION.md) says how source moves between the
-repository and Excel. The template holds only the
-[VBA test harness](methodology/TEST_HARNESS.md), its example suite and the
-illustrative relation tests in `tests/modules/`, so the examples below name
-no existing component other than those test modules.
+repository and Excel. Until the project adds its own components, the
+repository holds only the [VBA test harness](methodology/TEST_HARNESS.md),
+its example suite and the illustrative relation tests in `tests/modules/`, so
+the examples below name no existing component other than those test modules.
 
 ## Naming and visibility
 

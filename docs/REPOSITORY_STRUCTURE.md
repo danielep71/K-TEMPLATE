@@ -11,10 +11,10 @@ them are already set in `.gitattributes`, `.editorconfig` and `.gitignore`.
 
 ## Locations
 
-| Location | Holds | In the template |
+| Location | Holds | In this repository |
 | --- | --- | --- |
 | Repository root | The README; the contribution, conduct, security, installation and release guides (`CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`, `INSTALLATION.md`, `RELEASING.md`); `CHANGELOG.md`, `AGENTS.md` and `LICENSE`; the Ruff and mypy settings in `pyproject.toml`; and the Git and editor rules in `.gitattributes`, `.gitignore` and `.editorconfig` | Present |
-| `VERSION` | The newest released version, published or not, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md#current-status)) | Present: the newest released version, which [current status](../RELEASING.md#current-status) also states; `tools/initialize_repository.py` deletes it in a new repository |
+| `VERSION` | The newest released version, published or not, one `X.Y.Z` line, created when the first release is prepared ([releasing](../RELEASING.md#current-status)) | Present once the first release is prepared; [current status](../RELEASING.md#current-status) says whether it exists and, if so, the version it holds |
 | `.github/` | Workflows (`workflows/`) and the label scripts they run (`scripts/`); issue forms (`ISSUE_TEMPLATE/`) and the pull request template; the label catalogue `labels.json`; the Dependabot configuration and the hash-locked configuration parser of the workflow tests (`requirements.txt`); the binary allowlist `binary-allowlist.json`; the Excel evidence policy `excel-evidence-policy.json`; and, when needed, the expiring link exceptions `link-exceptions.json` and the reviewed link-check exclusions `link-check-exclusions.json` | Present, without `link-exceptions.json` or `link-check-exclusions.json` |
 | `docs/` | Governance, setup, structure, style and the API inventory; the templates of the release certification and milestone closeout records and the pre-release maintenance audit (`docs/release/`); and the license texts, the third-party notice and its machine-readable provenance (`docs/licenses/`) | Present |
 | `docs/assets/` | The repository's social preview image, `social-preview.png`, shown at the top of the README, and its editable source `social-preview.svg` | Present |
@@ -85,7 +85,7 @@ review.
 ## Public API inventory
 
 [PUBLIC_API.txt](PUBLIC_API.txt) lists every `Public` declaration under
-`src/`, in two tiers; in the template both are empty.
+`src/`, in two tiers; both are empty until the project adds its own.
 
 - **`[supported]`:** the supported API, the public declarations of the
   standard modules in `src/modules/`. A `Public` declaration is supported
@@ -154,7 +154,7 @@ the implementation.
 ## Native declarations
 
 `docs/native-declarations.json` registers each native export that a
-`Declare` imports; in the template it lists none.
+`Declare` imports; it lists none until the project adds a `Declare`.
 `python tools/check_vba_declares.py`, which **Repository integrity** runs,
 reports a `Declare` whose export it does not list or whose signature differs
 from the export's ABI, and holds every call to the error-capture rules of

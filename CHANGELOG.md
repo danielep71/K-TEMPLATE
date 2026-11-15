@@ -174,6 +174,16 @@ Use only the categories an entry needs.
   accuracy measurement reads it from the commit the run certifies, so the
   run that exposed a holdout also certifies the commit that records it,
   when every other run input is identical (#526).
+- The **Repository integrity** check `template-wording` runs the new
+  `tools/check_template_wording.py`. It fails, with `--template true` and
+  `false` alike, when a tracked text file says "in the template", "the
+  template's", "template repository" or "generated repository", phrases that
+  describe the template rather than the repository the file is in. It names
+  the file, line and phrase. The changelog, the license texts, the setup
+  guide, the initializer and the check itself are not read, nor is the
+  template-only section of `AGENTS.md`; the reviewed uses that stay, such as
+  "the template's" meaning the workbook template, are listed with their
+  reasons, and one that matches nothing fails the check (#491).
 
 ### Changed
 
@@ -290,6 +300,21 @@ Use only the categories an entry needs.
   comma collects the numbers from every page it reads. An item without a
   valid number stops the run. A real run refuses the same deletions as
   before (#534).
+- The guides and configuration comments describe the repository they are
+  in, so a repository created from the template no longer rewrites them by
+  hand. The `VERSION` row of the structure guide says that the file is
+  present once the first release is prepared; the Dependabot header says
+  that `target-branch`, when set, names the active release branch; and the
+  guides say that a register or list is empty until the project adds its
+  own. Steps
+  only the template needs moved: running the release checks with
+  `--template true` to the template-only section of `AGENTS.md`, and the
+  new-repository steps of the label and traffic guides to the setup guide,
+  which already held them. `tools/initialize_repository.py` also replaces
+  the house style's request to replace `<REGIME>` with a paragraph that
+  names the prefix, and lists that edit. The README's *Start a new
+  repository* links the setup guide's *Template cleanup* for the list of
+  edits instead of repeating it (#491).
 
 ### Fixed
 

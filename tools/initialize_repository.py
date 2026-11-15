@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Adapt the files of a repository created from the template, once, in one diff.
 
-It makes the edits that README.md, *Start a new repository*, step 2, lists
-and that **Repository integrity** requires with --template false:
+It makes the edits that the *Template cleanup* row of
+docs/setup/REPOSITORY_SETUP.md lists, those that **Repository integrity**
+requires with --template false among them:
 
 - AGENTS.md: delete the template-only section, with its markers;
 - .github/ISSUE_TEMPLATE/config.yml: point the contact links at the new
@@ -15,7 +16,8 @@ and that **Repository integrity** requires with --template false:
   repository; with them go VERSION and the release rows of the *Current
   status* of RELEASING.md, which describe the template's releases;
 - docs/VBA_HOUSE_STYLE.md: replace <REGIME> in the naming table with
-  --regime;
+  --regime, and the paragraph above the table, which asks for that, with
+  one that names the prefix;
 - INSTALLATION.md and docs/methodology/VALIDATION_PLAN.md: with the
   changelog's entries go the template's evidence, which cites its own commits
   and issues: the rows of the Tested environment table are removed, and the
@@ -63,6 +65,9 @@ INSTALLATION = "INSTALLATION.md"
 VALIDATION_PLAN = "docs/methodology/VALIDATION_PLAN.md"
 TESTED_HEADER = "| Tested environment |"
 HOST_HEADER = "| ID | Behaviour |"
+# The house style's request to replace <REGIME>, up to the blank line after it.
+REGIME_REQUEST = re.compile(r"^Replace `<REGIME>` with the project's short name\b"
+                            r".*?(?=\n[ \t]*\n)", re.M | re.S)
 LAST_CELL = re.compile(r"\|[^|]*\|[ \t]*$")
 NO_EVIDENCE = "\u2014"
 STATUS_ROWS = {
@@ -203,6 +208,14 @@ def adapt_releasing(text: str, options: Options) -> Adapted:
     return text, notes
 
 
+def regime_paragraph(regime: str) -> str:
+    """The house style's paragraph above the naming table, once the prefix is set."""
+    reserved = [f"`{prefix}_`" for prefix in RESERVED_PREFIXES]
+    return (f"The project's short name is `{regime}`. The [static checks](#static-checks)\n"
+            f"read the facade prefix, `{regime}_`, from this table; the reserved prefixes\n"
+            f"are {', '.join(reserved[:-1])} and {reserved[-1]}.")
+
+
 def adapt_house_style(text: str, options: Options) -> Adapted:
     lines = text.split("\n")
     rows = [index for index, line in enumerate(lines)
@@ -212,11 +225,18 @@ def adapt_house_style(text: str, options: Options) -> Adapted:
         if match and match.group(1) != options.regime:
             raise InitializeError(f"{HOUSE_STYLE}: the facade prefix is already "
                                   f"{match.group(1)}_, not {options.regime}_; change it by hand")
-        return text, []
+    notes = []
     for index in rows:
         lines[index] = lines[index].replace("<REGIME>", options.regime)
-    return "\n".join(lines), [f"replace <REGIME> with {options.regime} in {len(rows)} row(s) of "
-                              "the naming table"]
+    if rows:
+        notes.append(f"replace <REGIME> with {options.regime} in {len(rows)} row(s) of the "
+                     "naming table")
+    adapted, requests = REGIME_REQUEST.subn(lambda _: regime_paragraph(options.regime),
+                                            "\n".join(lines), count=1)
+    if requests:
+        notes.append("replace the paragraph that asks for <REGIME> to be replaced with one that "
+                     f"names the prefix {options.regime}_")
+    return adapted, notes
 
 
 def table_rows(lines: list[str], header: str) -> list[int]:

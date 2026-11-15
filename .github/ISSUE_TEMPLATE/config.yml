@@ -1,6 +1,6 @@
 blank_issues_enabled: false
 # Both links must point to this repository; Repository integrity fails
-# otherwise. Update them after creating a repository from the template.
+# otherwise.
 contact_links:
   - name: "🔒 Report a security vulnerability privately"
     url: "https://github.com/danielep71/K-TEMPLATE/security/policy"
