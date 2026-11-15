@@ -320,7 +320,15 @@ class WorkflowControlTests(unittest.TestCase):
         # A task branch's head is checked by its pull request run; a second
         # run on the push would only duplicate it.
         self.assertIsNone(triggers['pull_request'])
-        self.assertEqual(triggers['push'], {'branches': ['main', 'release/**']})
+        # The default branch, by its name in this repository, and the release
+        # branches. codeql_default_branch() in tools/check_repository.py checks
+        # that the name is the default branch's, so a renamed one passes here.
+        self.assertEqual(set(triggers['push']), {'branches'})
+        branches = triggers['push']['branches']
+        self.assertEqual(len(branches), 2, branches)
+        self.assertIn('release/**', branches)
+        default = next(name for name in branches if name != 'release/**')
+        self.assertNotIn('*', default)
         self.assertIn('workflow_dispatch', triggers)
 
     def test_integrity_cancels_only_a_superseded_pull_request_run(self):
