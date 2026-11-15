@@ -32,6 +32,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import check_changelog  # noqa: E402
 import check_repository  # noqa: E402
 import initialize_repository as initialize  # noqa: E402
+import vba_lexer  # noqa: E402
 from check_repository import Check, Context  # noqa: E402
 from initialize_repository import InitializeError, Options  # noqa: E402
 
@@ -128,12 +129,17 @@ RELEASING = """# Releasing
 
 HOUSE_STYLE = """# House style
 
-Replace `<REGIME>` with the project's short name, once, in this table.
+## Naming
+
+Replace `<REGIME>` with the project's short name, such as `SACCR` or `LCR`,
+once, in this table. The checks accept any prefix while it is `<REGIME>_`.
 
 | Element | Convention | Example |
 | --- | --- | --- |
 | Public facade module | `<REGIME>_` plus subject | `<REGIME>_Functions` |
 | Enum and member | `<REGIME>` plus noun | `<REGIME>RunStatus`, `rsFailed` |
+
+A later paragraph that names `<REGIME>` keeps it.
 """
 
 # The template's evidence: a tested environment and a host behaviour row that
@@ -214,13 +220,35 @@ class AdaptationTests(unittest.TestCase):
         self.assertEqual(added, adapted.replace('"release/0.1.0"', "release/0.1.0"))
         self.assertIn("    directory: /tools\n    target-branch: release/0.1.0\n", added)
 
-    def test_house_style_takes_the_regime_in_its_table_only(self) -> None:
+    def test_house_style_takes_the_regime_in_its_table_and_the_request_above_it(self) -> None:
         adapted = self.assertIdempotent(initialize.adapt_house_style, HOUSE_STYLE)
         self.assertIn("| `LCR_` plus subject | `LCR_Functions` |", adapted)
         self.assertIn("`LCRRunStatus`", adapted)
-        self.assertIn("Replace `<REGIME>` with the project's short name", adapted)
+        # The request to replace the placeholder becomes a statement of the prefix.
+        self.assertIn("## Naming\n\nThe project's short name is `LCR`. The [static checks]"
+                      "(#static-checks)\nread the facade prefix, `LCR_`, from this table; the "
+                      "reserved prefixes\nare `CORE_`, `TEST_`, `EX_` and `M_`.\n\n| Element",
+                      adapted)
+        self.assertNotIn("Replace `<REGIME>`", adapted)
+        self.assertNotIn("while it is", adapted)
+        self.assertIn("A later paragraph that names `<REGIME>` keeps it.", adapted)
         with self.assertRaisesRegex(InitializeError, "already LCR_, not FRTB_"):
             initialize.adapt_house_style(adapted, Options(REPOSITORY, "FRTB"))
+        # A table set by hand still has its request replaced, once.
+        by_hand = HOUSE_STYLE.replace("| `<REGIME>_` plus subject | `<REGIME>_Functions` |",
+                                      "| `LCR_` plus subject | `LCR_Functions` |") \
+            .replace("| `<REGIME>` plus noun | `<REGIME>RunStatus`", "| `LCR` plus noun | "
+                     "`LCRRunStatus`")
+        self.assertEqual(initialize.adapt_house_style(by_hand, OPTIONS)[0], adapted)
+
+    def test_the_real_house_style_names_the_prefix_and_no_placeholder(self) -> None:
+        text = (ROOT / vba_lexer.HOUSE_STYLE).read_text(encoding="utf-8")
+        if "<REGIME>" not in text:
+            self.skipTest("the house style already names the project's prefix")
+        adapted, notes = initialize.adapt_house_style(text, OPTIONS)
+        self.assertEqual(len(notes), 2, notes)
+        self.assertNotIn("<REGIME>", adapted)
+        self.assertIn("The project's short name is `LCR`.", adapted)
 
     def test_tested_environments_lose_their_rows_but_keep_the_header(self) -> None:
         adapted = self.assertIdempotent(initialize.adapt_tested_environments, INSTALLATION)

@@ -165,8 +165,8 @@ A case runner tests the workbook as a user runs it: it writes a test case's
 inputs to the input sheets, runs the calculation through its public entry
 point, compares the outputs with the case's expected values within the case's
 tolerance, and restores the sheets. It needs the input and result areas of the
-[workbook contract](WORKBOOK_CONTRACT.md), which the template does not lay out
-yet, so it ships no runner. The suite's runner calls one case procedure per
+[workbook contract](WORKBOOK_CONTRACT.md), which the repository does not lay
+out yet, so it ships no runner. The suite's runner calls one case procedure per
 test case, `Case<Name>`, which follows this skeleton; it uses the contract's
 illustrative `Inputs_Settings` area and `M_Run.RunCalculation` entry point,
 and the constant `SETTING_ROWS`, the number of rows the contract fixes for
@@ -268,7 +268,7 @@ End Sub
 A volume benchmark times the calculation on a large synthetic input. Its
 timing depends on the host and its load, so it is never evidence that a
 figure is right, and it stays outside the certification. A benchmark module
-follows these conventions; the template ships none:
+follows these conventions; none ships with the harness:
 
 - **Name.** `TEST_Benchmark` plus a subject, such as
   `TEST_BenchmarkTotals`, in `tests/modules/`, so that a development build
@@ -422,7 +422,7 @@ holds what an Excel run must leave as evidence:
   certification entry point, counts, `log` and `certification_log`,
   `results` when it records results, and `runner` when its runner is not
   `RunSuite`, run in `NORMAL` mode after the example
-  suite; empty in the template, and never a
+  suite; empty until the project adds its own, and never a
   [volume benchmark](#volume-benchmarks);
 - `modes`: the example suite's modes in run order, the log each one saves and whether
   it must pass (only `NORMAL`);

@@ -257,7 +257,7 @@ class TemplateOnlyContentTests(unittest.TestCase):
         block = re.search(r'<!-- template-only:start -->(.*?)<!-- template-only:end -->',
                           agents, re.S)
         if block is None:
-            self.skipTest('no template-only section (generated repository)')
+            self.skipTest('no template-only section (not the template)')
         names = set(re.findall(r'`[\w.-]+/([\w.-]+)`', block.group(1)))
         self.assertTrue(names, 'the template-only section names no reference repository')
         outside = agents.replace(block.group(0), '')

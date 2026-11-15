@@ -135,12 +135,12 @@ def git(root: Path, *args: str) -> str:
 # Checks that read files or Git, without a separate tool.
 
 def template_only(context: Context) -> list[Finding]:
-    """A generated repository has deleted the template-only section of AGENTS.md."""
+    """Only the template keeps the template-only section of AGENTS.md."""
     text = (context.root / "AGENTS.md").read_text(encoding="utf-8") \
         if (context.root / "AGENTS.md").is_file() else ""
     if context.is_template is False and "template-only:start" in text:
         return [("AGENTS.md", "Delete the template-only section of AGENTS.md, including its "
-                              "markers, in a generated repository.")]
+                              "markers: only the template keeps it.")]
     return []
 
 
@@ -150,8 +150,8 @@ def contact_links(context: Context) -> list[Finding]:
     if not (context.root / path).is_file():
         return []
     expected = f"https://github.com/{str(context.repository).lower()}/"
-    return [(path, f"Contact link {url} does not point to {context.repository}; update it "
-                   "after creating a repository from the template.")
+    return [(path, f"Contact link {url} does not point to {context.repository}; point it "
+                   "there.")
             for url in CONTACT_URL.findall((context.root / path).read_text(encoding="utf-8"))
             if not url.lower().startswith(expected)]
 
@@ -350,6 +350,7 @@ def checks(context: Context) -> list[Check]:
         Check("changelog", changelog),
         Check("generated-docs", [python, "tools/render_docs.py", "--check"]),
         Check("restated-counts", [python, "tools/check_restated_counts.py"]),
+        Check("template-wording", [python, "tools/check_template_wording.py"]),
         Check("markdown-links", [python, "tools/check_links.py"]),
         Check("documented-commands", [python, "tools/check_doc_commands.py"]),
         # Every check of this list that can fail the run, this one included, needs a

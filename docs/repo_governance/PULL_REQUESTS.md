@@ -39,8 +39,8 @@ request open and record what blocks it.
 ## 🧪 Excel run
 
 CI cannot run Excel. A pull request that changes VBA source, a workbook layout
-or a test case that runs in Excel keeps the template's *Excel run* block, and
-records a run on the exact commit of the pull request:
+or a test case that runs in Excel keeps the *Excel run* block of the pull
+request template, and records a run on the exact commit of the pull request:
 
 - the commit, the Excel build and bitness, and the Windows version;
 - whether **Debug → Compile VBAProject** passed, or `ON_DEMAND` as the

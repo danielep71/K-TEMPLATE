@@ -79,7 +79,7 @@ that keeps them honest.
 GitHub copies files from a template, not its settings. In order:
 
 1. Create the repository with **Use this template**. GitHub copies the
-   template's default branch as it is at that moment, not a release tag:
+   default branch of this template as it is at that moment, not a release tag:
    record the template commit the new repository came from, or the release
    tag when the default branch equals it, so that later template changes
    can be compared with it.
@@ -97,43 +97,11 @@ GitHub copies files from a template, not its settings. In order:
    branch, and `--remove-traffic-badges` to remove the badges. Review the diff
    and commit it.
 
-   <details>
-   <summary><b>What the initializer changes, and what Repository integrity checks</b></summary>
-
-   <br>
-
-   It deletes the template-only section of `AGENTS.md`, with its markers,
-   points the two contact links in `.github/ISSUE_TEMPLATE/config.yml` and
-   the traffic badges at the top of this README to the new repository,
-   removes `target-branch` from `.github/dependabot.yml`, replaces the
-   entries and the link references of `CHANGELOG.md` with an empty
-   `[Unreleased]` section of the new repository and restores the
-   introduction's "No version has been released" sentence if it is missing,
-   deletes `VERSION` if the template has one (it exists once a template
-   release is prepared) and sets the release rows of *Current status* in
-   `RELEASING.md` to say that nothing is released yet, since both describe
-   the template's releases, and replaces `<REGIME>` in the naming table of
-   `docs/VBA_HOUSE_STYLE.md`. With the changelog's entries it also removes
-   the template's evidence, which cites the template's own commits and
-   issues: the rows of the *Tested environment* table of `INSTALLATION.md`,
-   and the issue numbers of the *Host behaviour* table of
-   `docs/methodology/VALIDATION_PLAN.md`, which become a dash. You can then
-   delete
-   `tools/initialize_repository.py` and `tests/test_initialize_repository.py`:
-   nothing else uses them. Without the initializer, make the same edits by
+   The setup guide's
+   [*Template cleanup*](docs/setup/REPOSITORY_SETUP.md#-before-you-start)
+   lists what the initializer changes, and what **Repository integrity**
+   checks until it is done. Without the initializer, make the same edits by
    hand.
-
-   **Repository integrity** fails while the `AGENTS.md` section remains, a
-   contact link or traffic badge names another repository, `target-branch`
-   names a branch that does not exist, or a link reference of `CHANGELOG.md`
-   points to another repository. Once the changelog holds no dated release,
-   it also fails while `VERSION` exists, the introduction lacks the "No
-   version has been released" sentence, or *Current status* does not say that
-   no version is released and that `VERSION` does not exist. It does not
-   check the changelog's entries or `<REGIME>`: replace them by hand, or let
-   the initializer do it.
-
-   </details>
 
 3. Enable Actions and let **Repository integrity** pass on the default branch.
 4. Apply and verify the settings baseline, as the

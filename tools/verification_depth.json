@@ -86,7 +86,7 @@
       "proofs": [
         "tests.test_check_repository.FileCheckTest.test_template_only_content"
       ],
-      "negative_claim": "a generated repository whose AGENTS.md keeps the template-only section is reported",
+      "negative_claim": "with --template false, an AGENTS.md that keeps the template-only section is reported",
       "state": "green"
     },
     {
@@ -329,6 +329,20 @@
         "tests.test_check_restated_counts.RestatedCounts.test_main_reports_and_exits"
       ],
       "negative_claim": "a count of a single-source record restated by hand in tracked Markdown, an unused or unexplained allowed restatement and an unreadable source fail",
+      "state": "green"
+    },
+    {
+      "check": "template-wording",
+      "checker": "python tools/check_template_wording.py",
+      "proofs": [
+        "tests.test_check_template_wording.TemplateWording.test_the_old_sentences_fail_with_file_line_and_phrase",
+        "tests.test_check_template_wording.TemplateWording.test_case_line_breaks_comment_marks_and_apostrophes",
+        "tests.test_check_template_wording.TemplateWording.test_only_the_template_only_section_of_agents_is_left_out",
+        "tests.test_check_template_wording.TemplateWording.test_allowed_uses",
+        "tests.test_check_template_wording.TemplateWording.test_tracked_files_that_cannot_be_listed_fail",
+        "tests.test_check_template_wording.TemplateWording.test_main_reports_and_exits"
+      ],
+      "negative_claim": "a tracked text file that holds one of the phrases of PHRASES, also across a line break or comment marks, outside the template-only section of AGENTS.md, is reported with its file, line and phrase; an allowed use that matches nothing or has no reason, and tracked files that cannot be listed, are reported",
       "state": "green"
     },
     {

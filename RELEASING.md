@@ -150,9 +150,8 @@ python tools/check_repository.py --strict --ci --repository OWNER/REPOSITORY \
   --default-branch DEFAULT_BRANCH --template false
 ```
 
-Use `--template true` in the template repository itself. `git status --short`
-must print nothing, `--ci` fails the run if the checks leave a file changed,
-and `test-results/integrity/report.json` must name
+`git status --short` must print nothing, `--ci` fails the run if the checks
+leave a file changed, and `test-results/integrity/report.json` must name
 `FULL_SHA` with `"dirty": false` and `"status": "pass"`; keep it with the
 certification record. Confirm that **Repository
 integrity** is green on the same SHA on the default branch, and review the
@@ -467,7 +466,7 @@ problem. Use synthetic data in examples and screenshots; an image needs an
 entry in `.github/binary-allowlist.json`.
 
 The PDF is built with the certification (step 4), attached to the release
-in step 7, and never committed. The template installs no PDF tool: choose one and record it, with its version, in
+in step 7, and never committed. The repository installs no PDF tool: choose one and record it, with its version, in
 the certification record. With [Pandoc](https://pandoc.org/) and a PDF engine
 it uses, such as a LaTeX distribution, from a clean checkout of the
 candidate:

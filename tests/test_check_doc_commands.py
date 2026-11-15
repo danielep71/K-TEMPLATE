@@ -292,8 +292,8 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(code, 0, output.getvalue())
         self.assertIn("documented-commands: PASS", output.getvalue())
 
-    # A generated repository may retire the setup guide (its *Optional: retire
-    # the setup tooling* steps); the list has nothing to match then.
+    # The repository may retire the setup guide (its *Optional: retire the
+    # setup tooling* steps); the list has nothing to match then.
     @unittest.skipUnless(SETUP_GUIDE.is_file(), f"{SETUP_GUIDE.relative_to(ROOT)} is retired")
     def test_removed_once_run_matches_the_setup_guide(self) -> None:
         guide_text = SETUP_GUIDE.read_text(encoding="utf-8")

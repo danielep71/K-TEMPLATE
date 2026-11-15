@@ -131,8 +131,8 @@ raises the count; for the same reason they never raise a
 
 The README shows the three badges for this repository. **Repository integrity**
 fails while a README badge reads another repository's `traffic-history` branch:
-after **Use this template**, point the badges at the new repository, or remove
-them if you do not enable collection.
+point the badges at this repository, or remove them if you do not enable
+collection.
 
 ### Merge rules
 

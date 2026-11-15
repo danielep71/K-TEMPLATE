@@ -11,7 +11,7 @@
 
 - Describe this repository's current files, configuration, and behavior.
 - Do not insert references to other repositories, copied-from history, unrelated projects, or conversation context into operational documentation.
-- Make reusable guidance self-contained so it remains accurate in newly generated repositories.
+- Make reusable guidance self-contained, so that it stays accurate in every repository that holds a copy of it.
 - Keep necessary platform/dependency documentation links and third-party license notices. Put licensing attribution in dedicated license files, not operational guides.
 - Do not invent project history, capabilities, or dependencies.
 
@@ -55,6 +55,8 @@ Preserve useful policies and assumptions for file types, tooling, and reserved p
 This section applies only to the template repository. In a repository generated from the template, delete it together with its markers; **Repository integrity** fails until you do.
 
 - This repository is the template that new workbook repositories are created from. Keep its files generic: each one must still be correct after it is copied into a new repository.
+- Word each file so that it is true both here and in a repository created from the template: write "empty until the project adds its own", not "empty in the template". Put a step that only the template needs in `docs/setup/REPOSITORY_SETUP.md` or in this section, or let the initializer adapt the sentence and list the edit. The `template-wording` check of **Repository integrity** fails on the phrases its tool lists.
+- When releasing this repository, run the repository checks of `RELEASING.md` with `--template true`, not `--template false`.
 - My reference repositories are `danielep71/K-SFTs` (primary) and `danielep71/K-SACCR` (secondary). Compare repository settings, issue labels, issue forms, and automation with them before changing the template.
 - My other workbook repositories, `danielep71/K-FRTB-ASA`, `danielep71/K-FRTB-SSA`, `danielep71/K-LCR`, and `danielep71/K-NSFR`, are also compared: adopt what they do better, and report where they lag behind the template.
 - My portfolio hub, `danielep71/K-Risk-Engines`, holds no workbook but shares labels, traffic collection, link checks and review rules with the template; compare those parts with it too.

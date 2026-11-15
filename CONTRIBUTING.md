@@ -189,7 +189,7 @@ either, `changelog` runs without `--repository`.
 | `labels-catalogue` | `node .github/scripts/labels-sync.mjs --mode validate` |
 | `labels-drift-self-test` | `node .github/scripts/labels-drift.mjs --self-test` |
 | `issue-configuration` | `python tools/check_issues.py --check-config` |
-| `template-only-content` | Built in: A generated repository has deleted the template-only section of AGENTS.md. |
+| `template-only-content` | Built in: Only the template keeps the template-only section of AGENTS.md. |
 | `issue-contact-links` | Built in: The issue forms' contact links point to this repository. |
 | `readme-traffic-badges` | Built in: The README's traffic badges read this repository's traffic. |
 | `binaries` | `python tools/check_binaries.py` |
@@ -213,6 +213,7 @@ either, `changelog` runs without `--repository`.
 | `changelog` | `python tools/check_changelog.py --repository OWNER/REPOSITORY` |
 | `generated-docs` | `python tools/render_docs.py --check` |
 | `restated-counts` | `python tools/check_restated_counts.py` |
+| `template-wording` | `python tools/check_template_wording.py` |
 | `markdown-links` | `python tools/check_links.py` |
 | `documented-commands` | `python tools/check_doc_commands.py` |
 | `verification-depth` | `python tools/check_verification_depth.py` |
@@ -229,7 +230,10 @@ blocks between `BEGIN generated` and `END generated` markers from the code;
 the renderer in `tools/render_docs.py`, never the block. Outside a block, link
 a count's source instead of copying the count: `restated-counts` fails on a
 count of cases, assertions, modes, checks, datasets or finding codes written
-by hand, as the docstring of `tools/check_restated_counts.py` lists. A check whose tool or GitHub
+by hand, as the docstring of `tools/check_restated_counts.py` lists, and
+`template-wording` fails on a phrase that describes the repository template
+rather than the repository the file is in, as the docstring of
+`tools/check_template_wording.py` lists. A check whose tool or GitHub
 context is missing locally, such as Ruff or the default branch, is reported as
 skipped, as is `dependabot-target-branches` when a `target-branch` has no
 remote-tracking branch and the `origin` remote cannot be asked whether it

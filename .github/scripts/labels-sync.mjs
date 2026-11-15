@@ -103,8 +103,8 @@ function validateSortedNames(names, location) {
   return [];
 }
 
-// Overlays are named label sets besides the core: a generated repository
-// defines its own, such as one per regulatory regime, and selects them.
+// Overlays are named label sets besides the core: the repository defines
+// its own, such as one per regulatory regime, and selects them.
 function validateOverlays(overlays, seen) {
   if (!overlays || typeof overlays !== "object" || Array.isArray(overlays)) {
     return ["overlays must be an object mapping each overlay name to its label array"];

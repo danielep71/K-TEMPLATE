@@ -299,11 +299,11 @@ The check then:
   install the implementation in the **Repository integrity** workflow for the
   comparison to run on every pull request.
 
-With no registry, or no adapter in it, as in the template, the check passes
-and says that nothing was cross-checked. An adapter and its implementation
-are test tools, never a runtime dependency of the workbook. A match shows that
-the implementation and the expected file agree; what class a value has is
-still decided by the [reference classes](#reference-classes).
+With no registry, or no adapter in it, as before the project registers one,
+the check passes and says that nothing was cross-checked. An adapter and its
+implementation are test tools, never a runtime dependency of the workbook. A
+match shows that the implementation and the expected file agree; what class a
+value has is still decided by the [reference classes](#reference-classes).
 
 <a id="tolerance"></a>
 
@@ -388,7 +388,7 @@ blocks, and so can be tighter than what a release may promise.
 - **Frozen.** A contract may be frozen only with at least `min_holdout_cases`
   holdout cases, and only when every expected value of its quantities in
   them is `published` or `independent`. A contract on an illustrative
-  calculation stays `draft`, as the template's `ACC-01` does.
+  calculation stays `draft`, as the illustrative `ACC-01` does.
 - **Frozen is kept.** Once a release tag holds a frozen contract, it is never
   removed or returned to `draft`, even by deleting the registry. With the
   same `decision`, it may only get stricter: a lower threshold, or added
@@ -554,10 +554,10 @@ draft keeps its exposures; it is sealed and prints them.
 
 A contract measured before the record existed is recorded once, with its
 next run; its decision should state that the holdout was measured before.
-The template's record holds no exposure: its only contract, `ACC-01`, is
-illustrative, so it stays draft and its holdout stays sealed. A repository
-generated from the template starts with the same empty record and records
-its first exposure when it freezes its first contract.
+While the only contract is the illustrative `ACC-01`, the record holds no
+exposure: an illustrative contract stays draft and its holdout stays sealed.
+The record gets its first exposure when the project freezes its first
+contract.
 
 <a id="invariants"></a>
 
@@ -662,10 +662,10 @@ An invariant does not repeat the per-case check: every output of a contract's
 cases already fails outside its own tolerance. When the expected values keep
 a `monotone` or `sum` invariant exactly, results within their own tolerances
 keep it too, so such an invariant adds most for the outputs that no contract
-measures. A `bounds` invariant is stricter than any tolerance. The template's
-registry declares only the illustrative `INV-01`: the illustrative total is a
-sum of notional amounts, which the illustrative data contract requires to be
-at least 0. Like the contract on the same cases, it validates nothing.
+measures. A `bounds` invariant is stricter than any tolerance. Until the
+project adds its own, the registry declares only the illustrative `INV-01`:
+the illustrative total is a sum of notional amounts, which the illustrative
+data contract requires to be at least 0. Like the contract on the same cases, it validates nothing.
 
 <a id="categories"></a>
 

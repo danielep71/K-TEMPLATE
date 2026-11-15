@@ -8,7 +8,7 @@
 #   repository evidence.
 #
 # REPOSITORY POLICY
-#   These defaults also cover file types used by generated repositories.
+#   These defaults also cover file types the repository may not use yet.
 #   - Exported VBA source and UserForm companions are version-controlled.
 #   - Workbooks, Access databases and macro-enabled Office files are ignored
 #     unless an exact path is approved. Copies of regulatory sources in
