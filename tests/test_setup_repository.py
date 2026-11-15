@@ -465,7 +465,7 @@ class SetupTests(unittest.TestCase):
         self.assertIn(f'DIFF ruleset "Protect main" ({main["id"]}) bypass_actors: observed', output)
 
     def test_apply_refuses_a_ruleset_it_cannot_verify(self) -> None:
-        report = {'visibility': {'matches': True}, 'settings': [], 'security': [],
+        report = {'visibility': {'matches': True}, 'settings': [], 'security': [], 'actions': [],
                   'rulesets': [{'name': 'Protect main', 'id': 1, 'status': 'unknown', 'differences': []}]}
         state = {'metadata': {'permissions': {'admin': True}}}
         with self.assertRaisesRegex(setup.SetupError, 'unknown: ruleset "Protect main"'):
@@ -899,6 +899,24 @@ class SetupTests(unittest.TestCase):
         # One read per endpoint, even for two settings.
         self.assertEqual(self.api.reads.count(REPO + '/actions/permissions/workflow'), 1)
 
+    def test_apply_refuses_an_unknown_actions_setting_before_any_write(self) -> None:
+        self.api.forbidden.add('actions/permissions/workflow')
+        journal = self.approve()
+        with self.assertRaisesRegex(setup.SetupError, 'unknown: default_workflow_permissions, '
+                                                      'can_approve_pull_request_reviews\\. Rerun preview'):
+            self.run_setup()
+        self.assertEqual(self.api.writes, [])
+        self.assertFalse(journal.exists())
+        # Every unread setting is named; the fork policy, which a private repository
+        # does not use, is not, even when its endpoint would refuse the read too.
+        self.api.forbidden |= set(ACTIONS)
+        self.approve()
+        with self.assertRaises(setup.SetupError) as caught:
+            self.run_setup()
+        self.assertIn('unknown: sha_pinning_required, default_workflow_permissions, '
+                      'can_approve_pull_request_reviews, retention_days. ', str(caught.exception))
+        self.assertEqual(self.api.writes, [])
+
     def test_fork_approval_policy_applies_to_public_repositories_only(self) -> None:
         self.configure()
         self.api.actions['actions/permissions/fork-pr-contributor-approval']['approval_policy'] = \
@@ -1238,6 +1256,56 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.run_setup(), 0)
         self.assertEqual(self.api.writes, [])
         self.assertEqual(history['name'], 'History')
+
+    def test_the_digest_binds_the_definition_of_a_covering_ruleset(self) -> None:
+        self.configure()
+        other: dict[str, Any] = {
+            'name': 'Tags', 'target': 'tag', 'enforcement': 'active', 'bypass_actors': [],
+            'conditions': {'ref_name': {'include': ['~ALL'], 'exclude': []}},
+            'rules': [{'type': 'deletion'}], 'source_type': 'Repository', 'id': 99}
+        self.api.rules.append(other)
+        history = self.rename('Protect traffic history', 'History')
+        before = self.digest()
+        # A ruleset that covers no configured one leaves the approval valid when its rules change.
+        other['rules'].append({'type': 'update'})
+        self.assertEqual(self.digest(), before)
+        # Stricter still covers, so the plan stays empty, but the approval must go stale.
+        history['rules'].append({'type': 'update'})
+        self.assertEqual(self.ruleset_row('Protect traffic history')['status'], 'covered')
+        self.assertNotEqual(self.digest(), before)
+        self.args.approve_plan = before
+        self.args.journal = self.journals / 'stale.json'
+        self.args.apply = True
+        with self.assertRaisesRegex(setup.SetupError, 'plan differs from the approved one'):
+            self.run_setup()
+        self.assertFalse(self.args.journal.exists())
+        self.approve()
+        self.assertEqual(self.run_setup(), 0)
+        self.assertEqual(self.api.writes, [])
+
+    def test_a_digest_without_covering_rulesets_keeps_its_earlier_form(self) -> None:
+        self.configure()
+        config = setup.load_config(self.args.config)
+        state = setup.observe(self.api, 'example/project', config)
+        report = setup.assess(config, state)
+        self.assertEqual([row['status'] for row in report['rulesets']], ['matches'] * len(config['rulesets']))
+        steps = setup.plan(config, report, 'example/project')
+
+        def stable(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return [{key: value for key, value in row.items() if key != 'source'} for row in rows]
+        document = {
+            'repository': 'example/project', 'configuration_sha256': 'c' * 64,
+            'observed': {'visibility': report['visibility'], 'settings': report['settings'],
+                         'security': stable(report['security']), 'actions': stable(report['actions']),
+                         'rulesets': report['rulesets'],
+                         'unmanaged_rulesets': sorted(report['unmanaged_rulesets']),
+                         'inherited_rulesets': sorted(report['inherited_rulesets'])},
+            'writes': [{'method': m, 'endpoint': e, 'payload': p} for m, e, p in steps],
+        }
+        expected = hashlib.sha256(json.dumps(document, sort_keys=True, separators=(',', ':'))
+                                  .encode('utf-8')).hexdigest()
+        self.assertEqual(setup.plan_digest('example/project', 'c' * 64, report, steps, state['rulesets']),
+                         expected)
 
     def test_coverage_follows_all_refs_and_the_default_branch(self) -> None:
         self.configure()
