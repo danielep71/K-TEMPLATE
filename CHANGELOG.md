@@ -274,6 +274,14 @@ Use only the categories an entry needs.
   under the source directories; an untracked file there is no longer
   formatted or checked, and a run outside a Git repository is an error with
   exit status 2 (#502).
+- The **Sync issue labels** dry run names, for each deletion a real run would
+  refuse, up to ten of the issues and pull requests that still use the label,
+  in number order, and adds `and others` when more do, such as
+  `used by #3, #7 and others`; the refusal of a real run names them too. A
+  plain name still costs one request, now a page of eleven; a name with a
+  comma collects the numbers from every page it reads. An item without a
+  valid number stops the run. A real run refuses the same deletions as
+  before (#534).
 
 ### Fixed
 
