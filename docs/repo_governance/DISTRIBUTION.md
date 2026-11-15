@@ -90,23 +90,37 @@ when it exists, holds aggregate counts only; it is scanned with the rest.
 ## 📗 Workbooks
 
 A workbook holds content that its exported source and a text diff do not
-show. **Repository integrity** already fails a committed Office Open XML
-package, other than a regulatory source copy, that carries macros or names a
-person or organization in `docProps/core.xml` (author, last editor) or
-`docProps/app.xml` (company, manager); it checks only the current tree.
-Open each workbook ever committed in Excel and run **File → Info → Check for
-Issues → Inspect Document**, or unzip a `.xlsx`, `.xlsm` or `.xltx` and read
-its parts. Look for:
+show. A workbook opened or saved in a Microsoft 365 environment can also
+carry the paths, user names, sensitivity label and SharePoint properties of
+that environment. `tools/check_workbook_privacy.py` reports them for any
+Office Open XML package, by part and kind, never by value:
 
-| Content | Where it is stored |
-| --- | --- |
-| Author, last editor, company and manager | `docProps/core.xml`, `docProps/app.xml` |
-| Hidden and very hidden sheets | `state` attributes in `xl/workbook.xml` |
-| Defined names, including hidden ones | `definedNames` in `xl/workbook.xml` |
-| Links to other workbooks and data connections | `xl/externalLinks/`, `xl/connections.xml` |
-| Comments and threaded comments, with their authors | `xl/comments*.xml`, `xl/threadedComments/`, `xl/persons/` |
-| Cached source data of pivot tables | `xl/pivotCache/` |
-| Values left in cells, rows or columns outside the visible range | the sheet parts under `xl/worksheets/` |
+```sh
+python tools/check_workbook_privacy.py FILE
+```
+
+**Repository integrity** fails a committed Office Open XML package, other
+than a regulatory source copy, that carries macros or any of its findings,
+and `tools/release.py verify-published` fails an attached workbook with one.
+Both check only the current files. Open each workbook ever committed in Excel
+and run **File → Info → Check for Issues → Inspect Document**, or unzip a
+`.xlsx`, `.xlsm` or `.xltx` and read its parts. Look for the content below;
+*Checked* marks what Repository integrity and `verify-published` check:
+
+| Content | Where it is stored | Checked |
+| --- | --- | :---: |
+| Author, last editor, company and manager | `docProps/core.xml`, `docProps/app.xml` | ✅ |
+| Folder of the last save, any absolute path | `x15ac:absPath` in `xl/workbook.xml` | ✅ |
+| OneDrive and SharePoint paths and URLs, network shares, `file:` URLs and paths under a user profile | any XML part, relationship targets in `_rels/` parts included, and the VBA project, `xl/vbaProject.bin` | ✅ |
+| The user who reserved the file and the users of shared-workbook revisions | `fileSharing` in `xl/workbook.xml`, `xl/revisions/` | ✅ |
+| Microsoft Purview sensitivity labels | `MSIP_Label_*` properties in `docProps/custom.xml`, `docMetadata/LabelInfo.xml` | ✅ |
+| SharePoint library properties and schemas, such as `ContentTypeId` or `_dlc_DocId` | `docProps/custom.xml`, `customXml/` | ✅ |
+| Hidden and very hidden sheets | `state` attributes in `xl/workbook.xml` | |
+| Defined names, including hidden ones | `definedNames` in `xl/workbook.xml` | |
+| Links to other workbooks and data connections | `xl/externalLinks/`, `xl/connections.xml` | paths only |
+| Comments and threaded comments, with their authors | `xl/comments*.xml`, `xl/threadedComments/`, `xl/persons/` | authors and people only |
+| Cached source data of pivot tables | `xl/pivotCache/` | |
+| Values left in cells, rows or columns outside the visible range | the sheet parts under `xl/worksheets/` | paths only |
 
 The VBA project inside a workbook can differ from the exported source in the
 repository. Export the modules from the workbook itself and read them too.

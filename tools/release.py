@@ -63,6 +63,13 @@ Subcommands, all read-only apart from the files that bundle writes:
   - its assets are exactly NAME-VERSION-source.tar.gz, SHA256SUMS and each
     FILE given; SHA256SUMS records exactly the bundle and its SHA-256, and
     each FILE has the SHA-256 given;
+  - each FILE that is an Office Open XML package, or is named like one
+    (.xlsx, .xlsm, .docx and the like), has no finding of
+    tools/check_workbook_privacy.py, whatever its SHA-256: no OneDrive or
+    SharePoint path or URL, absolute path under a user profile, person or
+    organization, Purview sensitivity label or SharePoint metadata. A file
+    named like a package that is not one, such as an encrypted workbook,
+    cannot be checked and fails;
   - gh attestation verify passes on the bundle, as built by the Release
     workflow at TAG, unless the notes state that it is not attested;
   - with --milestone, milestone N is closed and has no open issue.
@@ -92,6 +99,7 @@ from typing import TYPE_CHECKING
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import check_workbook_privacy  # noqa: E402
 from check_changelog import CHANGELOG, VERSION, released_versions  # noqa: E402
 
 if TYPE_CHECKING:
@@ -121,6 +129,10 @@ EXCEL_EVIDENCE = "Excel evidence:"
 EXCEL_LINE = re.compile(r"^Excel evidence: ([0-9a-f]{64}) \(run ([0-9a-f]{40})\)\.[ \t]*$")
 INVARIANT_4 = re.compile(r"^Invariant 4:[ \t]*\S")
 LIST_ITEM = re.compile(r"^[ \t]*[-*][ \t]+(.*)$")
+# The names of Office Open XML packages: an asset named so must be one, so that
+# its content can be checked for private data.
+OFFICE_SUFFIXES = (".xlsx", ".xlsm", ".xltx", ".xltm", ".xlam", ".docx", ".docm", ".dotx",
+                   ".dotm", ".pptx", ".pptm", ".potx", ".potm", ".ppsx", ".ppsm")
 
 # Runs gh with the arguments given and returns the completed process, with
 # stdout and stderr as bytes. Tests replace it with a fake.
@@ -488,6 +500,22 @@ def attestation(repository: str, tag: str, name: str, content: bytes,
                     f"at refs/tags/{tag}")
 
 
+def privacy_facts(name: str, content: bytes) -> list[Fact]:
+    """The facts about the private data of an attached Office package; none for
+    another file."""
+    try:
+        findings = check_workbook_privacy.scan(content)
+    except check_workbook_privacy.NotAPackage as error:
+        if name.lower().endswith(OFFICE_SUFFIXES):
+            return [("FAIL", f"{name} cannot be checked for private data: it is {error}")]
+        return []
+    if not findings:
+        return [("PASS", f"{name} has no finding of tools/check_workbook_privacy.py")]
+    return [("FAIL", f"{name} carries private data: {len(findings)} finding(s) of "
+                     "tools/check_workbook_privacy.py"),
+            *(("FAIL", f"{name}: {finding}") for finding in findings)]
+
+
 def published_assets(repository: str, tag: str, release: dict[str, object],
                      extra: dict[str, str], runner: Runner) -> list[Fact]:
     """The facts about the assets of the release, their digests and attestation."""
@@ -528,6 +556,9 @@ def published_assets(repository: str, tag: str, release: dict[str, object],
                          if digests[name] == recorded else
                          ("FAIL", f"{name} has SHA-256 {digests[name]}, not the recorded "
                                   f"{recorded}"))
+    for name in extra:
+        if name in contents:
+            facts += privacy_facts(name, contents[name])
     if bundle_name in contents:
         if UNATTESTED in str(release.get("body") or ""):
             facts.append(("NOTE", f"{bundle_name} is not attested, as the release notes "

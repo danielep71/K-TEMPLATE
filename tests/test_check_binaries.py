@@ -131,15 +131,39 @@ class BinaryCheckTest(unittest.TestCase):
     def test_an_office_package_with_personal_metadata_fails(self) -> None:
         cases = {
             "creator": ("docProps/core.xml", CORE.format(creator="A. Person", editor="")),
-            "last editor": ("docProps/core.xml", CORE.format(creator="", editor="A. Person")),
-            "company": ("docProps/app.xml", APP.format(company="Firm", manager="")),
-            "manager": ("docProps/app.xml", APP.format(company="", manager="A. Boss")),
+            "lastModifiedBy": ("docProps/core.xml", CORE.format(creator="", editor="A. Person")),
+            "Company": ("docProps/app.xml", APP.format(company="Firm", manager="")),
+            "Manager": ("docProps/app.xml", APP.format(company="", manager="A. Boss")),
         }
-        for label, (part, text) in cases.items():
-            with self.subTest(label=label):
+        for field, (part, text) in cases.items():
+            with self.subTest(field=field):
                 found = self.repository({"tests/fixtures/a-case/variant/input.xlsx":
                                          package(parts={part: text})})
-                self.assertFinding(found, f"{part} names a person or organization")
+                self.assertFinding(found, f"input.xlsx: {part}: person or organization "
+                                          f"({field} is not blank); clear it")
+
+    def test_an_office_package_with_private_data_fails(self) -> None:
+        # One case of each kind; tests/test_check_workbook_privacy.py covers every form.
+        absolute = ('<workbook xmlns:x15ac="http://schemas.microsoft.com/office/'
+                    'spreadsheetml/2010/11/ac"><x15ac:absPath url="C:\\Users\\avery\\'
+                    'OneDrive - Contoso\\"/></workbook>')
+        cases: dict[str, dict[str, str | bytes]] = {
+            "path or URL": {"xl/workbook.xml": absolute},
+            "person or organization": {"xl/persons/person.xml":
+                                       '<personList><person displayName="Avery"/></personList>'},
+            "sensitivity label": {"docMetadata/LabelInfo.xml": "<labelList/>"},
+            "SharePoint metadata": {"customXml/item1.xml":
+                                    '<p:properties xmlns:p="http://schemas.microsoft.com/office/'
+                                    '2006/metadata/properties"/>'},
+        }
+        for kind, parts in cases.items():
+            with self.subTest(kind=kind):
+                found = self.repository({"src/workbook/Template.xlsx": package(parts=parts)})
+                self.assertFinding(found, f"src/workbook/Template.xlsx: {next(iter(parts))}: "
+                                          f"{kind} (")
+                self.assertFalse([finding for finding in found
+                                  if "avery" in finding.lower() or "contoso" in finding.lower()],
+                                 found)
 
     def test_encoding_and_character_references_hide_nothing(self) -> None:
         def utf16(text: str) -> bytes:
@@ -148,7 +172,7 @@ class BinaryCheckTest(unittest.TestCase):
         cases = {
             "utf-16 creator": (package(parts={"docProps/core.xml": utf16(
                 CORE.format(creator="A. Person", editor=""))}),
-                "docProps/core.xml names a person or organization"),
+                "docProps/core.xml: person or organization (creator is not blank)"),
             "utf-16 relationship": (package(parts={"xl/_rels/workbook.xml.rels": utf16(
                 '<Relationships><Relationship Target="vbaProject.bin"/></Relationships>')}),
                 "carries macros"),
@@ -166,11 +190,13 @@ class BinaryCheckTest(unittest.TestCase):
     def test_a_part_that_is_not_xml_fails(self) -> None:
         broken = package(parts={"docProps/app.xml": "<Properties><Company>"})
         self.assertFinding(self.repository({"src/workbook/Template.xlsx": broken}),
-                           "docProps/app.xml cannot be read as XML")
+                           "docProps/app.xml: unreadable (is not well-formed XML, so it "
+                           "cannot be checked)")
 
     def test_regulatory_source_copies_are_not_inspected(self) -> None:
         published = package(parts={"xl/vbaProject.bin": "\0", "docProps/core.xml":
-                                   CORE.format(creator="Regulator", editor="Staff")})
+                                   CORE.format(creator="Regulator", editor="Staff"),
+                                   "docMetadata/LabelInfo.xml": "<labelList/>"})
         self.assertEqual(self.repository({"docs/methodology/sources/SRC-01_template.xlsm":
                                           published}), [])
 
