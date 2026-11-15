@@ -188,8 +188,9 @@ Use only the categories an entry needs.
   Open XML package says about where it was saved and by whom: a OneDrive or
   SharePoint path or URL, an absolute path under a user profile, a network
   share, a `file:` URL or any `x15ac:absPath`, in any XML part or in the
-  text of the VBA project, stored or compressed, in its declared code page
-  or as UTF-16LE, for profile names in any alphabet; a person or organization in
+  text of the VBA project, stored or compressed, in its declared code page,
+  multi-byte ones such as cp936 included, or as UTF-16LE, for profile names
+  in any script, Chinese characters included; a person or organization in
   the document properties, `fileSharing`, threaded-comment people, comment
   authors and shared-workbook revisions, each part found by its usual path
   or by its content type; a Microsoft Purview sensitivity
@@ -199,7 +200,9 @@ Use only the categories an entry needs.
   exits with 1 on a finding and 2 on a file it cannot read. **Repository
   integrity** now fails a committed Office package with any finding, through
   `tools/check_binaries.py`, except the regulatory source copies, and an XML
-  part that declares a DTD is no longer parsed. `tools/release.py
+  part that declares a DTD is no longer parsed. A part is read as XML when its
+  name ends in `.xml` or `.rels`, its declared content type is XML or it has
+  one of these roles, so a renamed part hides nothing. `tools/release.py
   verify-published` fails when an attached `--asset` that is an Office
   package, or is named like one, has a finding, whatever its SHA-256. A
   committed or attached workbook that carries such data fails until it is
