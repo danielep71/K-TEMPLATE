@@ -127,7 +127,14 @@ apply.
   integration's merge commit back, changes no file, and lets the next task
   branch start from the same history as the default branch.
 - Integration and sync pull requests follow the final-head review above, like
-  any other pull request.
+  any other pull request, with one exception. A sync pull request needs no new
+  automated review when its head is the integration merge commit, the diff
+  between the release branch and that head is empty, and the integration pull
+  request's final-head review covered the same tree. Its *Final-head review*
+  then names the integration pull request and its review in place of a new
+  one. **Repository integrity** must still pass on the sync head. A sync pull
+  request that changes any file, for example to resolve a conflict, is
+  reviewed as usual.
 - `.github/dependabot.yml` names the active release branch in `target-branch`.
   Update it when a new release branch opens, or remove it when none is active.
 - GitHub reads some files only from the default branch: the issue forms, this

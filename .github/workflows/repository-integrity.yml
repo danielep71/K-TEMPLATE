@@ -2,7 +2,13 @@ name: Repository integrity
 
 on:
   pull_request:
+  # A pull request's head is checked by its own run; a push is checked only
+  # where it lands: the default branch, listed by name (Repository integrity
+  # fails while it is missing), and the release branches.
   push:
+    branches:
+      - main
+      - "release/**"
   workflow_dispatch:
 
 permissions:

@@ -177,6 +177,14 @@ Use only the categories an entry needs.
 
 ### Changed
 
+- **Repository integrity** runs on every pull request and on pushes to `main`
+  and `release/**` only, no longer a second time on each push to a task
+  branch. The `codeql-default-branch` check also fails while the workflow's
+  push branches omit the default branch (#538).
+- A sync pull request whose head is the integration merge commit, with an
+  empty diff against the release branch and a tree the integration's
+  final-head review covered, needs no new automated review;
+  **Repository integrity** still runs on it (#539).
 - While a release branch is active, commit messages, squash messages and task
   pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
   guide and the pull request template now say: a closing keyword in a commit
