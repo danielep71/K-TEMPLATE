@@ -15,6 +15,8 @@ const LABELS_PER_PAGE = 100;
 const MAX_LABEL_PAGES = 100;
 const ISSUES_PER_PAGE = 100;
 const MAX_ISSUE_PAGES = 100;
+// The issues and pull requests a summary names for a label still in use.
+export const USAGE_SAMPLE = 10;
 const MAX_RATE_LIMIT_RETRIES = 2;
 export const MAX_RETRY_DELAY_MS = 5000;
 
@@ -368,22 +370,46 @@ export async function listLiveLabels(repository, token) {
   throw new Error(`GitHub label pagination exceeded ${MAX_LABEL_PAGES} pages`);
 }
 
-// The issues endpoint covers pull requests; state=all adds closed items.
-export async function labelInUse(repository, token, name, request = githubRequest) {
+// The number of an issue or pull request, a positive integer, or an error:
+// a summary never names an item it cannot read.
+function itemNumber(item) {
+  const number = item?.number;
+  if (!Number.isSafeInteger(number) || number < 1) {
+    throw new Error("GitHub issues response has an item without a valid number");
+  }
+  return number;
+}
+
+// The usage of a label from the numbers of the items that carry it: null when
+// none does, otherwise the lowest USAGE_SAMPLE numbers, ascending, and whether
+// more items carry it.
+export function usageSample(numbers) {
+  const sorted = [...new Set(numbers)].sort((left, right) => left - right);
+  if (sorted.length === 0) return null;
+  return { items: sorted.slice(0, USAGE_SAMPLE), more: sorted.length > USAGE_SAMPLE };
+}
+
+// The issues and pull requests that carry a label: null when none does,
+// otherwise `{ items, more }` as usageSample returns it. The issues endpoint
+// covers pull requests; state=all adds closed items.
+export async function labelUsage(repository, token, name, request = githubRequest) {
   if (!name.includes(",")) {
+    // One page, oldest first, with one item more than the sample: the extra
+    // item says whether more items carry the label, without another request.
     const batch = await request(
       repository,
       token,
       "GET",
-      `/issues?state=all&per_page=1&labels=${encodeURIComponent(name)}`
+      `/issues?state=all&direction=asc&per_page=${USAGE_SAMPLE + 1}&labels=${encodeURIComponent(name)}`
     );
     if (!Array.isArray(batch)) throw new Error("GitHub issues response is not an array");
-    return batch.length > 0;
+    return usageSample(batch.map(itemNumber));
   }
   // The labels filter is a comma-separated list, so it cannot query this name:
   // read the labels of every issue and pull request instead. A malformed page
   // or more pages than the limit throws, so nothing is deleted on a guess.
   const wanted = name.toLowerCase();
+  const numbers = [];
   for (let page = 1; page <= MAX_ISSUE_PAGES; page += 1) {
     const batch = await request(
       repository,
@@ -396,33 +422,43 @@ export async function labelInUse(repository, token, name, request = githubReques
       if (!Array.isArray(item?.labels) || item.labels.some(label => typeof label?.name !== "string")) {
         throw new Error("GitHub issues response has malformed labels");
       }
-      if (item.labels.some(label => label.name.toLowerCase() === wanted)) return true;
+      const number = itemNumber(item);
+      if (item.labels.some(label => label.name.toLowerCase() === wanted)) numbers.push(number);
     }
-    if (batch.length < ISSUES_PER_PAGE) return false;
+    if (batch.length < ISSUES_PER_PAGE) return usageSample(numbers);
   }
   throw new Error(`GitHub issue pagination exceeded ${MAX_ISSUE_PAGES} pages while checking ${JSON.stringify(name)}`);
 }
 
-// The planned deletions that an issue or pull request still carries, read
-// without any change: a dry run previews them, a real run refuses on them.
-export async function deletionsInUse(changes, isInUse) {
+// The planned deletions that an issue or pull request still carries, each as
+// `{ name, items, more }`, read without any change: a dry run previews them,
+// a real run refuses on them. `usageOf(name)` returns what labelUsage returns.
+export async function deletionsInUse(changes, usageOf) {
   const inUse = [];
   for (const change of changes) {
     if (change.action !== "delete") continue;
-    if (await isInUse(change.currentName)) inUse.push(change.currentName);
+    const usage = await usageOf(change.currentName);
+    if (usage !== null) inUse.push({ name: change.currentName, items: usage.items, more: usage.more });
   }
   return inUse;
 }
 
+// Where a label is used, such as "#3, #7 and others": "and others" only when
+// more items carry it than the sample names.
+export function renderUsage(entry) {
+  return `${entry.items.map(number => `#${number}`).join(", ")}${entry.more ? " and others" : ""}`;
+}
+
 export function deletionRefusal(inUse) {
-  return `Refusing to prune labels still used by an issue or pull request: ${inUse.map(name => JSON.stringify(name)).join(", ")}. `
+  const labels = inUse.map(entry => `${JSON.stringify(entry.name)} (used by ${renderUsage(entry)})`);
+  return `Refusing to prune labels still used by an issue or pull request: ${labels.join(", ")}. `
     + "No change was applied. Remove each label from its issues and pull requests, or add it to the catalogue or select its overlay.";
 }
 
 // Deleting a label removes it from every issue and pull request, closed ones
 // included, and cannot be undone: refuse before any change is applied.
-export async function assertSafeDeletions(changes, isInUse) {
-  const inUse = await deletionsInUse(changes, isInUse);
+export async function assertSafeDeletions(changes, usageOf) {
+  const inUse = await deletionsInUse(changes, usageOf);
   if (inUse.length > 0) throw new Error(deletionRefusal(inUse));
 }
 
@@ -522,11 +558,13 @@ function renderSummary({
     lines.push("", "No label changes are required.");
   } else {
     lines.push("", "| Action | Label | Detail |", "|---|---|---|");
-    const refused = new Set((inUse ?? []).map(name => name.toLowerCase()));
+    const refused = new Map((inUse ?? []).map(entry => [entry.name.toLowerCase(), entry]));
     for (const change of changes) {
+      const entry = change.action === "delete" ? refused.get(change.currentName.toLowerCase()) : undefined;
       const detail = change.action === "update" ? change.fields.join(", ")
-        : change.action === "delete" ? (refused.has(change.currentName.toLowerCase())
-          ? "outside the catalogue; still in use, a real run would refuse it" : "outside the catalogue")
+        : change.action === "delete" ? (entry
+          ? `outside the catalogue; still in use, a real run would refuse it; used by ${renderUsage(entry)}`
+          : "outside the catalogue")
           : "missing live label";
       lines.push(`| ${change.action} | ${inlineCode(change.name, { table: true })} | ${markdownEscape(detail)} |`);
     }
@@ -787,25 +825,41 @@ async function runSelfTest(manifestPath) {
   assert.doesNotMatch(errorSummary, /\r/);
 
   // Pruning refuses labels in use before any change; comma names are checked too.
+  // The refusal names each label with the items that use it.
   const asked = [];
   const usage = used => async name => {
     asked.push(name);
-    return used.includes(name);
+    return used[name] ?? null;
   };
   const pruned = planChanges(desired, [...structuredClone(desired),
     { name: "unused", color: "ABCDEF", description: "d" },
     { name: "in-use", color: "ABCDEF", description: "d" },
     { name: "a,b", color: "ABCDEF", description: "d" }]);
-  await assert.rejects(assertSafeDeletions(pruned, usage(["in-use", "a,b"])),
-    error => /still used by an issue or pull request: "a,b", "in-use"\. No change was applied/.test(error.message));
+  const twoUses = { items: [3, 7], more: false };
+  const tenUses = { items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], more: false };
+  const manyUses = { items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], more: true };
+  await assert.rejects(assertSafeDeletions(pruned, usage({ "in-use": manyUses, "a,b": twoUses })),
+    error => error.message.includes('still used by an issue or pull request: "a,b" (used by #3, #7), '
+      + '"in-use" (used by #1, #2, #3, #4, #5, #6, #7, #8, #9, #10 and others). No change was applied'));
   assert.deepEqual(asked, ["a,b", "in-use", "unused"]);
   asked.length = 0;
-  await assertSafeDeletions(pruned, usage([]));
+  await assertSafeDeletions(pruned, usage({}));
   assert.deepEqual(asked, ["a,b", "in-use", "unused"], "an unused comma name can be pruned");
   asked.length = 0;
 
-  // A comma name is not passed to the labels filter: every issue and pull
-  // request, open and closed, is read page by page and its real labels compared.
+  // The sample: up to ten numbers, ascending, and "and others" exactly when
+  // more items use the label.
+  const odd = [21, 19, 17, 15, 13, 11, 9, 7, 5, 3];
+  const oddSample = "#3, #5, #7, #9, #11, #13, #15, #17, #19, #21";
+  assert.equal(usageSample([]), null);
+  assert.deepEqual(usageSample([7, 3, 7]), { items: [3, 7], more: false });
+  assert.equal(renderUsage(usageSample([7, 3])), "#3, #7", "under ten");
+  assert.equal(renderUsage(usageSample(odd)), oddSample, "exactly ten: no others");
+  assert.equal(renderUsage(usageSample([23, ...odd])), `${oddSample} and others`, "eleven");
+  assert.equal(renderUsage(usageSample([99, 23, ...odd])), `${oddSample} and others`, "twelve");
+
+  // A plain name costs one request: one page of eleven, oldest first, whose
+  // eleventh item only says that there are others.
   const paths = [];
   const pages = responses => {
     let next = 0;
@@ -815,54 +869,117 @@ async function runSelfTest(manifestPath) {
       return responses[next++];
     };
   };
-  const full = Array.from({ length: 100 }, () => ({ labels: [{ name: "a" }, { name: "b" }] }));
-  assert.equal(await labelInUse("o/r", "t", "a,b", pages([full, [{ labels: [{ name: "A,B" }] }]])), true);
-  assert.deepEqual(paths, ["/issues?state=all&per_page=100&page=1", "/issues?state=all&per_page=100&page=2"]);
+  const issue = (number, ...names) => ({ number, labels: names.map(name => ({ name })) });
+  const plainQuery = "/issues?state=all&direction=asc&per_page=11&labels=plain";
+  assert.deepEqual(await labelUsage("o/r", "t", "plain", pages([[issue(7, "plain"), issue(3, "plain")]])), twoUses);
+  assert.deepEqual(paths, [plainQuery]);
   paths.length = 0;
-  assert.equal(await labelInUse("o/r", "t", "a,b", pages([full, [{ labels: [] }]])), false);
+  assert.equal(await labelUsage("o/r", "t", "plain", pages([[]])), null);
+  assert.deepEqual(paths, [plainQuery]);
+  paths.length = 0;
+  const oddItems = odd.map(number => issue(number, "plain"));
+  assert.deepEqual(await labelUsage("o/r", "t", "plain", pages([oddItems])),
+    { items: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21], more: false });
+  assert.deepEqual(paths, [plainQuery]);
+  paths.length = 0;
+  assert.deepEqual(await labelUsage("o/r", "t", "plain", pages([[issue(23, "plain"), ...oddItems]])),
+    { items: [3, 5, 7, 9, 11, 13, 15, 17, 19, 21], more: true });
+  assert.deepEqual(paths, [plainQuery]);
+  paths.length = 0;
+
+  // A comma name is not passed to the labels filter: every issue and pull
+  // request, open and closed, is read page by page and its real labels compared;
+  // the numbers of every page are collected.
+  const pageQueries = ["/issues?state=all&per_page=100&page=1", "/issues?state=all&per_page=100&page=2"];
+  const full = Array.from({ length: 100 }, (_, index) => issue(200 - index, "a", "b"));
+  full[10] = issue(190, "A,B");
+  full[90] = issue(110, "a,b", "other");
+  assert.deepEqual(await labelUsage("o/r", "t", "a,b", pages([full, [issue(5, "a,b"), issue(4, "x")]])),
+    { items: [5, 110, 190], more: false });
+  assert.deepEqual(paths, pageQueries);
+  paths.length = 0;
+  const allUse = Array.from({ length: 100 }, (_, index) => issue(200 - index, "a,b"));
+  assert.deepEqual(await labelUsage("o/r", "t", "a,b", pages([allUse, [issue(3, "a,b")]])),
+    { items: [3, 101, 102, 103, 104, 105, 106, 107, 108, 109], more: true });
+  assert.deepEqual(paths, pageQueries);
+  paths.length = 0;
+  const noneUse = Array.from({ length: 100 }, (_, index) => issue(200 - index, "a", "b"));
+  assert.equal(await labelUsage("o/r", "t", "a,b", pages([noneUse, [issue(1)]])), null);
   assert.equal(paths.length, 2);
   paths.length = 0;
-  assert.equal(await labelInUse("o/r", "t", "plain", pages([[{ labels: [{ name: "plain" }] }]])), true);
-  assert.deepEqual(paths, ["/issues?state=all&per_page=1&labels=plain"]);
-  paths.length = 0;
   // Anything it cannot read stops synchronization before a change.
-  await assert.rejects(labelInUse("o/r", "t", "a,b", pages([[{ labels: null }]])), /malformed labels/);
-  await assert.rejects(labelInUse("o/r", "t", "a,b", pages([[{ labels: [{ name: 1 }] }]])), /malformed labels/);
-  await assert.rejects(labelInUse("o/r", "t", "a,b", pages([{}])), /not an array/);
-  await assert.rejects(labelInUse("o/r", "t", "a,b", async () => full), /exceeded 100 pages while checking "a,b"/);
+  await assert.rejects(labelUsage("o/r", "t", "a,b", pages([[{ number: 1, labels: null }]])), /malformed labels/);
+  await assert.rejects(labelUsage("o/r", "t", "a,b", pages([[{ number: 1, labels: [{ name: 1 }] }]])), /malformed labels/);
+  await assert.rejects(labelUsage("o/r", "t", "a,b", pages([{}])), /not an array/);
+  await assert.rejects(labelUsage("o/r", "t", "plain", pages([{}])), /not an array/);
+  await assert.rejects(labelUsage("o/r", "t", "a,b", async () => full), /exceeded 100 pages while checking "a,b"/);
+  for (const number of [undefined, null, 0, -3, 1.5, "7", 2 ** 53]) {
+    for (const name of ["plain", "a,b"]) {
+      await assert.rejects(labelUsage("o/r", "t", name, pages([[issue(3, name), { number, labels: [{ name }] }]])),
+        /an item without a valid number/, `${name}: ${number}`);
+    }
+  }
   const failing = pages([[], [], {}]);
-  await assert.rejects(assertSafeDeletions(pruned, name => labelInUse("o/r", "t", name, failing)),
+  await assert.rejects(assertSafeDeletions(pruned, name => labelUsage("o/r", "t", name, failing)),
     /not an array/);
   await assertSafeDeletions(planChanges(desired, [...structuredClone(desired),
-    { name: "unused", color: "ABCDEF", description: "d" }]), usage([]));
+    { name: "unused", color: "ABCDEF", description: "d" }]), usage({}));
   assert.deepEqual(asked, ["unused"]);
   asked.length = 0;
-  await assertSafeDeletions(planChanges(desired, desired.slice(1)), usage(["anything"]));
+  await assertSafeDeletions(planChanges(desired, desired.slice(1)), usage({ anything: twoUses }));
   assert.deepEqual(asked, [], "a plan without deletions makes no query");
 
-  // A dry run previews the deletions a real run would refuse; a plan checks none.
-  assert.deepEqual(await deletionsInUse(pruned, usage(["in-use"])), ["in-use"]);
+  // A dry run previews the deletions a real run would refuse, each with the
+  // items that use it; a plan checks none.
+  assert.deepEqual(await deletionsInUse(pruned, usage({ "in-use": manyUses })), [{ name: "in-use", ...manyUses }]);
+  const blocked = [{ name: "a,b", ...twoUses }, { name: "in-use", ...manyUses }];
   const previewed = renderSummary({
     mode: "reconcile",
     manifest,
     manifestPath: "fixture-labels.json",
     desiredLabels: desired,
     changes: pruned,
-    inUse: ["in-use"],
+    inUse: blocked,
     dryRun: true
   });
-  assert.ok(previewed.includes("- Deletions still in use: **1**"), previewed);
-  assert.ok(previewed.includes("| delete | `in-use` | outside the catalogue; still in use, a real run would refuse it |"), previewed);
+  const refusedRow = "outside the catalogue; still in use, a real run would refuse it; used by";
+  assert.ok(previewed.includes("- Deletions still in use: **2**"), previewed);
+  assert.ok(previewed.includes(`| delete | \`a,b\` | ${refusedRow} #3, #7 |`), previewed);
+  assert.ok(previewed.includes(`| delete | \`in-use\` | ${refusedRow} #1, #2, #3, #4, #5, #6, #7, #8, #9, #10 and others |`), previewed);
   assert.ok(previewed.includes("| delete | `unused` | outside the catalogue |"), previewed);
-  assert.ok(previewed.includes('A real run would refuse every change. Refusing to prune labels still used by an issue or pull request: "in-use". No change was applied.'), previewed);
+  assert.ok(previewed.includes('A real run would refuse every change. Refusing to prune labels still used by an issue or pull request: '
+    + '"a,b" (used by #3, #7), "in-use" (used by #1, #2, #3, #4, #5, #6, #7, #8, #9, #10 and others). No change was applied.'), previewed);
+  const exactlyTen = renderSummary({
+    mode: "reconcile",
+    manifest,
+    manifestPath: "fixture-labels.json",
+    desiredLabels: desired,
+    changes: pruned,
+    inUse: [{ name: "IN-USE", ...tenUses }],
+    dryRun: true
+  });
+  assert.ok(exactlyTen.includes(`| delete | \`in-use\` | ${refusedRow} #1, #2, #3, #4, #5, #6, #7, #8, #9, #10 |`), exactlyTen);
+  assert.doesNotMatch(exactlyTen, /and others/);
+  // A real run's failure summary shows no table: its refusal names the items.
+  const refusedRun = renderSummary({
+    mode: "failed",
+    manifest,
+    manifestPath: "fixture-labels.json",
+    desiredLabels: desired,
+    changes: pruned,
+    inUse: blocked,
+    error: deletionRefusal(blocked)
+  });
+  assert.ok(refusedRun.includes('"a,b" (used by #3, #7), "in-use" (used by #1, #2, #3, #4, #5, #6, #7, #8, #9, #10 and others)'), refusedRun);
+  assert.doesNotMatch(refusedRun, /\| delete \|/);
   const unchecked = renderSummary({ mode: "plan", manifest, manifestPath: "fixture-labels.json", desiredLabels: desired, changes: pruned });
   assert.ok(unchecked.includes("- Deletions still in use: **not checked (no repository read)**"), unchecked);
-  assert.doesNotMatch(unchecked, /would refuse/);
+  assert.doesNotMatch(unchecked, /would refuse|used by/);
   const clean = renderSummary({ mode: "reconcile", manifest, manifestPath: "fixture-labels.json", desiredLabels: desired, changes: pruned, inUse: [], dryRun: true });
   assert.ok(clean.includes("- Deletions still in use: **0**"), clean);
-  assert.doesNotMatch(clean, /would refuse/);
+  assert.doesNotMatch(clean, /would refuse|used by/);
 
-  process.stdout.write("SELF-TEST PASS: retry delays, validation, overlays, reconciliation, safe pruning, plan output and summary fixtures\n");
+  process.stdout.write("SELF-TEST PASS: retry delays, validation, overlays, reconciliation, safe pruning, label usage, plan output and summary fixtures\n");
 }
 
 // What the run knew before a failure, so that the failure summary reports it.
@@ -909,7 +1026,7 @@ async function main() {
   // a dry run included, reads the usage of every planned deletion before anything
   // else: the dry run previews the deletions a real run would refuse.
   const inUse = options.mode === "reconcile"
-    ? await deletionsInUse(changes, name => labelInUse(options.repository, process.env.GITHUB_TOKEN, name))
+    ? await deletionsInUse(changes, name => labelUsage(options.repository, process.env.GITHUB_TOKEN, name))
     : null;
   runState.inUse = inUse;
   if (options.mode === "plan" || options.dryRun) {
