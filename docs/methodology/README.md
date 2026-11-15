@@ -68,9 +68,9 @@ tables of the [validation plan](VALIDATION_PLAN.md) differ:
   remove each once the plan states the choice.
 - **Host behaviour** has no illustrative entry: its entries record Excel
   behaviour that the repository's tools rely on. Keep them, and add the
-  behaviour that the project's code relies on. The initializer replaces
-  their *Issue* column, which cites the template's issues, with a dash:
-  link an entry to this repository's own evidence once it is measured here.
+  behaviour that the project's code relies on. Their *Issue* column cites
+  this repository's evidence for each entry, or holds a dash until the
+  behaviour is measured here: link the entry to that evidence once it is.
 
 Byte-preserved copies of sources go under `docs/methodology/sources/`, whose
 Git and editor rules are already set; [Sources](SOURCES.md) describes the

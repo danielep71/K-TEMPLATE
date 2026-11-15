@@ -437,8 +437,8 @@ class DeclareTest(unittest.TestCase):
                          ([], len(data["declarations"])))
 
     def test_repository_register_is_valid(self) -> None:
-        # Empty in the template; a generated repository adds an entry for each
-        # export a Declare imports, so the test must not require it to stay empty.
+        # Empty until the project adds an entry for each export a Declare
+        # imports, so the test must not require it to stay empty.
         self.assertRegisterPasses(ROOT)
 
     def test_register_check_accepts_a_registered_declare(self) -> None:

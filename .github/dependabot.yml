@@ -2,11 +2,11 @@
 # parser in .github/requirements.txt, and the hash-locked quality tools in
 # tools/requirements-quality-ci.txt. Every update arrives as a pull request
 # for my review; nothing merges automatically.
-# Pull requests target the active release branch, named in target-branch.
-# Update target-branch when a new release branch opens, or remove it to target
-# the default branch; in a generated repository, set it to that repository's
-# release branch or remove it. Repository integrity fails while target-branch
-# names a branch that does not exist.
+# Pull requests target the default branch, or, when target-branch is set, the
+# active release branch it names. Set target-branch when a release branch
+# opens, update it when the next one opens, and remove it when none is active.
+# Repository integrity fails while target-branch names a branch that does not
+# exist.
 # Labels must exist in .github/labels.json, include exactly one priority (P3),
 # and the assignee must match the issue forms; Repository integrity checks them.
 # A version update waits 14 days after its release (cooldown), so a package

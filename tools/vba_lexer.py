@@ -17,7 +17,7 @@ from pathlib import Path
 VBA_SUFFIXES = frozenset({".bas", ".cls", ".frm"})
 HOUSE_STYLE = "docs/VBA_HOUSE_STYLE.md"
 # The facade prefix of the house style's naming table, such as SACCR_; the
-# template's <REGIME>_ placeholder stands for any project prefix.
+# <REGIME>_ placeholder, until it is replaced, stands for any project prefix.
 FACADE_ROW = re.compile(r"^\|\s*Public facade module\s*\|\s*`([^`]*)_`", re.M)
 RESERVED_PREFIXES = ("CORE", "TEST", "EX", "M")
 REM = re.compile(r"Rem(?=\s|$)", re.IGNORECASE)

@@ -11,7 +11,7 @@ Ongoing repository rules and maintenance guidance live here. One-time initializa
 | [🏷️ Issue labels](ISSUE_LABELS.md) | Label catalogue, synchronization, drift detection, and issue triage. |
 | [🔎 Pull request review](PULL_REQUESTS.md) | Final-head review before merging, and the exceptions to record. |
 | [📈 Traffic history](TRAFFIC.md) | Optional daily traffic collection on the `traffic-history` branch, with alerts. |
-| [🚀 Repository setup](../setup/REPOSITORY_SETUP.md) | Preview, apply, verify, and hand over a newly generated repository. |
+| [🚀 Repository setup](../setup/REPOSITORY_SETUP.md) | Preview, apply and verify the settings baseline, and what to keep, adapt or remove. |
 | [📋 Settings configuration](../setup/repository-settings.json) | Machine-readable baseline used by the setup script. |
 | [🔒 Security policy](../../SECURITY.md) | Private vulnerability reporting, response targets, and scope. |
 | [📦 Distribution review](DISTRIBUTION.md) | What to check and record before making the repository public, sharing a copy or publishing a release. |
