@@ -222,6 +222,10 @@ Use only the categories an entry needs.
   instead of a list of regimes, and show one formula for each (#492).
 - **Issue triage** reports each open issue in a cycle of open issues'
   dependency sections, which no finished work can unblock (#506).
+- **Issue triage** reports an empty dependency section, one with nothing but
+  blank lines or `_No response_`, as a `dependencies` finding: write `None`,
+  link each prerequisite or add an `External condition:` line. An open issue
+  with such a section now fails triage until it is filled in (#531).
 - An issue's *Resolution* names the merge commit, the Excel run with its
   case and assertion counts when the change needed one, and any deviation
   from the proposed fix. An issue closed through `release/X.Y.Z` goes into
@@ -286,6 +290,9 @@ Use only the categories an entry needs.
   keeps a blank line that a continuation carries over, after an `End`
   statement and at the end of the file too, so that no blank line is added
   to or removed from a logical line (#502).
+- **Issue triage** reports a milestone without a due date together with a
+  missing or invalid target end date, in the same run, instead of only after
+  the date is fixed (#530).
 
 ## [1.0.0] - 2026-11-11
 

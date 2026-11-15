@@ -111,6 +111,14 @@ class TargetDateTests(unittest.TestCase):
         self.assertEqual(rules([issue(1, milestone_due="2026-11-04")]), [(1, "milestone-due")])
         self.assertEqual(rules([issue(1, milestone_due=None)]), [(1, "milestone-due")])
 
+    def test_invalid_target_date_does_not_hide_a_milestone_without_due_date(self) -> None:
+        for target in (None, "soon"):
+            with self.subTest(target=target):
+                self.assertEqual(rules([issue(1, target=target, milestone_due=None)]),
+                                 [(1, "target-date"), (1, "milestone-due")])
+        # A milestone with a due date adds nothing while the target end date is invalid.
+        self.assertEqual(rules([issue(1, target="soon")]), [(1, "target-date")])
+
     def test_missing_milestone_is_reported_once(self) -> None:
         self.assertEqual(rules([issue(1, milestone=None, milestone_due=None)]), [(1, "milestone")])
 
@@ -208,6 +216,22 @@ class DependencyTests(unittest.TestCase):
         self.assertEqual(rules([issue(1, body="## Objective\n\nx\n")]), [(1, "dependencies")])
         self.assertEqual(rules([issue(2, "P3", BLOCKED_LABEL, body=blocked_by(7))]),
                          [(2, "dependencies"), (2, "blocked")])
+
+    def test_empty_dependency_section_is_reported(self) -> None:
+        for body in ("## Dependencies and blocking status\n",
+                     "## Dependencies and blocking status\n\n  \n\n## Tracking\n\n#99\n",
+                     "### 🔗 Dependencies and blocking status\n\n_No response_\n"):
+            with self.subTest(body=body):
+                findings = check_issues.audit([issue(1, body=body)], {1: "open"}, REPOSITORY,
+                                              assignee="triage-person")
+                self.assertEqual([(f.number, f.rule) for f in findings], [(1, "dependencies")])
+                self.assertEqual(findings[0].message,
+                                 "has an empty dependency section: write None, link each "
+                                 "prerequisite or add an External condition: line")
+        for none in ("None", "None."):
+            with self.subTest(none=none):
+                body = f"## Dependencies and blocking status\n\n{none}\n"
+                self.assertEqual(rules([issue(1, body=body)]), [])
 
     def test_self_reference_is_ignored(self) -> None:
         self.assertEqual(rules([issue(2, "P3", body=blocked_by(2))]), [])
