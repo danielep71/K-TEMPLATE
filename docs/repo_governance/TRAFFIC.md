@@ -216,8 +216,8 @@ issue's table and summed in the clones badge.
 At most one issue is opened per snapshot date: the job skips a date whose
 issue exists, open or closed. The issue is assigned to the issue-form account,
 labelled `P3` and `repository`, filed under the open milestone with the
-earliest due date after the collection day, and carries a dependency section
-and a target end date (seven days after the snapshot, or the day before the
+earliest due date after the collection day, and carries a dependency section,
+a start date (the snapshot date) and a target end date (seven days after the snapshot, or the day before the
 milestone's due date if that is earlier), so it passes **Issue triage**. The
 job first decides from the history alone whether an alert is due
 (`traffic_history.py alert --snapshot-output`), and looks up the milestone

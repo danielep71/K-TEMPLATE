@@ -10,8 +10,9 @@ in an issue or pull request.
 ## 🐞 Issues
 
 Open issues with the issue forms. Each issue is triaged automatically: it needs
-an assignee, exactly one priority label, an open milestone, a target end date
-earlier than the milestone's due date, and a dependency section. The
+an assignee, exactly one priority label, an open milestone, a start date, a
+target end date earlier than the milestone's due date, and a dependency
+section. The
 [issue guide](docs/repo_governance/ISSUE_LABELS.md) explains the labels, the
 priorities (`P1` only for a confirmed calculation bug) and how an issue is
 closed, with a *Resolution* section.

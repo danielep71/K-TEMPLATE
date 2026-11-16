@@ -229,6 +229,11 @@ Use only the categories an entry needs.
   exemption may use it, and may carry a short record in place of the full
   template. No task pull request merges into the release branch while it
   waits (#552).
+- Every open issue needs a start date (Europe/Rome), not after its target end
+  date. The bug, enhancement and documentation forms ask for it; on other
+  issues it is a `- Start date:` line. **Issue triage** reports a missing or
+  invalid one, or one after the target end date (`start-date`), and the
+  traffic alert writes `- Start date:` in place of `- Planned start:` (#557).
 - While a release branch is active, commit messages, squash messages and task
   pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
   guide and the pull request template now say: a closing keyword in a commit

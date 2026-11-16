@@ -89,6 +89,15 @@ body:
       required: true
 
   - type: input
+    id: start_date
+    attributes:
+      label: "🗓️ Start date (Europe/Rome)"
+      description: ISO calendar date YYYY-MM-DD when the work is planned to start, not after the target end date.
+      placeholder: "YYYY-MM-DD"
+    validations:
+      required: true
+
+  - type: input
     id: target_end_date
     attributes:
       label: "🗓️ Target end date (Europe/Rome)"
