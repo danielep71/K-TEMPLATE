@@ -221,7 +221,8 @@ Use only the categories an entry needs.
 - The settings baseline allows auto-merge (`allow_auto_merge: true`); it
   bypasses no required check or rule. A sync pull request under the review
   exemption may use it, and may carry a short record in place of the full
-  template; it must merge before the next integration (#552).
+  template. No task pull request merges into the release branch while it
+  waits (#552).
 - While a release branch is active, commit messages, squash messages and task
   pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
   guide and the pull request template now say: a closing keyword in a commit
