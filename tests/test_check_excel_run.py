@@ -32,6 +32,7 @@ import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, ClassVar
+from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
@@ -1872,6 +1873,47 @@ class SourceIdentityTest(unittest.TestCase):
             b"x = [Sheet1!A1]\n", b"x = [sheet1!A1]\n", False)[0], 1)
         self.assertEqual(check_excel_run.source_difference(b"x = 1\n", b"x = 1\ny = 2\n",
                                                            False)[0], 2)
+
+    def test_identical_sources_are_not_lexed(self) -> None:
+        data = components(self.root, self.commit)["TEST_Examples.bas"]
+        with mock.patch.object(check_excel_run, "source_lines",
+                               side_effect=AssertionError("identical sources were lexed")):
+            for document in (False, True):
+                self.assertEqual(check_excel_run.source_difference(data, bytes(data), document),
+                                 (0, [], []))
+
+    def test_the_components_are_read_by_one_git_process(self) -> None:
+        listed = subprocess.run(["git", "-C", str(self.root), "ls-tree", "-r", "-z",
+                                 "--name-only", self.commit], capture_output=True,
+                                check=True).stdout.decode().split("\0")
+        expected = {Path(path).name: subprocess.run(
+            ["git", "-C", str(self.root), "show", f"{self.commit}:{path}"],
+            capture_output=True, check=True).stdout for path in listed
+            if path.lower().endswith(check_excel_run.VBA_SUFFIXES +
+                                     check_excel_run.RESOURCE_SUFFIXES)}
+        with mock.patch.object(subprocess, "run", wraps=subprocess.run) as run:
+            found = components(self.root, self.commit)
+        self.assertEqual(found, expected)
+        self.assertIn("frmFixture.frx", found)
+        self.assertEqual([call.args[0][3] for call in run.call_args_list], ["ls-tree", "cat-file"])
+
+    def test_a_component_path_with_a_line_break_is_still_read(self) -> None:
+        root = Path(tempfile.mkdtemp(prefix="excel-run-odd-path-"))
+        self.addCleanup(shutil.rmtree, root, True)
+        files = {"src/odd\nname.bas": b"Attribute VB_Name = \"Odd\"\n",
+                 "src/plain.bas": b"Attribute VB_Name = \"Plain\"\n"}
+        for name, data in files.items():
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(data)
+        for command in (["init", "-q"], ["add", "-A"],
+                        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Fixture"]):
+            subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
+        commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                                capture_output=True, check=True, text=True).stdout.strip()
+        self.assertEqual(components(root, commit),
+                         {"odd\nname.bas": files["src/odd\nname.bas"],
+                          "plain.bas": files["src/plain.bas"]})
 
     def test_the_tolerated_attributes_are_those_excel_writes_for_a_document(self) -> None:
         # The build writes the same attributes for a document module without a source file.

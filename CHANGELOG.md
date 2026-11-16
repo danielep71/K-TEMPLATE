@@ -218,6 +218,12 @@ Use only the categories an entry needs.
   empty diff against the release branch and a tree the integration's
   final-head review covered, needs no new automated review;
   **Repository integrity** still runs on it (#539).
+- The VBA source analysis and the Excel-run source comparison are faster,
+  with the same findings: the conditional-compilation pass of a component is
+  computed once and shared by the checks that read it, identical exported and
+  committed modules are not compared line by line, and the commit's
+  components are read by one `git cat-file --batch` instead of one `git show`
+  each. The test suite runs in about three quarters of its time (#551).
 - The settings baseline allows auto-merge (`allow_auto_merge: true`); it
   bypasses no required check or rule. A sync pull request under the review
   exemption may use it, and may carry a short record in place of the full

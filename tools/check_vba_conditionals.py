@@ -21,6 +21,7 @@ check_excel_run.py.
 from __future__ import annotations
 
 import argparse
+import functools
 import re
 import sys
 from collections.abc import Callable, Sequence
@@ -333,13 +334,22 @@ def walk(path: str, text: str) -> tuple[list[tuple[int, int, str, list[str]]], l
 def reachable_sources(path: str, text: str) -> tuple[dict[str, str], list[Finding]]:
     """Each environment's source with inactive lines and directives blanked,
     so that line numbers are preserved; plus the directive findings."""
+    sources, findings = _reachable_sources(path, text)
+    return dict(sources), list(findings)
+
+
+@functools.lru_cache(maxsize=256)
+def _reachable_sources(path: str, text: str
+                       ) -> tuple[tuple[tuple[str, str], ...], tuple[Finding, ...]]:
+    # Several checks read the same component; the result depends only on the
+    # arguments and is returned as fresh containers, so caching it is safe.
     lines = text.split("\n")
     sources = {name: [""] * len(lines) for name in ENVIRONMENTS}
     units, findings = walk(path, text)
     for start, end, _, environments in units:
         for name in environments:
             sources[name][start - 1:end] = lines[start - 1:end]
-    return {name: "\n".join(source) for name, source in sources.items()}, findings
+    return tuple((name, "\n".join(source)) for name, source in sources.items()), tuple(findings)
 
 
 def analyze(path: str, text: str) -> list[Finding]:

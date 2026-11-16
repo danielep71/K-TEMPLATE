@@ -447,7 +447,32 @@ def components(root: Path, commit: str) -> dict[str, bytes]:
     listed = git(root, "ls-tree", "-r", "-z", "--name-only", commit).split(b"\0")
     paths = [item.decode("utf-8") for item in listed
              if item.decode("utf-8").lower().endswith(VBA_SUFFIXES + RESOURCE_SUFFIXES)]
-    return {Path(path).name: git(root, "show", f"{commit}:{path}") for path in paths}
+    return dict(zip((Path(path).name for path in paths), blobs(root, commit, paths), strict=True))
+
+
+def blobs(root: Path, commit: str, paths: list[str]) -> list[bytes]:
+    """The contents of ``paths`` in the commit, read by one ``git cat-file``
+    instead of one ``git show`` each. The batch protocol is line based, so a
+    path with a line break is read with ``git show``."""
+    if not paths:
+        return []
+    if any("\n" in path or "\r" in path for path in paths):
+        return [git(root, "show", f"{commit}:{path}") for path in paths]
+    request = "".join(f"{commit}:{path}\n" for path in paths).encode("utf-8")
+    completed = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"], input=request,
+                               capture_output=True, check=False)
+    if completed.returncode:
+        raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
+    output, contents = completed.stdout, []
+    for path in paths:
+        header, _, output = output.partition(b"\n")
+        fields = header.split()
+        if len(fields) != 3 or fields[1] != b"blob":
+            raise RuntimeError(f"{commit}:{path}: not a blob ({header.decode(errors='replace')})")
+        size = int(fields[2])
+        contents.append(output[:size])
+        output = output[size + 1:]
+    return contents
 
 
 def source_at(root: Path, commit: str, path: str, evidence: Evidence) -> bytes:
@@ -573,6 +598,8 @@ def source_difference(actual: bytes, expected: bytes, document: bool
     where it first differs other than in the letter case of code (0 when it does
     not), the identifiers re-cased, as "commit spelling -> exported spelling",
     and the document-module attributes that differ."""
+    if actual == expected:
+        return 0, [], []
     left, right = source_lines(actual, document), source_lines(expected, document)
     recased: dict[str, None] = {}
     for line, other in zip(left, right, strict=False):
