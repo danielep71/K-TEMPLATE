@@ -32,6 +32,7 @@ import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, ClassVar
+from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
@@ -1875,17 +1876,11 @@ class SourceIdentityTest(unittest.TestCase):
 
     def test_identical_sources_are_not_lexed(self) -> None:
         data = components(self.root, self.commit)["TEST_Examples.bas"]
-        original = check_excel_run.source_lines
-
-        def refused(*_: object) -> list[check_excel_run.SourceLine]:
-            raise AssertionError("identical sources were lexed")
-        check_excel_run.source_lines = refused
-        try:
+        with mock.patch.object(check_excel_run, "source_lines",
+                               side_effect=AssertionError("identical sources were lexed")):
             for document in (False, True):
                 self.assertEqual(check_excel_run.source_difference(data, bytes(data), document),
                                  (0, [], []))
-        finally:
-            check_excel_run.source_lines = original
 
     def test_the_components_are_read_by_one_git_process(self) -> None:
         listed = subprocess.run(["git", "-C", str(self.root), "ls-tree", "-r", "-z",
@@ -1896,20 +1891,11 @@ class SourceIdentityTest(unittest.TestCase):
             capture_output=True, check=True).stdout for path in listed
             if path.lower().endswith(check_excel_run.VBA_SUFFIXES +
                                      check_excel_run.RESOURCE_SUFFIXES)}
-        calls: list[list[str]] = []
-        original = check_excel_run.subprocess.run
-
-        def counted(command: list[str], *args: Any, **kwargs: Any) -> Any:
-            calls.append(command)
-            return original(command, *args, **kwargs)
-        check_excel_run.subprocess.run = counted  # type: ignore[assignment]
-        try:
+        with mock.patch.object(subprocess, "run", wraps=subprocess.run) as run:
             found = components(self.root, self.commit)
-        finally:
-            check_excel_run.subprocess.run = original
         self.assertEqual(found, expected)
         self.assertIn("frmFixture.frx", found)
-        self.assertEqual([command[3] for command in calls], ["ls-tree", "cat-file"])
+        self.assertEqual([call.args[0][3] for call in run.call_args_list], ["ls-tree", "cat-file"])
 
     def test_a_component_path_with_a_line_break_is_still_read(self) -> None:
         root = Path(tempfile.mkdtemp(prefix="excel-run-odd-path-"))
