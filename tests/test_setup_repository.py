@@ -288,8 +288,8 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(list(config), list(setup.TOP_KEYS))
         self.assertEqual(set(config['repository']), set(GITHUB_DEFAULTS))
         changed = {key for key, value in config['repository'].items() if GITHUB_DEFAULTS[key] != value}
-        self.assertEqual(changed, {'delete_branch_on_merge', 'allow_update_branch', 'has_projects',
-                                   'has_downloads'})
+        self.assertEqual(changed, {'allow_auto_merge', 'delete_branch_on_merge', 'allow_update_branch',
+                                   'has_projects', 'has_downloads'})
         # The settings reference lists the changed values only.
         settings = (ROOT / 'docs/repo_governance/SETTINGS.md').read_text(encoding='utf-8')
         table = settings.split('## 🏷️ General settings')[1].split('\n## ')[0]
@@ -326,7 +326,8 @@ class SetupTests(unittest.TestCase):
                          + [('PUT', '/vulnerability-alerts'), ('PUT', '/automated-security-fixes'),
                             ('PATCH', '')])
         self.assertEqual(self.api.writes[0][2], {'allow_merge_commit': True, 'allow_squash_merge': True})
-        self.assertEqual(self.api.writes[-1][2], {'allow_update_branch': True, 'delete_branch_on_merge': True,
+        self.assertEqual(self.api.writes[-1][2], {'allow_auto_merge': True, 'allow_update_branch': True,
+                                                  'delete_branch_on_merge': True,
                                                   'has_projects': False, 'has_downloads': False})
 
     def test_plan_puts_merge_methods_first_and_other_settings_last(self) -> None:
@@ -789,7 +790,8 @@ class SetupTests(unittest.TestCase):
                        {'security_and_analysis': {'secret_scanning': {'status': 'enabled'},
                                                   'secret_scanning_push_protection': {'status': 'enabled'}}}),
                       self.api.writes)
-        self.assertEqual(self.api.writes[-1][2], {'allow_update_branch': True, 'delete_branch_on_merge': True,
+        self.assertEqual(self.api.writes[-1][2], {'allow_auto_merge': True, 'allow_update_branch': True,
+                                                  'delete_branch_on_merge': True,
                                                   'has_projects': False, 'has_downloads': False})
 
     def test_dependent_security_features_are_rejected(self) -> None:

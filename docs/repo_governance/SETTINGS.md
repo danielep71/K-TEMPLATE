@@ -34,6 +34,7 @@ Copying this file does not apply settings or verify another repository.
 
 | Setting | Documented baseline | Configured value | Effect / qualification |
 | --- | --- | --- | --- |
+| Allow auto-merge | Off (`allow_auto_merge: false`) | **On** | Lets a pull request merge on its own once every required check and rule passes; it bypasses none of them. Using it stays optional. |
 | Automatically delete merged head branches | Off (`delete_branch_on_merge: false`) | **On** | Cleans up eligible task branches; protected retained branches remain subject to their deletion rules. |
 | Always suggest updating PR branches | Off (`allow_update_branch: false`) | **On** | Offers updates even without a freshness requirement; local governance still governs use on shared integration branches. |
 | Repository Projects feature | On (`has_projects: true`) | **Off** | Disables the repository feature; this does not describe account-level project boards. Organization defaults may differ. |
