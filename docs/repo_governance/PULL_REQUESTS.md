@@ -135,6 +135,22 @@ apply.
   one. **Repository integrity** must still pass on the sync head. A sync pull
   request that changes any file, for example to resolve a conflict, is
   reviewed as usual.
+- A sync pull request under that exemption may have auto-merge enabled, with
+  the merge-commit method, as soon as it is opened: GitHub merges it once
+  every required check and rule passes. It must merge before the next
+  integration, not before the next task pull request. Its body may replace
+  the template with this short record:
+
+  ```text
+  Sync after #N. Head: <integration merge commit SHA>, the integration merge commit.
+  Diff against <release branch>: empty; tree <tree SHA>.
+  Final-head review: the review of #N at <SHA> (<link>) covered the same tree.
+  The required Repository integrity check gates the merge (auto-merge).
+  Refs #N
+  ```
+
+  If the check fails, auto-merge waits: fix the cause on the default branch,
+  not in the sync pull request.
 - `.github/dependabot.yml` names the active release branch in `target-branch`.
   Update it when a new release branch opens, or remove it when none is active.
 - GitHub reads some files only from the default branch: the issue forms, this

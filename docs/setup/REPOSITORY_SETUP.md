@@ -241,7 +241,7 @@ of the [settings reference](../repo_governance/SETTINGS.md).
 
 | Layer | Managed configuration |
 | --- | --- |
-| **General · 12 settings** | The three merge methods, auto-merge, branch update suggestions, deletion of merged head branches, web commit sign-off, and the Issues, Projects, Wiki, Discussions and legacy downloads features. Four differ from GitHub's defaults: delete merged head branches, suggest PR branch updates, disable Projects and the legacy downloads flag. |
+| **General · 12 settings** | The three merge methods, auto-merge, branch update suggestions, deletion of merged head branches, web commit sign-off, and the Issues, Projects, Wiki, Discussions and legacy downloads features. Five differ from GitHub's defaults: allow auto-merge, delete merged head branches, suggest PR branch updates, disable Projects and the legacy downloads flag. |
 | **Security · 5 features** | Dependabot alerts and security updates on every repository; private vulnerability reporting, secret scanning and push protection on a public repository (skipped with a note otherwise). |
 | **Actions · 5 settings, checked only** | SHA pinning required, read-only default workflow permissions, no pull request approval by workflows, approval for every external contributor's fork pull request workflows (public repository only) and 90-day retention. Reported and verified, never written. |
 | **Protection · 5 rulesets** | Default branch, release branches, independent release-branch deletion protection, release tags, and traffic history. The configuration may hold any number of uniquely named rulesets. Active rulesets without bypass actors or excluded refs that enforce a configured one at least as strictly, under any names, cover it: nothing is written for it. |
