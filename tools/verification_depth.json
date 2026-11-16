@@ -74,10 +74,11 @@
       "checker": "python tools/check_issues.py --check-config",
       "proofs": [
         "tests.test_check_issues.ConfigTests.test_forms_must_ask_for_the_target_end_date",
+        "tests.test_check_issues.ConfigTests.test_forms_must_ask_for_the_start_date",
         "tests.test_check_issues.ConfigTests.test_an_unknown_or_duplicated_overlay_selection_is_rejected",
         "tests.test_check_issues.ConfigTests.test_the_previous_manifest_schema_is_rejected"
       ],
-      "negative_claim": "an issue form without the target end date field, an unknown or repeated overlay selection and the previous label manifest schema are rejected",
+      "negative_claim": "an issue form without the start date or the target end date field, an unknown or repeated overlay selection and the previous label manifest schema are rejected",
       "state": "green"
     },
     {

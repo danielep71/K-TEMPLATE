@@ -25,13 +25,23 @@ PRIORITIES = ("P1", "P2", "P3")
 BLOCKED = "blocked"
 FORM_PRIORITIES = {"bug.yml": "P2", "enhancement.yml": "P3", "documentation.yml": "P3",
                    "security-contact.yml": "P2"}
-# Forms whose reporter proposes the target end date; triage adds it to the others.
+# Forms whose reporter proposes the start and target end dates; triage adds
+# them to the others.
 TARGET_DATE_FORMS = ("bug.yml", "enhancement.yml", "documentation.yml")
-# The planning line triage writes, or the field an issue form renders. Each
-# captures its whole value, so an invalid line never falls back to the form.
-PLANNED_TARGET = re.compile(r"^[ \t]*[-*][ \t]*Target end date:[ \t]*(.*?)[ \t]*$", re.I | re.M)
-FORM_TARGET = re.compile(
-    r"^###\s+(?:🗓️\s*)?Target end date(?:\s*\(Europe/Rome\))?\s*$\n\s*(.*?)[ \t]*$", re.I | re.M)
+
+
+def planning_patterns(label: str) -> tuple[re.Pattern[str], re.Pattern[str]]:
+    """The planning line triage writes, and the field an issue form renders, for
+    one date. Each captures its whole value, so an invalid line never falls back
+    to the form."""
+    line = re.compile(rf"^[ \t]*[-*][ \t]*{label}:[ \t]*(.*?)[ \t]*$", re.I | re.M)
+    form = re.compile(
+        rf"^###\s+(?:🗓️\s*)?{label}(?:\s*\(Europe/Rome\))?\s*$\n\s*(.*?)[ \t]*$", re.I | re.M)
+    return line, form
+
+
+PLANNED_TARGET, FORM_TARGET = planning_patterns("Target end date")
+PLANNED_START, FORM_START = planning_patterns("Start date")
 ROME_SUFFIX = re.compile(r"\s*\(Europe/Rome\)$", re.I)
 DEPENDENCY_STATUS_WORDS = re.compile(r"block|ready|waiting|depend|on[ -]hold|prerequisite", re.I)
 HEADING = re.compile(r"^#{2,3}\s+(.*)$")
@@ -107,8 +117,17 @@ def references(lines: Iterable[str], repository: str, own: int) -> set[int]:
 
 def target_end_date(body: str) -> str | None:
     """Read the planning line or the issue-form field without guessing a date."""
+    return planned_date(body, PLANNED_TARGET, FORM_TARGET)
+
+
+def start_date(body: str) -> str | None:
+    """Read the start date as ``target_end_date`` reads the target end date."""
+    return planned_date(body, PLANNED_START, FORM_START)
+
+
+def planned_date(body: str, line: re.Pattern[str], form: re.Pattern[str]) -> str | None:
     body = normalized(body)
-    match = PLANNED_TARGET.search(body) or FORM_TARGET.search(body)
+    match = line.search(body) or form.search(body)
     return ROME_SUFFIX.sub("", match.group(1)) if match else None
 
 
@@ -142,6 +161,19 @@ def target_date_findings(issue: Issue) -> list[Finding]:
     if target >= due:
         return [Finding(issue.number, "milestone-due",
                         f"target end date {target} must be before the milestone due date {due}")]
+    return []
+
+
+def start_date_findings(issue: Issue) -> list[Finding]:
+    """The start date must be a real ISO date, not after the target end date."""
+    start = iso_date(start_date(issue.body))
+    if start is None:
+        return [Finding(issue.number, "start-date",
+                        "needs a valid ISO YYYY-MM-DD start date (Europe/Rome)")]
+    target = iso_date(target_end_date(issue.body))
+    if target is not None and start > target:
+        return [Finding(issue.number, "start-date",
+                        f"start date {start} must not be after the target end date {target}")]
     return []
 
 
@@ -285,6 +317,7 @@ def audit(issues: Sequence[Issue], states: Mapping[int, str], repository: str,
             continue
         findings += metadata_findings(issue, assignee)
         findings += target_date_findings(issue)
+        findings += start_date_findings(issue)
         findings += dependency_findings(issue, states, repository, pulls)
         if catalogue is not None:
             findings += [Finding(issue.number, "catalogue", f"has label {label!r}, "
@@ -344,9 +377,10 @@ def config_findings(root: Path) -> list[str]:
             problems.append(f"{name} must assign {assignee}")
         if not re.search(r"^\s*id:\s*dependencies\s*$", text, re.M):
             problems.append(f"{name} has no dependencies field")
-        if name in TARGET_DATE_FORMS and not re.search(r"^\s*id:\s*target_end_date\s*$",
-                                                       text, re.M):
-            problems.append(f"{name} has no target end date field")
+        for field, what in (("start_date", "start date"), ("target_end_date", "target end date")):
+            if name in TARGET_DATE_FORMS and not re.search(rf"^\s*id:\s*{field}\s*$",
+                                                           text, re.M):
+                problems.append(f"{name} has no {what} field")
     config = forms / "config.yml"
     if not config.is_file() or not re.search(r"^blank_issues_enabled:\s*false\s*$",
                                              config.read_text(encoding="utf-8"), re.M):

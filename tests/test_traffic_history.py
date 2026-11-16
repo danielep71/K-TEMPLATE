@@ -396,7 +396,7 @@ class AlertTests(unittest.TestCase):
             self.assertEqual(issue["title"], "Traffic alert: 2026-10-14")
             self.assertIn("views spike, stars increased.", issue["body"])
             self.assertIn("| Stars | 2 | 1 |", issue["body"])
-            for line in ("- Planned start: 2026-10-14 (UTC collection date)",
+            for line in ("- Start date: 2026-10-14 (Europe/Rome)",
                          "- Target end date: 2026-10-21 (Europe/Rome)",
                          "- Milestone due date: 2026-12-20",
                          "## Dependencies and blocking status\n\nNone."):
@@ -411,6 +411,7 @@ class AlertTests(unittest.TestCase):
                 issue = traffic_history.alert(ws.data, due)
                 assert issue is not None
                 self.assertEqual(check_issues.target_end_date(issue["body"]), target)
+                self.assertEqual(check_issues.start_date(issue["body"]), "2026-10-14")
                 candidate = check_issues.Issue(1, "open", ("P3", "repository"), ("me",), "v1",
                                                issue["body"], due)
                 self.assertEqual(check_issues.audit([candidate], {1: "open"}, "o/r",
