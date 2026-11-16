@@ -10,7 +10,7 @@ This repository defines 20 issue labels, each with a name, description, and colo
 | --- | --- |
 | Sync issue labels | Validates pull requests; reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch. Refuses to delete a label in use. Verifies the exact live result. |
 | Detect issue-label drift | Checks daily at 05:17 UTC and manually; PR runs use offline fixtures. Reports drift without modifying labels. Each report is cross-checked against the reconciler's plan on the same snapshot: the script writes the live labels it read to a temporary file, runs `labels-sync.mjs --mode plan` on it, and fails (status `fail`) if the two plans differ; the evidence then carries both plans under `cross_check`. |
-| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, target end date or dependency section; an empty dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; open issues whose dependency sections form a cycle; invalid labels; and inconsistent blocked status. |
+| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, start date, target end date or dependency section; a start date after the target end date; an empty dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; open issues whose dependency sections form a cycle; invalid labels; and inconsistent blocked status. |
 | Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a daily and manual scan of every pull request. It reads each pull request again after the change and fails if the milestone is still set; its job summary lists each pull request and the milestone removed. If GitHub gives a pull-request run a read-only token, the run warns instead of failing, and the next daily or manual scan removes the milestone. It never checks out pull-request code. |
 | Dependabot (`.github/dependabot.yml`) | Opens weekly grouped pull requests for the SHA-pinned GitHub Actions, the hash-locked configuration parser, and the hash-locked Python quality tools, labelled `ci` and `P3` and assigned to me. Nothing merges automatically. |
 
@@ -21,7 +21,7 @@ Among these workflows, only synchronization has `issues: write` and only *Keep m
 1. Run **Sync issue labels** from the default branch to bring the live labels to the catalogue: once Actions is enabled, and again whenever the live labels must be brought back to it.
 2. To add labels for this repository, add them as an overlay in `.github/labels.json`, such as one overlay per regulatory regime: an entry of `overlays` whose name maps to a label array sorted case-insensitively by name, with the same fields as the core. List the overlay's name in `selected_overlays`, sorted case-insensitively; an overlay that is not selected adds nothing. Then add each selected label to the catalogue and usage tables below and update the label counts, the badge included, to the resolved total. Leave the `core` list as it is. **Repository integrity** checks all three.
 3. My GitHub account, `danielep71`, is the assignee in the four issue forms (`assignees`) and in `.github/dependabot.yml`; the triage check reads it from `bug.yml`. If someone else maintains this repository, replace my account in those five files. **Repository integrity** fails if they disagree.
-4. Create project milestones with due dates, give each open issue exactly one priority, an open milestone, and a target end date before that milestone's due date, and assign it to me (or the account configured in those five files). Use `blocked` only for a named open prerequisite or `External condition:`. P1 is reserved for confirmed calculation bugs.
+4. Create project milestones with due dates, give each open issue exactly one priority, an open milestone, a start date, and a target end date before that milestone's due date, and assign it to me (or the account configured in those five files). Use `blocked` only for a named open prerequisite or `External condition:`. P1 is reserved for confirmed calculation bugs.
 5. Label validation runs on pull requests to any branch that change the label manifest, the synchronization script or its workflow. Live synchronization runs only on the current default branch, including after a rename.
 
 **Keep** the label manifest, scripts, all four workflows, issue forms, triage checker/tests, and this guide after bootstrap. They provide ongoing maintenance and must not be deleted with one-time repository setup files.
@@ -42,13 +42,14 @@ Pull requests opened by Dependabot or another bot carry the labels of the work a
 
 A form sets the default priority; triage confirms or changes it. Raise a bug to `P1` only once the calculation defect is confirmed.
 
-Every open issue also needs a target end date: an ISO `YYYY-MM-DD` calendar date (Europe/Rome) earlier than the due date of its milestone. The bug, enhancement, and documentation forms ask for it in the *Target end date* field. On other issues, including private security contacts, add it during triage as a line in the issue body:
+Every open issue also needs a start date and a target end date: ISO `YYYY-MM-DD` calendar dates (Europe/Rome). The start date is when the work is planned to start, not after the target end date; the target end date is earlier than the due date of the issue's milestone. The bug, enhancement, and documentation forms ask for them in the *Start date* and *Target end date* fields. On other issues, including private security contacts, add them during triage as lines in the issue body:
 
 ```text
+- Start date: YYYY-MM-DD (Europe/Rome)
 - Target end date: YYYY-MM-DD (Europe/Rome)
 ```
 
-When both are present, that line takes precedence over the form field, so edit the line to reschedule. Triage reports a missing or invalid date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`). A missing or invalid date does not hide a milestone without a due date: triage reports both in the same run.
+When both a line and a form field are present, the line takes precedence, so edit the line to reschedule. Triage reports a missing or invalid start date, or one after the target end date (`start-date`), a missing or invalid target end date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`). A missing or invalid date does not hide a milestone without a due date: triage reports both in the same run.
 
 ### Types
 

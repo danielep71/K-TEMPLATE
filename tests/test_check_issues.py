@@ -22,13 +22,19 @@ REPOSITORY = "example-org/sample-project"
 BLOCKED_LABEL = check_issues.BLOCKED
 READY = "## Dependencies and blocking status\n\n**Ready to start**: none.\n"
 PLANNING = "## Planning\n- Target end date: {} (Europe/Rome)\n\n"
+START = "- Start date: {} (Europe/Rome)\n\n"
+# Both planning lines, for a body built by hand.
+PLANNED = PLANNING + START.format("2026-11-01")
 
 
 def issue(number: int, *labels: str, state: str = "open", body: str = READY,
           assignees: tuple[str, ...] = ("triage-person",), milestone: str | None = "v0.1.0",
-          target: str | None = "2026-11-04", milestone_due: str | None = "2026-11-30") -> Issue:
-    """An issue whose body starts with a planning line for ``target`` unless it is None."""
-    planned = (PLANNING.format(target) if target is not None else "") + body
+          target: str | None = "2026-11-04", milestone_due: str | None = "2026-11-30",
+          start: str | None = "2026-11-01") -> Issue:
+    """An issue whose body starts with planning lines for ``target`` and
+    ``start``, each left out when it is None."""
+    planned = ((PLANNING.format(target) if target is not None else "")
+               + (START.format(start) if start is not None else "") + body)
     return Issue(number, state, labels or ("P3",), assignees, milestone, planned, milestone_due)
 
 
@@ -80,7 +86,7 @@ class TargetDateTests(unittest.TestCase):
         self.assertEqual(rules([issue(1, target=None)]), [(1, "target-date")])
 
     def test_crlf_bodies_are_read(self) -> None:
-        planned = PLANNING.format("2026-11-04").replace("\n", "\r\n") + READY.replace("\n", "\r\n")
+        planned = PLANNED.format("2026-11-04").replace("\n", "\r\n") + READY.replace("\n", "\r\n")
         self.assertEqual(check_issues.target_end_date(planned), "2026-11-04")
         form = "### 🗓️ Target end date (Europe/Rome)\r\n\r\n2026-11-04\r\n\r\n" + READY.replace("\n", "\r\n")
         self.assertEqual(check_issues.target_end_date(form), "2026-11-04")
@@ -106,6 +112,27 @@ class TargetDateTests(unittest.TestCase):
                 body = f"- Target end date: {value}\n\n" + form
                 self.assertEqual(rules([issue(1, body=body, target=None)]), [(1, "target-date")])
 
+    def test_start_date_must_be_a_real_iso_date(self) -> None:
+        for date in ("2026-02-30", "16/11/2026", "soon", ""):
+            with self.subTest(date=date):
+                self.assertEqual(rules([issue(1, start=date)]), [(1, "start-date")])
+        self.assertEqual(rules([issue(1, start=None)]), [(1, "start-date")])
+
+    def test_start_date_must_not_be_after_the_target_end_date(self) -> None:
+        self.assertEqual(rules([issue(1, start="2026-11-05", target="2026-11-04")]),
+                         [(1, "start-date")])
+        self.assertEqual(rules([issue(1, start="2026-11-04", target="2026-11-04")]), [])
+
+    def test_start_date_form_field_is_read_and_the_line_takes_precedence(self) -> None:
+        form = ("### 🗓️ Start date (Europe/Rome)\n\n2026-11-02\n\n"
+                "### 🗓️ Target end date (Europe/Rome)\n\n2026-11-04\n\n" + READY)
+        self.assertEqual(check_issues.start_date(form), "2026-11-02")
+        self.assertEqual(rules([issue(1, body=form, target=None, start=None)]), [])
+        self.assertEqual(check_issues.start_date(START.format("2026-11-03") + form), "2026-11-03")
+        empty = form.replace("2026-11-02", "_No response_")
+        self.assertEqual(rules([issue(1, body=empty, target=None, start=None)]),
+                         [(1, "start-date")])
+
     def test_target_date_must_be_before_the_milestone_due_date(self) -> None:
         self.assertEqual(rules([issue(1, milestone_due="2026-11-05")]), [])
         self.assertEqual(rules([issue(1, milestone_due="2026-11-04")]), [(1, "milestone-due")])
@@ -124,7 +151,7 @@ class TargetDateTests(unittest.TestCase):
 
     def test_open_issue_in_a_closed_milestone_is_reported(self) -> None:
         closed = Issue(1, "open", ("P3",), ("triage-person",), "v0.1.0",
-                       PLANNING.format("2026-11-04") + READY, "2026-11-30", "closed")
+                       PLANNED.format("2026-11-04") + READY, "2026-11-30", "closed")
         self.assertEqual(rules([closed]), [(1, "milestone")])
 
     def test_due_date_comes_from_the_api_milestone(self) -> None:
@@ -276,6 +303,16 @@ class ConfigTests(unittest.TestCase):
     def test_repository_configuration_passes(self) -> None:
         self.assertEqual(check_issues.config_findings(ROOT), [])
 
+    def test_forms_must_ask_for_the_start_date(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shutil.copytree(ROOT / ".github", root / ".github")
+            form = root / ".github/ISSUE_TEMPLATE/bug.yml"
+            form.write_text(form.read_text(encoding="utf-8").replace(
+                "id: start_date", "id: begin_date"), encoding="utf-8")
+            self.assertEqual(check_issues.config_findings(root),
+                             ["bug.yml has no start date field"])
+
     def test_forms_must_ask_for_the_target_end_date(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -347,7 +384,7 @@ class MainTests(unittest.TestCase):
         items = [
             {"number": 1, "state": "open", "labels": [{"name": "P3"}],
              "assignees": [{"login": "triage-person"}], "milestone": None,
-             "body": PLANNING.format("2026-11-04") + READY + "Delivered in #2, a pull request.\n"},
+             "body": PLANNED.format("2026-11-04") + READY + "Delivered in #2, a pull request.\n"},
             {"number": 2, "state": "open", "labels": [], "assignees": [],
              "milestone": None, "body": READY, "pull_request": {}},
         ]
@@ -373,7 +410,7 @@ class MainTests(unittest.TestCase):
                     "assignees": [{"login": "triage-person"}],
                     "milestone": {"title": "v0.1.0", "state": "open",
                                   "due_on": "2026-11-30T00:00:00Z"},
-                    "body": PLANNING.format("2026-11-04") + blocked_by(prerequisite)}
+                    "body": PLANNED.format("2026-11-04") + blocked_by(prerequisite)}
 
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "issues.json"
