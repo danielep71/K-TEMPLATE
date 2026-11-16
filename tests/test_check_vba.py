@@ -561,6 +561,17 @@ class ConditionalTest(unittest.TestCase):
         self.assertEqual(sources["vba7-win64"].split("\n"), ["", "", "B", ""])
         self.assertEqual(sources["vba7-win32"].split("\n"), ["", "", "", ""])
 
+    def test_reachable_sources_returns_independent_results_for_the_same_input(self) -> None:
+        text = "A\n#If VBA7 Then\nB\n#End If\n#If\n"
+        first, first_findings = check_vba_conditionals.reachable_sources("y.bas", text)
+        expected = (dict(first), list(first_findings))
+        self.assertTrue(first_findings)
+        first["vba7-win64"] = "changed"
+        first_findings.clear()
+        second, second_findings = check_vba_conditionals.reachable_sources("y.bas", text)
+        self.assertEqual((second, second_findings), expected)
+        self.assertIsNot(second, first)
+
     def test_module_const_false_blanks_its_branch_everywhere(self) -> None:
         sources, findings = check_vba_conditionals.reachable_sources(
             "x.bas", "A\n#Const WRITE_STATUS_BAR = False\n#If WRITE_STATUS_BAR Then\nB\n"
