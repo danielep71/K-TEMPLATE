@@ -71,6 +71,11 @@ class FileCheckTest(RepositoryTest):
         self.assertEqual(check_repository.template_only(self.context(is_template=True)), [])
         self.write({"AGENTS.md": "# Instructions\n"})
         self.assertEqual(check_repository.template_only(self.context()), [])
+        # The README's template-only sections count as much as those of AGENTS.md.
+        self.write({"README.md": "# Project\n\n<!-- template-only:start -->\nx\n"
+                                 "<!-- template-only:end -->\n"})
+        self.assertEqual([path for path, _ in check_repository.template_only(self.context())],
+                         ["README.md"])
 
     def test_contact_links(self) -> None:
         self.write({".github/ISSUE_TEMPLATE/config.yml":
@@ -88,6 +93,19 @@ class FileCheckTest(RepositoryTest):
         self.write({"README.md": f"![a]({badge.format('other/template')})\n"})
         self.assertIn("reads other/template",
                       check_repository.traffic_badges(self.context())[0][1])
+
+    def test_the_badge_check_is_listed_while_traffic_or_a_badge_is_there(self) -> None:
+        def listed() -> bool:
+            return "readme-traffic-badges" in [check.name for check in
+                                               check_repository.checks(self.context())]
+        self.commit({"README.md": "# Project\n"})
+        self.assertFalse(listed())
+        self.write({check_repository.TRAFFIC_WORKFLOW: "name: Traffic history\n"})
+        self.assertTrue(listed())
+        (self.root / check_repository.TRAFFIC_WORKFLOW).unlink()
+        badge = "https://raw.githubusercontent.com/other/template/traffic-history/badges/x.json"
+        self.write({"README.md": f"![a]({badge})\n"})
+        self.assertTrue(listed())
 
     def origin(self, *branches: str) -> Path:
         """A bare repository with main and these branches, as origin would be."""
@@ -660,7 +678,7 @@ class RunTest(RepositoryTest):
                           seen[1].ci), ("a/b", "trunk", None, True))
 
     def test_real_check_list_names_each_check_once(self) -> None:
-        self.commit()
+        self.commit({check_repository.TRAFFIC_WORKFLOW: "name: Traffic history\n"})
         names = [check.name for check in check_repository.checks(self.context())]
         self.assertEqual(len(names), len(set(names)))
         for expected in ("tests", "ruff", "mypy", "actionlint", "binaries", "secret-files",

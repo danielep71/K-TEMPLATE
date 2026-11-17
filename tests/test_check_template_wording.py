@@ -99,14 +99,16 @@ class TemplateWording(unittest.TestCase):
                 "and created from the template.\n")
         self.assertEqual(self.findings({"GUIDE.md": text}), [])
 
-    def test_only_the_template_only_section_of_agents_is_left_out(self) -> None:
+    def test_only_the_template_only_sections_of_agents_and_readme_are_left_out(self) -> None:
         section = ("# Rules\n\n<!-- template-only:start -->\nIn the template, the template's "
                    "rules.\n<!-- template-only:end -->\n\nOutside: in the template.\n")
-        self.assertEqual(self.located({"AGENTS.md": section, "OTHER.md": section}), [
+        self.assertEqual(self.located({"AGENTS.md": section, "README.md": section,
+                                       "OTHER.md": section}), [
             "AGENTS.md:7: 'in the template'",
             "OTHER.md:4: 'in the template'",
             "OTHER.md:4: \"the template's\"",
             "OTHER.md:7: 'in the template'",
+            "README.md:7: 'in the template'",
         ])
 
     def test_excluded_binary_and_untracked_files_are_out_of_scope(self) -> None:

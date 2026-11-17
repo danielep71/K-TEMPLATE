@@ -75,7 +75,7 @@ PLACEHOLDER = re.compile(r"[<>{}\[\]$*…]|\.\.\.|^[A-Z][A-Z0-9_./-]*$")
 # so the commands they cite stay as released.
 HISTORY = {"CHANGELOG.md": re.compile(r"^## \[\d", re.M)}
 TOOLS = "tools/"
-# The tools that docs/setup/REPOSITORY_SETUP.md marks **Remove once run**.
+# The tools that docs/setup/REPOSITORY_SETUP.md marks **Removes itself once run**.
 REMOVED_ONCE_RUN = frozenset({"tools/initialize_repository.py"})
 NO_VALUE = frozenset({"store_true", "store_false", "store_const", "append_const", "count",
                       "help", "version"})

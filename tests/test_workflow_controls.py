@@ -403,6 +403,8 @@ class WorkflowControlTests(unittest.TestCase):
         permissions = workflows()['labels-sync.yml']['jobs']['reconcile']['permissions']
         self.assertEqual(permissions.get('pull-requests'), 'read')
 
+    @unittest.skipUnless((WORKFLOWS / 'traffic-history.yml').is_file(),
+                         '.github/workflows/traffic-history.yml does not exist')
     def test_traffic_app_credentials_stay_in_their_steps(self):
         jobs = workflows()['traffic-history.yml']['jobs']
         steps = jobs['collect']['steps']
@@ -426,6 +428,8 @@ class WorkflowControlTests(unittest.TestCase):
         self.assertNotIn('environment', alert)
         self.assertNotIn('secrets.', str(alert))
 
+    @unittest.skipUnless((WORKFLOWS / 'traffic-history.yml').is_file(),
+                         '.github/workflows/traffic-history.yml does not exist')
     def test_traffic_alert_reads_the_commit_its_collection_wrote(self):
         jobs = workflows()['traffic-history.yml']['jobs']
         collect, alert = jobs['collect'], jobs['alert']
