@@ -238,6 +238,11 @@ Use only the categories an entry needs.
   two `- Target end date:` lines, with different dates (`start-date`,
   `target-date`). A line that differs from the form field is still the
   documented way to reschedule (#561).
+- The `codeql-default-branch` check reads branch filters as GitHub does:
+  patterns, `!` negations in order, `branches-ignore`, `pull_request_target`
+  and a push filtered by tags alone. CodeQL and **Repository integrity** must
+  still run on the default branch, and a malformed branch filter in any
+  workflow is now reported (#562).
 - While a release branch is active, commit messages, squash messages and task
   pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
   guide and the pull request template now say: a closing keyword in a commit
