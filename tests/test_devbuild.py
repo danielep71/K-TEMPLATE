@@ -38,6 +38,7 @@ import build_workbook  # noqa: E402
 import check_binaries  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
+import gitfixture  # noqa: E402
 import lo_smoke  # noqa: E402
 import vba_project  # noqa: E402
 import workbook_template  # noqa: E402
@@ -490,10 +491,8 @@ SHEET_SOURCE = (b'VERSION 1.0 CLASS\r\nBEGIN\r\n  MultiUse = -1  \'True\r\nEND\r
 def git_tree(files: dict[str, bytes]) -> Any:
     """A committed Git repository with the build configuration and the given files."""
     with source_tree(files) as root:
-        for command in (["init", "-q"], ["add", "-A"],
-                        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                         "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"]):
-            build_workbook.git(root, *command)
+        gitfixture.init(root)
+        gitfixture.commit(root)
         yield root
 
 

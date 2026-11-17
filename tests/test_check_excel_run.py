@@ -38,6 +38,7 @@ from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
+sys.path.insert(0, str(SOURCE / "tests"))
 
 sys.path.insert(0, str(SOURCE / "tools" / "devbuild"))
 
@@ -45,6 +46,9 @@ import build_workbook  # noqa: E402
 import check_accuracy  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
+import gitfixture  # noqa: E402
+import gitio  # noqa: E402
+import vba_lexer  # noqa: E402
 import vba_project  # noqa: E402
 from check_excel_run import Suite, components, read_suite  # noqa: E402
 
@@ -85,24 +89,16 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_bytes((SOURCE / check_excel_run.BUILD_CONFIG).read_bytes())
     if with_cases:
-        tracked = subprocess.run(["git", "-C", str(SOURCE), "ls-files", "-z", "--",
-                                  *check_excel_run.CASE_PATHS],
-                                 capture_output=True, check=True).stdout.decode().split("\0")
-        for name in filter(None, tracked):
+        for name in gitio.tracked(SOURCE, *check_excel_run.CASE_PATHS):
             target = root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((SOURCE / name).read_bytes())
     for name, data in [*(FORM.items() if with_form else ()), *(extra or {}).items()]:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(data)
-    for command in (["init", "-q"], ["add", "-A"],
-                    ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                     "-c", "commit.gpgsign=false",
-                     "commit", "-qm", "Fixture"]):
-        subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
-    commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
-                            check=True, text=True).stdout.strip()
-    return root, commit
+    gitfixture.init(root)
+    gitfixture.commit(root)
+    return root, gitfixture.head(root)
 
 
 # The fixture repository and its commit, which setUpModule builds and
@@ -847,20 +843,15 @@ class EvidenceTest(unittest.TestCase):
 def commit_change(root: Path, base: str, changes: dict[str, bytes | None]) -> str:
     """A commit on top of ``base`` that writes each file of ``changes``, or deletes
     it when its bytes are None."""
-    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", base],
-                   capture_output=True, check=True)
+    gitfixture.git(root, "checkout", "-q", "--detach", base)
     for name, data in changes.items():
         if data is None:
             (root / name).unlink()
         else:
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_bytes(data)
-    for command in (["add", "-A"],
-                    ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                     "-c", "commit.gpgsign=false", "commit", "-qm", "Change"]):
-        subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
-    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
-                          check=True, text=True).stdout.strip()
+    gitfixture.commit(root, "Change")
+    return gitfixture.head(root)
 
 
 @needs_commit
@@ -1357,14 +1348,8 @@ class HoldoutExposureTest(unittest.TestCase):
                 unrecorded = check_excel_run.check(root, first, folder)
                 recorded = check_accuracy.record_holdout(root, ["ACC-01"],
                                                          [folder / POLICY.results], first)
-            for command in (["add", "-A"],
-                            ["-c", "user.name=Fixture", "-c",
-                             "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                             "commit", "-qm", "Record the holdout exposure"]):
-                subprocess.run(["git", "-C", str(root), *command], capture_output=True,
-                               check=True)
-            second = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                                    capture_output=True, check=True, text=True).stdout.strip()
+            gitfixture.commit(root, "Record the holdout exposure")
+            second = gitfixture.head(root)
             before = record.read_bytes()
             with evidence(None, root, second) as folder:
                 later = check_excel_run.check(root, second, folder)
@@ -1937,7 +1922,7 @@ class SourceIdentityTest(unittest.TestCase):
         expected = {Path(path).name: subprocess.run(
             ["git", "-C", str(self.root), "show", f"{self.commit}:{path}"],
             capture_output=True, check=True).stdout for path in listed
-            if path.lower().endswith(check_excel_run.VBA_SUFFIXES +
+            if path.lower().endswith(vba_lexer.VBA_SUFFIXES +
                                      check_excel_run.RESOURCE_SUFFIXES)}
         with mock.patch.object(subprocess, "run", wraps=subprocess.run) as run:
             found = components(self.root, self.commit)
@@ -1953,12 +1938,9 @@ class SourceIdentityTest(unittest.TestCase):
         for name, data in files.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_bytes(data)
-        for command in (["init", "-q"], ["add", "-A"],
-                        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Fixture"]):
-            subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
-        commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                                capture_output=True, check=True, text=True).stdout.strip()
+        gitfixture.init(root)
+        gitfixture.commit(root)
+        commit = gitfixture.head(root)
         self.assertEqual(components(root, commit),
                          {"odd\nname.bas": files["src/odd\nname.bas"],
                           "plain.bas": files["src/plain.bas"]})

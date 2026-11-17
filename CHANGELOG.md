@@ -390,6 +390,18 @@ Use only the categories an entry needs.
   keep the milestone workflow's output out of the test log. On a four-CPU
   machine, the test suite went from about 77 s to about 60 s and
   `tools/check_repository.py` from about 98 s to about 64 s (#568).
+- The tools share one source for their common building blocks, with the
+  same results. The new `tools/gitio.py` runs Git for every tool, raises one
+  `GitError` that carries the command and Git's message, and lists the
+  tracked files; each tool keeps its own errors, messages and exit codes.
+  The documentation checks that scan the folder when Git cannot list the
+  files do so through one documented function. The VBA component suffixes,
+  the VBA string-literal pattern and the data checks' `SNAKE`, `is_number`
+  and `is_date` are each defined once. The duplicate-key YAML loader moved
+  from `tests/strict_yaml.py` to `tools/strict_yaml.py`, which
+  `tools/check_repository.py` imports directly. The tests create their Git
+  repositories through one helper, `tests/gitfixture.py`, which ignores the
+  user's and the system's Git configuration (#569).
 
 ### Fixed
 

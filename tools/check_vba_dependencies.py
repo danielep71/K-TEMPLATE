@@ -23,6 +23,7 @@ from pathlib import Path
 from check_vba_conditionals import reachable_sources
 from check_vba_jumps import PROC_CLOSE, is_procedure
 from vba_lexer import (
+    STRING,
     Finding,
     facade_prefix,
     logical_units,
@@ -50,7 +51,6 @@ HOST_TYPE = re.compile(r"\bAs\s+(?:New\s+)?(Worksheet|Workbook|Chart|Window|Shap
 # Bracketed expressions such as [A1] are evaluated by Excel; an Enum's hidden
 # member such as [_First] is not.
 BRACKET = re.compile(r"\[(?!_\w*\])")
-STRING = re.compile(r'"(?:[^"]|"")*"?')
 # VBA's file, registry, process, form and system-clock statements, read at
 # the start of a statement once labels and VBA. qualifiers are removed.
 FILE_STATEMENT = re.compile(r"^(?:Open\b.*\bFor\b|Kill|FileCopy|MkDir|RmDir|ChDir|ChDrive|SetAttr|"

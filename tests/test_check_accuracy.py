@@ -16,7 +16,6 @@ import hashlib
 import io
 import json
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -26,9 +25,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import check_accuracy  # noqa: E402
 from check_test_cases import Report  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 
 QUANTITY = "total_exposure_amount"
 CANDIDATE = "a" * 40
@@ -64,12 +65,6 @@ def demo_case(root: Path, case: str, value: float, reference: str = "independent
          "reference": {"class": reference}}]}
     (root / "tests/fixtures" / f"{case}.json").write_text(json.dumps(fixture), "utf-8")
     (root / "tests/expected" / f"{case}.json").write_text(json.dumps(expected), "utf-8")
-
-
-def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                    "-c", "tag.gpgsign=false", *args], capture_output=True, check=True)
 
 
 EMPTY_RECORD: dict[str, Any] = {"schema_version": 1, "kind": "holdout-exposures",
@@ -465,7 +460,7 @@ class WideningTest(unittest.TestCase):
                widening: bool = True) -> list[str]:
         """Commit and tag ``before`` as v1.0.0, then check ``now`` in the working tree."""
         with repository(registry(before)) as root:
-            git(root, "init", "-q")
+            init(root)
             git(root, "add", "-A")
             git(root, "commit", "-qm", "Release")
             git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
@@ -543,7 +538,7 @@ class WideningTest(unittest.TestCase):
                                                   "decision": None}, False)):
             with self.subTest(status=before["status"]), \
                     repository(registry(before)) as root:
-                git(root, "init", "-q")
+                init(root)
                 git(root, "add", "-A")
                 git(root, "commit", "-qm", "Release")
                 git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")
@@ -1370,7 +1365,7 @@ class RecordCheckTest(unittest.TestCase):
     def test_the_exposures_recorded_at_a_tag_are_kept(self) -> None:
         with repository(registry(FROZEN)) as root:
             expose(root, "ACC-02")
-            git(root, "init", "-q")
+            init(root)
             git(root, "add", "-A")
             git(root, "commit", "-qm", "Release")
             git(root, "tag", "-a", "v1.0.0", "-m", "v1.0.0")

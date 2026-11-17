@@ -39,10 +39,11 @@ import argparse
 import datetime
 import itertools
 import re
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+
+from gitio import text_or_none
 
 ROOT = Path(__file__).resolve().parents[1]
 CHANGELOG = "CHANGELOG.md"
@@ -250,15 +251,6 @@ def sections(text: str) -> dict[str, tuple[int, list[str]]]:
     return found
 
 
-def git(root: Path, *args: str) -> str | None:
-    try:
-        completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
-                                   text=True, encoding="utf-8", check=False)
-    except OSError:
-        return None
-    return completed.stdout if completed.returncode == 0 else None
-
-
 def frozen_problems(root: Path, text: str, released: list[str]) -> tuple[list[str], list[str]]:
     """Each released section against its content at its tag: findings and notes.
 
@@ -266,28 +258,30 @@ def frozen_problems(root: Path, text: str, released: list[str]) -> tuple[list[st
     too, so that deleting or renaming a section cannot escape the comparison.
     Only tags on commits that HEAD contains count: an older revision, checked
     out after a newer tag was created, never held the newer section."""
-    if git(root, "rev-parse", "--git-dir") is None:
+    if text_or_none(root, "rev-parse", "--git-dir") is None:
         return [], [f"{CHANGELOG}: not a Git checkout, so released sections were not compared "
                     "with their tags"] if released else []
     findings: list[str] = []
     notes: list[str] = []
     current = sections(text)
-    for tag in sorted((git(root, "tag", "--list", "v*") or "").split()):
+    for tag in sorted((text_or_none(root, "tag", "--list", "v*") or "").split()):
         label = tag[1:]
         if not re.fullmatch(SEMVER, label) or label in released:
             continue
-        if git(root, "merge-base", "--is-ancestor", f"{tag}^{{commit}}", "HEAD") is None:
+        if text_or_none(root, "merge-base", "--is-ancestor", f"{tag}^{{commit}}",
+                        "HEAD") is None:
             continue
-        tagged_text = git(root, "show", f"{tag}:{CHANGELOG}")
+        tagged_text = text_or_none(root, "show", f"{tag}:{CHANGELOG}")
         if tagged_text is not None and label in released_versions(tagged_text):
             findings.append(f"{CHANGELOG}: [{label}] was released with tag {tag} but its "
                             "section is gone; a released section is frozen")
     for label in released:
         tag = f"v{label}"
-        if git(root, "rev-parse", "--verify", "--quiet", f"refs/tags/{tag}^{{commit}}") is None:
+        if text_or_none(root, "rev-parse", "--verify", "--quiet",
+                        f"refs/tags/{tag}^{{commit}}") is None:
             notes.append(f"{CHANGELOG}: [{label}] has no tag {tag} yet, so it is not frozen")
             continue
-        tagged_text = git(root, "show", f"{tag}:{CHANGELOG}")
+        tagged_text = text_or_none(root, "show", f"{tag}:{CHANGELOG}")
         tagged = sections(tagged_text).get(label) if tagged_text is not None else None
         if tagged is None:
             findings.append(f"{CHANGELOG}: [{label}] is not in {CHANGELOG} at its tag {tag}")

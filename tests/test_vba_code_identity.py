@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -28,8 +27,10 @@ from typing import ClassVar
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
+sys.path.insert(0, str(SOURCE / "tests"))
 
 import vba_code_identity as identity  # noqa: E402
+from gitfixture import git, head, init  # noqa: E402
 
 BASE = (
     'Attribute VB_Name = "CORE_Probe"\n'
@@ -195,13 +196,6 @@ class FailClosedTest(unittest.TestCase):
             identity.first_difference(BASE.encode("ascii"), raw)
 
 
-def git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
-                           "-c", "user.email=fixture@example.invalid",
-                           "-c", "commit.gpgsign=false", *args],
-                          check=True, capture_output=True, text=True).stdout.strip()
-
-
 MODULE = "src/core/CORE_Probe.bas"
 CLASS = "src/core/CProbe.cls"
 FORM = "src/forms/frmProbe.frm"
@@ -222,7 +216,7 @@ class RepositoryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls.root = Path(tempfile.mkdtemp(prefix="code-identity-"))
-        git(cls.root, "init", "-q")
+        init(cls.root)
         cls.executed = cls.commit({MODULE: BASE, CLASS: CLASS_TEXT, FORM: FORM_TEXT,
                                    RESOURCE: "\x00\x01 binary"}, on_run=False)
 
@@ -245,7 +239,7 @@ class RepositoryTest(unittest.TestCase):
             path.write_bytes(content.encode("ascii"))
         git(cls.root, "add", "-A")
         git(cls.root, "commit", "-qm", "Change", "--allow-empty")
-        return git(cls.root, "rev-parse", "HEAD")
+        return head(cls.root)
 
     def refused(self, path: str, run: str, commit: str) -> str | None:
         try:

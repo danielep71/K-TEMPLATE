@@ -51,6 +51,7 @@ from check_vba_identifiers import (
     top_level_split,
 )
 from vba_lexer import (
+    STRING,
     Finding,
     date_delimiter,
     read_component,
@@ -66,7 +67,6 @@ HEAD = re.compile(rf"^\s*(?:(?P<call>Call)\s+)?(?:(?P<qualifier>{NAME})\.)?(?P<n
 # of an object or a With block.
 EXPRESSION_CALL = re.compile(rf"(?<![\w.!])(?:(?P<qualifier>{NAME})\.)?(?P<name>{NAME}){SUFFIX}"
                              r"\s*\(")
-STRING = re.compile(r'"(?:[^"]|"")*"?')
 NAMED_ARGUMENT = re.compile(rf"^\s*(?P<name>{NAME})\s*:=")
 # Statements whose operands are names or constant bounds, not expressions to
 # read. ReDim bounds are evaluated at run time, so ReDim is read apart.

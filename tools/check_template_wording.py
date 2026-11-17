@@ -32,11 +32,12 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+from gitio import GitError, tracked
 
 ROOT = Path(__file__).resolve().parents[1]
 # What may stand between the words of a phrase.
@@ -103,12 +104,6 @@ def excluded(path: str, scope: dict[str, str]) -> bool:
                for name in scope)
 
 
-def tracked_files(root: Path) -> list[str]:
-    names = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
-                           check=True).stdout.decode("utf-8").split("\0")
-    return sorted(name for name in names if name)
-
-
 def text_of(root: Path, path: str) -> str | None:
     """The file's text, without the template-only section of AGENTS.md; None if not text."""
     file = root / path
@@ -130,7 +125,7 @@ def matches(root: Path, scope: dict[str, str]) -> tuple[list[Match], int]:
     """Every phrase found, and the number of files read."""
     found: list[Match] = []
     read = 0
-    for path in tracked_files(root):
+    for path in tracked(root):
         if excluded(path, scope):
             continue
         text = text_of(root, path)
@@ -155,7 +150,7 @@ def findings(root: Path, scope: dict[str, str] | None = None,
             problems.append(f"allowed use {entry.phrase!r} in {entry.path} has no reason")
     try:
         found, read = matches(root, EXCLUDED if scope is None else scope)
-    except (OSError, subprocess.CalledProcessError) as error:
+    except (OSError, GitError) as error:
         return [f"the tracked files cannot be listed: {error}"], 0
     used: set[Allowed] = set()
     for match in found:

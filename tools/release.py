@@ -100,7 +100,10 @@ from typing import TYPE_CHECKING
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_workbook_privacy  # noqa: E402
+import gitio  # noqa: E402
 from check_changelog import CHANGELOG, VERSION, released_versions  # noqa: E402
+from gitio import GitError  # noqa: E402
+from vba_lexer import VBA_SUFFIXES  # noqa: E402
 
 if TYPE_CHECKING:
     import check_excel_run
@@ -119,10 +122,6 @@ SUMS = "SHA256SUMS"
 # The sentence the Release workflow adds to the notes of an unattested draft.
 UNATTESTED = "The source bundle has no build provenance attestation"
 DIGEST = re.compile(r"^[0-9a-f]{64}$")
-# The VBA components whose presence requires an Excel run, as
-# tools/check_excel_run.py components() reads them; a form's .frx goes with
-# its .frm.
-VBA_SUFFIXES = (".bas", ".cls", ".frm")
 # The tag message's declaration of the Excel evidence, which the evidence
 # subcommand prints; any other line that starts with its label is malformed.
 EXCEL_EVIDENCE = "Excel evidence:"
@@ -151,12 +150,11 @@ class ReleaseError(Exception):
 
 
 def git(root: Path, *args: str) -> str:
-    completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
-                               check=False)
-    if completed.returncode:
-        raise ReleaseError(f"git {' '.join(args)}: "
-                           f"{completed.stderr.decode('utf-8', 'replace').strip()}")
-    return completed.stdout.decode("utf-8")
+    """Git's output as text; a ReleaseError naming the command when Git fails."""
+    try:
+        return gitio.git(root, *args).decode("utf-8")
+    except GitError as error:
+        raise ReleaseError(f"git {' '.join(args)}: {error.stderr.strip()}") from error
 
 
 def version_of(tag: str) -> str:
@@ -199,9 +197,9 @@ def verify(root: Path, tag: str, default_branch: str,
         recorded = ""
     if recorded != version:
         problems.append(f"{VERSION} at {tag} is {recorded or 'missing'}, not {version}")
-    reachable = subprocess.run(["git", "-C", str(root), "merge-base", "--is-ancestor", commit,
-                                f"origin/{default_branch}"], capture_output=True, check=False)
-    if reachable.returncode:
+    try:
+        gitio.git(root, "merge-base", "--is-ancestor", commit, f"origin/{default_branch}")
+    except GitError:
         problems.append(f"{tag} ({commit[:12]}) is not on origin/{default_branch}")
     if kind == "tag":
         message = git(root, "tag", "-l", "--format=%(contents)", tag)
@@ -415,15 +413,15 @@ def bundle(root: Path, ref: str, name: str, out: Path) -> list[Path]:
     match = TAG.match(ref)
     version = match.group(1) if match else commit[:12]
     stem = f"{name}-{version}"
-    archive = subprocess.run(["git", "-C", str(root), "archive", "--format=tar",
-                              f"--prefix={stem}/", commit], capture_output=True, check=False)
-    if archive.returncode:
-        raise ReleaseError(f"git archive {ref}: {archive.stderr.decode('utf-8', 'replace')}")
+    try:
+        archive = gitio.git(root, "archive", "--format=tar", f"--prefix={stem}/", commit)
+    except GitError as error:
+        raise ReleaseError(f"git archive {ref}: {error.stderr}") from error
     out.mkdir(parents=True, exist_ok=True)
     target = out / f"{stem}-source.tar.gz"
     with open(target, "wb") as raw, gzip.GzipFile(filename="", mode="wb", fileobj=raw,
                                                   mtime=0, compresslevel=9) as packed:
-        packed.write(archive.stdout)
+        packed.write(archive)
     sums = out / "SHA256SUMS"
     digest = hashlib.sha256(target.read_bytes()).hexdigest()
     sums.write_text(f"{digest}  {target.name}\n", encoding="utf-8")

@@ -307,7 +307,8 @@ class RepositoryTests(unittest.TestCase):
         name = "test_removed_once_run_matches_the_setup_guide"
         with tempfile.TemporaryDirectory() as directory:
             copy = Path(directory)
-            for path in ("tests/test_check_doc_commands.py", "tools/check_doc_commands.py"):
+            for path in ("tests/test_check_doc_commands.py", "tools/check_doc_commands.py",
+                         "tools/gitio.py"):
                 (copy / path).parent.mkdir(parents=True, exist_ok=True)
                 (copy / path).write_bytes((ROOT / path).read_bytes())
             result = subprocess.run(

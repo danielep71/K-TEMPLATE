@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import codecs
-import datetime
 import json
 import math
 import re
@@ -43,6 +42,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_data_contract  # noqa: E402
+from check_data_contract import CURRENCY, DATASET_ID, SNAKE, is_date  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 METHODOLOGY = Path("docs/methodology")
@@ -56,11 +56,7 @@ DEFAULT_ENCODING = "UTF-8"
 # would also accept a trailing line break. Digits are ASCII: \d would also
 # accept other scripts' digits.
 CASE_ID = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
-SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
-CURRENCY = re.compile(r"[A-Z]{3}")
-DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 CALCULATION_ID = re.compile(r"CALC-[0-9]+")
-DATASET_ID = re.compile(r"DS-[0-9]+")
 # A rule is a step of the case's calculation contract: CALC-01.2 is step 2.
 RULE = re.compile(r"(CALC-[0-9]+)\.([0-9]+)")
 # A calculation contract's *Rules* table, under its ### heading, lists its steps.
@@ -160,21 +156,12 @@ class Report:
 
 
 def is_number(value: object) -> bool:
+    """Whether the value is a finite JSON number: an int or a float, not a bool."""
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def is_text(value: object) -> bool:
     return isinstance(value, str) and value.strip() != ""
-
-
-def is_date(value: object) -> bool:
-    if not isinstance(value, str) or not DATE.fullmatch(value):
-        return False
-    try:
-        datetime.date.fromisoformat(value)
-    except ValueError:
-        return False
-    return True
 
 
 def keys_problem(data: Mapping[str, Any], allowed: frozenset[str]) -> str | None:
