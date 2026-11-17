@@ -51,14 +51,15 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path, PurePosixPath
 
+import gitio
+from vba_lexer import VBA_SUFFIXES
+
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORIES = ("src", "tests/modules", "examples/modules")
-EXTENSIONS = frozenset({".bas", ".cls", ".frm"})
 BASELINE = "tools/vba_layout_baseline.json"
 BASELINE_SCHEMA = 1
 INDENT = "    "
@@ -184,7 +185,7 @@ def format_text(text: str) -> str:
 
 
 def is_module(path: Path) -> bool:
-    return path.suffix.lower() in EXTENSIONS
+    return path.suffix.lower() in VBA_SUFFIXES
 
 
 def modules_under(folder: Path) -> list[Path]:
@@ -196,15 +197,13 @@ def tracked_modules(root: Path) -> list[str]:
 
     Git's index decides, staged files included; an untracked file is not read.
     """
-    completed = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--",
-                                *SOURCE_DIRECTORIES],
-                               capture_output=True, check=False)
-    if completed.returncode:
-        message = completed.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"cannot list the tracked files: {message or 'git ls-files failed'}")
-    names = (item.decode("utf-8", errors="surrogateescape")
-             for item in completed.stdout.split(b"\0") if item)
-    return sorted({name for name in names if is_module(Path(name))})
+    try:
+        names = gitio.tracked(root, *SOURCE_DIRECTORIES)
+    except gitio.GitError as error:
+        message = error.stderr.strip()
+        raise RuntimeError(f"cannot list the tracked files: {message or 'git ls-files failed'}") \
+            from error
+    return [name for name in names if is_module(Path(name))]
 
 
 def named_files(paths: Sequence[Path]) -> list[Path]:

@@ -47,11 +47,12 @@ from __future__ import annotations
 import argparse
 import ast
 import re
-import subprocess
 import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from gitio import tracked_or_scanned
 
 ROOT = Path(__file__).resolve().parents[1]
 FENCE = re.compile(r"\s*(`{3,}|~{3,})\s*([^\s`]*)")
@@ -523,16 +524,6 @@ def commands(code: str) -> Iterator[tuple[str, str, list[str]]]:
 # ---------------------------------------------------------------------------
 # The check.
 
-def tracked_files(root: Path) -> set[str]:
-    try:
-        names = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], capture_output=True,
-                               text=True, encoding="utf-8", check=True).stdout.split("\0")
-        return {name for name in names if name}
-    except (OSError, subprocess.CalledProcessError):
-        return {path.relative_to(root).as_posix() for path in root.rglob("*")
-                if path.is_file() and ".git" not in path.relative_to(root).parts}
-
-
 def module_script(module: str, tracked: set[str]) -> tuple[bool, str | None]:
     """Whether a module is this repository's, and the tracked file that runs it."""
     parts = module.split(".")
@@ -579,7 +570,7 @@ def command_findings(root: Path, tracked: set[str], scripts: dict[str, Script], 
 
 def check(root: Path = ROOT) -> tuple[list[Finding], int, int]:
     """Return (findings, commands checked, Markdown files read)."""
-    tracked = tracked_files(root)
+    tracked = set(tracked_or_scanned(root))
     scripts: dict[str, Script] = {}
     findings: list[Finding] = []
     count = files = 0

@@ -377,11 +377,12 @@ def allowed_text(field: Field) -> str:
 # ---------------------------------------------------------------------------
 # The reference validator.
 
-def is_date(text: str) -> bool:
-    if not DATE.fullmatch(text):
+def is_date(value: object) -> bool:
+    """Whether the value is a real calendar date written YYYY-MM-DD."""
+    if not isinstance(value, str) or not DATE.fullmatch(value):
         return False
     try:
-        datetime.date.fromisoformat(text)
+        datetime.date.fromisoformat(value)
     except ValueError:
         return False
     return True

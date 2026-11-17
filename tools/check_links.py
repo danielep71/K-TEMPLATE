@@ -76,6 +76,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+from gitio import text_or_none, tracked_or_scanned
+
 ROOT = Path(__file__).resolve().parents[1]
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$")
 ATTRIBUTE = r"""\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))"""
@@ -497,16 +499,6 @@ def markdown_links(text: str) -> tuple[list[str], set[str]]:
 # ---------------------------------------------------------------------------
 # Offline check.
 
-def tracked_markdown(root: Path) -> list[Path]:
-    try:
-        names = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
-                               capture_output=True, text=True, encoding="utf-8",
-                               check=True).stdout.split("\0")
-        return [root / name for name in names if name]
-    except (OSError, subprocess.CalledProcessError):
-        return [path for path in root.rglob("*.md") if ".git" not in path.relative_to(root).parts]
-
-
 def local_error(root: Path, source: Path, link: str, anchors: dict[Path, set[str]]) -> str | None:
     url = urlsplit(link)
     if url.path.startswith("/"):
@@ -610,7 +602,7 @@ def check(root: Path = ROOT) -> tuple[list[str], set[str], int]:
     """
     errors: list[str] = []
     documents = {}
-    for path in tracked_markdown(root):
+    for path in (root / name for name in tracked_or_scanned(root, "*.md")):
         if not path.is_file():
             # Tracked by Git but deleted from the working tree without git rm.
             errors.append(f"{path.relative_to(root).as_posix()}: tracked but missing from the working tree")
@@ -655,9 +647,8 @@ def check(root: Path = ROOT) -> tuple[list[str], set[str], int]:
 
 def detect_repository(root: Path) -> str:
     """owner/name of the origin remote on GitHub, or "" when there is none."""
-    result = subprocess.run(["git", "-C", str(root), "remote", "get-url", "origin"],
-                            capture_output=True, text=True, check=False)
-    match = GITHUB_REMOTE.search(result.stdout.strip()) if result.returncode == 0 else None
+    url = text_or_none(root, "remote", "get-url", "origin")
+    match = GITHUB_REMOTE.search(url.strip()) if url is not None else None
     return match.group(1) if match else ""
 
 

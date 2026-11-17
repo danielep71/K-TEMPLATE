@@ -23,15 +23,20 @@ warning and does not fail the run. --ci, which CI also passes, adds a last
 check that fails when the working tree differs from the commit, so that the
 result describes the commit and nothing a step changed. The run covers the
 repository only: it compiles no VBA, runs no Excel and certifies no figure.
+
+The command checks run in parallel, up to four at a time; the checks written
+as functions run one at a time, and that last check runs alone, once every
+other check has finished. The console, the logs and the report list the
+checks in the same order whichever finishes first.
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime
 import fnmatch
 import hashlib
-import importlib
 import importlib.util
 import json
 import os
@@ -40,15 +45,20 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import gitio
+from gitio import GitError
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = Path("test-results/integrity")
 SCOPE = "Repository checks only: no VBA compilation, no Excel run, no numerical certification"
 TIMEOUT_SECONDS = 600
+# The most command checks that run at once, and never more than the CPUs.
+MAX_WORKERS = 4
 # How long to wait for the origin remote to list a branch.
 REMOTE_TIMEOUT_SECONDS = 60
 # A workflow that actionlint must reject; it lives outside .github/workflows/,
@@ -114,6 +124,9 @@ class Check:
     advisory: bool = False
     # Run first; the check fails without running its command unless the probe fails.
     probe: Probe | None = None
+    # Start once every check listed before it has finished, and finish before any
+    # check listed after it starts.
+    alone: bool = False
 
 
 @dataclass
@@ -124,11 +137,6 @@ class Result:
     exit_code: int | None
     detail: str = ""
     log: str = field(default="", repr=False)
-
-
-def git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
-                          check=True).stdout
 
 
 # ---------------------------------------------------------------------------
@@ -178,8 +186,8 @@ def secret_pattern(path: str) -> str | None:
 def secret_files(context: Context) -> list[Finding]:
     """No tracked file is named as a secret or private key file."""
     findings = []
-    for path in git(context.root, "ls-files", "-z").split("\0"):
-        pattern = secret_pattern(path) if path else None
+    for path in gitio.tracked(context.root):
+        pattern = secret_pattern(path)
         if pattern:
             findings.append((path, f"is tracked and named as a secret or key file ({pattern}); "
                                    "remove it from the repository, rotate the secret it holds, "
@@ -208,11 +216,11 @@ def origin_has_branch(root: Path, branch: str) -> bool:
     branch that exists. Raises MissingContext when origin cannot answer: no
     such remote, no network or no access.
     """
-    tracked = subprocess.run(["git", "rev-parse", "--verify", "--quiet",
-                              f"refs/remotes/origin/{branch}"], cwd=root, capture_output=True,
-                             check=False)
-    if not tracked.returncode:
+    try:
+        gitio.git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
         return True
+    except GitError:
+        pass
     ref = f"refs/heads/{branch}"
     try:
         # --exit-code exits with 2 when origin answers that it has no such branch.
@@ -236,6 +244,7 @@ def origin_has_branch(root: Path, branch: str) -> bool:
 
 # The workflows that must run on the default branch, as their branch filters read.
 DEFAULT_BRANCH_WORKFLOWS = (".github/workflows/codeql.yml",
+                            ".github/workflows/minimum-python.yml",
                             ".github/workflows/repository-integrity.yml")
 # The events whose branch filters select the branch: the pushed one, or the
 # base of a pull request.
@@ -326,7 +335,7 @@ def runs_on_branch(event: str, config: Any, branch: str | None) -> bool:
 
 
 def codeql_default_branch(context: Context) -> list[Finding]:
-    """CodeQL and Repository integrity run on the default branch, and every workflow's branch filters are well formed.
+    """CodeQL, Minimum Python and Repository integrity run on the default branch, and every workflow's branch filters are well formed.
 
     Each branch filter of push, pull_request and pull_request_target is read as
     GitHub reads it: patterns, ! negations in order, branches-ignore, and a push
@@ -339,11 +348,9 @@ def codeql_default_branch(context: Context) -> list[Finding]:
         if workflows.is_dir() else []
     if not paths:
         return []
-    sys.path.insert(0, str(context.root / "tests"))
-    try:
-        strict_yaml: Any = importlib.import_module("strict_yaml")
-    finally:
-        sys.path.pop(0)
+    # Imported here, not at the top: it needs PyYAML, and without PyYAML the
+    # check is skipped (codeql_missing) while the others still run.
+    import strict_yaml
     findings = []
     for path in paths:
         document = strict_yaml.load((context.root / path).read_text(encoding="utf-8")) or {}
@@ -376,7 +383,7 @@ def required_documents(context: Context) -> list[Finding]:
 
 def clean_working_tree(context: Context) -> list[Finding]:
     """No file differs from the commit, after every other check has run."""
-    changes = git(context.root, "status", "--porcelain", "--untracked-files=all")
+    changes = gitio.text(context.root, "status", "--porcelain", "--untracked-files=all")
     return [(line[3:], f"differs from the commit (git status {line[:2].strip()}); the checks "
                        "must describe the commit as it is")
             for line in changes.splitlines() if line]
@@ -384,9 +391,7 @@ def clean_working_tree(context: Context) -> list[Finding]:
 
 def whitespace_commands(root: Path) -> list[tuple[str, list[str]]]:
     """Check every committed file, then local changes, without needing history."""
-    empty_tree = subprocess.run(["git", "hash-object", "-t", "tree", "--stdin"], cwd=root,
-                                input="", capture_output=True, text=True,
-                                check=True).stdout.strip()
+    empty_tree = gitio.text(root, "hash-object", "-t", "tree", "--stdin", input="").strip()
     return [("whitespace-committed", ["git", "diff", "--check", empty_tree, "HEAD"]),
             ("whitespace-local", ["git", "diff", "--check", "HEAD"])]
 
@@ -416,7 +421,7 @@ def checks(context: Context) -> list[Check]:
     node = shutil.which("node")
     node_missing = None if node else "node is not on PATH"
     no_repository = None if context.repository else "the repository is unknown (--repository)"
-    # The CodeQL check reads its workflow through tests/strict_yaml.py, which needs PyYAML.
+    # The CodeQL check reads its workflow through tools/strict_yaml.py, which needs PyYAML.
     codeql_missing = "; ".join(reason for found, reason in (
         (context.default_branch, "the default branch is unknown (--default-branch)"),
         (importlib.util.find_spec("yaml"), "PyYAML is not installed (.github/requirements.txt)"),
@@ -468,8 +473,8 @@ def checks(context: Context) -> list[Check]:
     ]
     listed += [Check(name, command) for name, command in whitespace_commands(context.root)]
     if context.ci:
-        # Last, so that it also sees what the other checks changed.
-        listed.append(Check("clean-working-tree", function=clean_working_tree))
+        # Last and alone, so that it also sees what the other checks changed.
+        listed.append(Check("clean-working-tree", function=clean_working_tree, alone=True))
     return listed
 
 
@@ -484,7 +489,13 @@ def annotate(finding: Finding) -> str:
 
 
 def run_check(check: Check, context: Context, strict: bool) -> Result:
-    result = run_one(check, context, strict)
+    try:
+        result = run_one(check, context, strict)
+    except Exception as error:  # noqa: BLE001 - reported as a failed check, not raised
+        # A command that cannot be started, like a function that raises, fails
+        # its check and lets the other checks run.
+        result = Result(check.name, "fail", check.command, None, "raised an error",
+                        f"{type(error).__name__}: {error}")
     if check.advisory and result.status == "fail":
         result.status = "warn"
         result.detail = f"advisory, not a failure: {result.detail}"
@@ -546,7 +557,7 @@ def missing_result(check: Check, reason: str, strict: bool) -> Result:
 
 
 def tracked_hashes(root: Path) -> dict[str, str]:
-    names = [name for name in git(root, "ls-files", "-z").split("\0") if name]
+    names = gitio.tracked(root)
     return {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
             for name in names if (root / name).is_file()}
 
@@ -555,8 +566,8 @@ def build_report(context: Context, results: Sequence[Result]) -> dict[str, Any]:
     root = context.root
     return {
         "schema_version": 1,
-        "commit": git(root, "rev-parse", "HEAD").strip(),
-        "dirty": bool(git(root, "status", "--porcelain")),
+        "commit": gitio.text(root, "rev-parse", "HEAD").strip(),
+        "dirty": bool(gitio.text(root, "status", "--porcelain")),
         "pull_request_head": os.environ.get("PR_HEAD_SHA") or None,
         "repository": context.repository,
         "generated_at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
@@ -587,12 +598,42 @@ def summary(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def results_in_order(context: Context, listed: Sequence[Check],
+                     strict: bool) -> Iterator[Result]:
+    """Each check's result, in the listed order, as soon as it and every check
+    before it have finished.
+
+    The command checks run in a pool of threads, up to MAX_WORKERS of them at
+    once and no more than the CPUs; the function checks, which are quick and
+    may change the process's state, run one at a time in this thread, as does
+    a check whose tool or context is missing. A check marked alone splits the
+    list: it runs once the checks before it have finished, and the checks
+    after it start once it has finished.
+    """
+    workers = max(1, min(MAX_WORKERS, os.cpu_count() or 1))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        start = 0
+        while start < len(listed):
+            if listed[start].alone:
+                yield run_check(listed[start], context, strict)
+                start += 1
+                continue
+            end = next((index for index in range(start, len(listed)) if listed[index].alone),
+                       len(listed))
+            futures = {index: pool.submit(run_check, listed[index], context, strict)
+                       for index in range(start, end)
+                       if listed[index].function is None and not listed[index].missing}
+            for index in range(start, end):
+                yield futures[index].result() if index in futures \
+                    else run_check(listed[index], context, strict)
+            start = end
+
+
 def run(context: Context, listed: Sequence[Check], out: Path, strict: bool,
         summary_path: Path | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     results = []
-    for check in listed:
-        result = run_check(check, context, strict)
+    for check, result in zip(listed, results_in_order(context, listed, strict), strict=True):
         command = " ".join(result.command) if result.command else check.name
         (out / f"{check.name}.log").write_text(f"$ {command}\n{result.log}", encoding="utf-8")
         results.append(result)
@@ -615,8 +656,8 @@ def run(context: Context, listed: Sequence[Check], out: Path, strict: bool,
 
 def detect_repository(root: Path) -> str | None:
     try:
-        url = git(root, "remote", "get-url", "origin").strip()
-    except subprocess.CalledProcessError:
+        url = gitio.text(root, "remote", "get-url", "origin").strip()
+    except GitError:
         return None
     match = GITHUB_REMOTE.search(url)
     return match.group(1) if match else None
@@ -624,8 +665,8 @@ def detect_repository(root: Path) -> str | None:
 
 def detect_default_branch(root: Path) -> str | None:
     try:
-        ref = git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
-    except subprocess.CalledProcessError:
+        ref = gitio.text(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
+    except GitError:
         return None
     return ref.removeprefix("refs/remotes/origin/") or None
 

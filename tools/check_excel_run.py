@@ -145,7 +145,6 @@ import io
 import json
 import posixpath
 import re
-import subprocess
 import sys
 import tempfile
 import zipfile
@@ -163,12 +162,13 @@ import check_accuracy  # noqa: E402
 import check_vba_conditionals  # noqa: E402
 import vba_code_identity  # noqa: E402
 import vba_lexer  # noqa: E402
+from gitio import git  # noqa: E402
+from vba_lexer import VBA_SUFFIXES  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "devbuild"))
 
 import build_workbook  # noqa: E402
 
-VBA_SUFFIXES = (".bas", ".cls", ".frm")
 # A form's binary resources, exported beside its .frm and compared byte for byte.
 RESOURCE_SUFFIXES = (".frx",)
 
@@ -434,13 +434,6 @@ class Evidence:
     carried: str = ""
 
 
-def git(root: Path, *args: str) -> bytes:
-    completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
-    if completed.returncode:
-        raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
-    return completed.stdout
-
-
 def components(root: Path, commit: str) -> dict[str, bytes]:
     """The commit's VBA components and form resources, by file name, as Git stores
     them: text components with LF line ends, resources byte for byte."""
@@ -459,11 +452,7 @@ def blobs(root: Path, commit: str, paths: list[str]) -> list[bytes]:
     if any("\n" in path or "\r" in path for path in paths):
         return [git(root, "show", f"{commit}:{path}") for path in paths]
     request = "".join(f"{commit}:{path}\n" for path in paths).encode("utf-8")
-    completed = subprocess.run(["git", "-C", str(root), "cat-file", "--batch"], input=request,
-                               capture_output=True, check=False)
-    if completed.returncode:
-        raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
-    output, contents = completed.stdout, []
+    output, contents = git(root, "cat-file", "--batch", input=request), []
     for path in paths:
         header, _, output = output.partition(b"\n")
         fields = header.split()
@@ -1221,13 +1210,15 @@ def copy_cases(root: Path, commit: str, target: Path, record_commit: str | None 
     files = [(commit, name) for name in filter(None, listed.decode("utf-8").split("\0"))
              if name != EXPOSURE_RECORD]
     files += [(record_commit, name) for name in filter(None, record.decode("utf-8").split("\0"))]
-    for source, name in files:
-        path = PurePosixPath(name)
-        if path.is_absolute() or ".." in path.parts:
-            continue
-        destination = target.joinpath(*path.parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(git(root, "show", f"{source}:{name}"))
+    files = [(source, name) for source, name in files
+             if not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts]
+    # One git cat-file per commit, not one git show per file.
+    for source in dict.fromkeys(source for source, _ in files):
+        names = [name for each, name in files if each == source]
+        for name, content in zip(names, blobs(root, source, names), strict=True):
+            destination = target.joinpath(*PurePosixPath(name).parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
 
 
 def results_files(policy: Policy) -> list[str]:

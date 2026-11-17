@@ -26,6 +26,7 @@ from pathlib import Path
 
 from check_vba_conditionals import reachable_sources
 from vba_lexer import (
+    STRING,
     Finding,
     logical_units,
     read_component,
@@ -84,8 +85,6 @@ class Declaration:
     def key(self) -> str:
         return f"{self.component}\t{self.kind}\t{self.name}"
 
-
-STRING = re.compile(r'"(?:[^"]|"")*"?')
 
 
 def norm(text: str) -> str:

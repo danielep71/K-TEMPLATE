@@ -49,7 +49,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import subprocess
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -61,6 +60,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import check_data_contract  # noqa: E402
 import check_repository  # noqa: E402
 import render_docs  # noqa: E402
+from gitio import GitError, tracked_or_scanned  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 POLICY = ".github/excel-evidence-policy.json"
@@ -210,17 +210,6 @@ def shown(text: str) -> str:
     return " ".join(re.sub(GAP, " ", text).split()).lower()
 
 
-def tracked_markdown(root: Path) -> list[str]:
-    try:
-        names = subprocess.run(["git", "-C", str(root), "ls-files", "-z", "--", "*.md"],
-                               capture_output=True, text=True, encoding="utf-8",
-                               check=True).stdout.split("\0")
-        return sorted(name for name in names if name)
-    except (OSError, subprocess.CalledProcessError):
-        return sorted(path.relative_to(root).as_posix() for path in root.rglob("*.md")
-                      if ".git" not in path.relative_to(root).parts)
-
-
 def without_generated_blocks(text: str, path: str) -> str:
     """The text with each generated block blanked, keeping its line breaks."""
     spans, _ = render_docs.blocks_in(text, path)
@@ -241,7 +230,7 @@ class Match:
 def matches(root: Path, sources: Sequence[Source]) -> list[Match]:
     found: list[Match] = []
     patterns = [(source, phrase_pattern(source.phrases)) for source in sources]
-    for path in tracked_markdown(root):
+    for path in tracked_or_scanned(root, "*.md"):
         if Path(path).name in EXCLUDED or not (root / path).is_file():
             continue
         text = without_generated_blocks((root / path).read_text(encoding="utf-8"), path)
@@ -260,7 +249,7 @@ def findings(root: Path, sources: Sequence[Source] = SOURCES,
     for source in sources:
         try:
             values[source.name] = source.read(root)
-        except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError, KeyError, GitError) as error:
             problems.append(f"source {source.name} ({source.where}) cannot be read: {error}")
     for entry in allowed:
         if not entry.reason.strip():

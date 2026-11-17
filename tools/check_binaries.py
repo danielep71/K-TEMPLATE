@@ -38,7 +38,6 @@ import fnmatch
 import hashlib
 import json
 import re
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -48,6 +47,7 @@ from xml.etree import ElementTree
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_workbook_privacy as privacy  # noqa: E402
+import gitio  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 ALLOWLIST = Path(".github/binary-allowlist.json")
@@ -64,19 +64,10 @@ SOURCE_COPIES = "docs/methodology/sources/"
 MACRO_PART = re.compile(r"vbaProject|macroEnabled", re.I)
 
 
-def git(root: Path, *args: str, stdin: str | None = None) -> str:
-    return subprocess.run(["git", *args], cwd=root, input=stdin, text=True,
-                          capture_output=True, check=True).stdout
-
-
-def tracked_files(root: Path) -> list[str]:
-    return [name for name in git(root, "ls-files", "-z").split("\0") if name]
-
-
 def text_attributes(root: Path, names: Sequence[str]) -> dict[str, str]:
     """The value of the text attribute for each path: set, unset, auto or unspecified."""
-    fields = git(root, "check-attr", "-z", "--stdin", "text",
-                 stdin="\0".join(names) + "\0").split("\0")
+    fields = gitio.text(root, "check-attr", "-z", "--stdin", "text",
+                        input="\0".join(names) + "\0").split("\0")
     return {fields[index]: fields[index + 2] for index in range(0, len(fields) - 2, 3)}
 
 
@@ -162,7 +153,7 @@ def approved(name: str, tracked: set[str]) -> bool:
 def check(root: Path) -> tuple[list[str], int]:
     """Return the findings and the number of binary files found."""
     findings: list[str] = []
-    names = tracked_files(root)
+    names = gitio.tracked(root)
     tracked = set(names)
     allowed = load_allowlist(root, findings)
     attributes = text_attributes(root, names) if names else {}

@@ -363,6 +363,45 @@ Use only the categories an entry needs.
   names the prefix, and lists that edit. The README's *Start a new
   repository* links the setup guide's *Template cleanup* for the list of
   edits instead of repeating it (#491).
+- Fewer workflow runs repeat what **Repository integrity** already checks.
+  **Sync issue labels** and **Detect issue-label drift** no longer run on
+  pull requests, whose label self-tests, catalogue validation and drift
+  fixtures **Repository integrity** runs. **CodeQL** analyzes pushes to the
+  default branch only, and skips a pull request that changes only Markdown
+  files and files under `docs/`. The minimum-Python test job moved to its
+  own workflow, `minimum-python.yml`, which runs on pull requests that
+  change Python code, the tests, the tools, the label scripts or the Python
+  requirements, on pushes to the default branch and on manual dispatch; the
+  `codeql-default-branch` check also requires it to run on the default
+  branch. The label-drift and pull-request milestone scans run weekly
+  instead of daily. The README's workflow table and the setup guide state
+  when each workflow runs (#567).
+- The tests and the repository checks run faster, with the same tests and
+  the same results. `tools/check_repository.py` runs the command checks in
+  parallel, up to four at a time, and still prints, logs and reports every
+  check in the listed order; `clean-working-tree` still runs last and alone,
+  and a command check that cannot start now fails instead of stopping the
+  run. `tools/check_excel_run.py` copies the test cases of a commit with one
+  `git cat-file` instead of one `git show` per file. The tests build the
+  Excel-run fixture repository when they run, not on import, so that
+  importing them leaves no temporary directory; copy one empty `.git` into
+  each VBA fixture instead of running `git init` for each; run mypy once over
+  its probes; stop their HTTP test server without the half-second poll; and
+  keep the milestone workflow's output out of the test log. On a four-CPU
+  machine, the test suite went from about 77 s to about 60 s and
+  `tools/check_repository.py` from about 98 s to about 64 s (#568).
+- The tools share one source for their common building blocks, with the
+  same results. The new `tools/gitio.py` runs Git for every tool, raises one
+  `GitError` that carries the command and Git's message, and lists the
+  tracked files; each tool keeps its own errors, messages and exit codes.
+  The documentation checks that scan the folder when Git cannot list the
+  files do so through one documented function. The VBA component suffixes,
+  the VBA string-literal pattern and the data checks' `SNAKE`, `is_number`
+  and `is_date` are each defined once. The duplicate-key YAML loader moved
+  from `tests/strict_yaml.py` to `tools/strict_yaml.py`, which
+  `tools/check_repository.py` imports directly. The tests create their Git
+  repositories through one helper, `tests/gitfixture.py`, which ignores the
+  user's and the system's Git configuration (#569).
 
 ### Fixed
 

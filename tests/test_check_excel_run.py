@@ -20,8 +20,10 @@ from __future__ import annotations
 import ast
 import contextlib
 import dataclasses
+import functools
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -31,11 +33,12 @@ import unittest
 import zipfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import Any, ClassVar, TypeVar
 from unittest import mock
 
 SOURCE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SOURCE / "tools"))
+sys.path.insert(0, str(SOURCE / "tests"))
 
 sys.path.insert(0, str(SOURCE / "tools" / "devbuild"))
 
@@ -43,8 +46,13 @@ import build_workbook  # noqa: E402
 import check_accuracy  # noqa: E402
 import check_excel_run  # noqa: E402
 import export_manifest  # noqa: E402
+import gitfixture  # noqa: E402
+import gitio  # noqa: E402
+import vba_lexer  # noqa: E402
 import vba_project  # noqa: E402
 from check_excel_run import Suite, components, read_suite  # noqa: E402
+
+Test = TypeVar("Test")
 
 # The policy of the working tree; make_repository commits it with the modules.
 POLICY = check_excel_run.working_policy(SOURCE)
@@ -81,27 +89,23 @@ def make_repository(policy: bytes | None = None, *, with_policy: bool = True,
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_bytes((SOURCE / check_excel_run.BUILD_CONFIG).read_bytes())
     if with_cases:
-        tracked = subprocess.run(["git", "-C", str(SOURCE), "ls-files", "-z", "--",
-                                  *check_excel_run.CASE_PATHS],
-                                 capture_output=True, check=True).stdout.decode().split("\0")
-        for name in filter(None, tracked):
+        for name in gitio.tracked(SOURCE, *check_excel_run.CASE_PATHS):
             target = root / name
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes((SOURCE / name).read_bytes())
     for name, data in [*(FORM.items() if with_form else ()), *(extra or {}).items()]:
         (root / name).parent.mkdir(parents=True, exist_ok=True)
         (root / name).write_bytes(data)
-    for command in (["init", "-q"], ["add", "-A"],
-                    ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                     "-c", "commit.gpgsign=false",
-                     "commit", "-qm", "Fixture"]):
-        subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
-    commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
-                            check=True, text=True).stdout.strip()
-    return root, commit
+    gitfixture.init(root)
+    gitfixture.commit(root)
+    return root, gitfixture.head(root)
 
 
-ROOT, COMMIT = make_repository() if MODULES and shutil.which("git") else (SOURCE, "")
+# The fixture repository and its commit, which setUpModule builds and
+# tearDownModule removes; COMMIT stays empty without Git or the modules.
+ROOT = SOURCE
+COMMIT = ""
+NEEDS_COMMIT = "needs Git and the modules of tests/modules/"
 ENVIRONMENT = ("ENVIRONMENT=host=Microsoft Excel; version=16.0; build=17928; "
                "os=Windows (64-bit) NT 10.00; office=64-bit; runtime=VBA7")
 HOST = ("operator=Fixture Operator\n"
@@ -118,13 +122,51 @@ HOST = ("operator=Fixture Operator\n"
         "outcome=PASS\n")
 UNCHANGED = "CLEANUP=PASS; detail=Excel state unchanged (Calculation, DisplayAlerts, " \
             "EnableEvents, ScreenUpdating, Workbooks, ActiveWindow)"
-FAILED = check_excel_run.test_failed_number(components(ROOT, COMMIT)[Path(POLICY.harness).name]) \
-    if COMMIT else None
+# The harness's ERR_TEST_FAILED, read by setUpModule from the fixture commit.
+FAILED: int | None = None
+
+
+def setUpModule() -> None:
+    """Build the fixture repository when the tests run, not on import, so that
+    importing this module, as test discovery does, leaves no directory behind."""
+    global ROOT, COMMIT, FAILED
+    if COMMIT or not (MODULES and shutil.which("git")):
+        return
+    ROOT, COMMIT = make_repository()
+    FAILED = check_excel_run.test_failed_number(
+        components(ROOT, COMMIT)[Path(POLICY.harness).name])
 
 
 def tearDownModule() -> None:
+    global ROOT, COMMIT, FAILED
     if ROOT != SOURCE:
         shutil.rmtree(ROOT, ignore_errors=True)
+    ROOT, COMMIT, FAILED = SOURCE, "", None
+
+
+def needs_commit(test: Test) -> Test:
+    """unittest.skipUnless(COMMIT) for a test class or method, with COMMIT read
+    when the test runs, after setUpModule, rather than on import."""
+    if isinstance(test, type) and issubclass(test, unittest.TestCase):
+        set_up = test.setUpClass
+
+        def set_up_class(cls: type[unittest.TestCase]) -> None:
+            if not COMMIT:
+                raise unittest.SkipTest(NEEDS_COMMIT)
+            set_up()
+
+        # unittest skips the whole class when its setUpClass raises SkipTest.
+        setattr(test, "setUpClass", classmethod(set_up_class))
+        return test
+    method: Callable[..., None] = test  # type: ignore[assignment]
+
+    @functools.wraps(method)
+    def skipping(self: unittest.TestCase, *args: Any, **kwargs: Any) -> None:
+        if not COMMIT:
+            raise unittest.SkipTest(NEEDS_COMMIT)
+        method(self, *args, **kwargs)
+
+    return skipping  # type: ignore[return-value]
 
 
 def suite() -> Suite:
@@ -191,11 +233,12 @@ def certification_log(name: str = "examples",
     return lines
 
 
-def results_document(commit: str = COMMIT, root: Path = ROOT) -> dict[str, Any]:
+def results_document(commit: str | None = None, root: Path | None = None) -> dict[str, Any]:
     """The results file a correct normal run writes for the commit checked out in
     ``root``: every output of its contracts' quantities in their cases, and of its
     invariants' quantities in theirs, equal to its expected value, and no result when
-    it has no accuracy registry."""
+    it has no accuracy registry; by default, of the fixture commit."""
+    commit, root = commit or COMMIT, root or ROOT
     path = root / check_accuracy.REGISTRY
     registry = json.loads(path.read_text(encoding="utf-8")) if path.is_file() \
         else {"contracts": []}
@@ -234,12 +277,13 @@ def write_log(folder: Path, name: str, lines: list[str]) -> None:
 
 
 @contextlib.contextmanager
-def evidence(change: Callable[[Path], None] | None = None, root: Path = ROOT,
-             commit: str = COMMIT) -> Iterator[Path]:
+def evidence(change: Callable[[Path], None] | None = None, root: Path | None = None,
+             commit: str | None = None) -> Iterator[Path]:
     """A complete, valid evidence folder for the suites of ``commit``, then ``change``
     applied to it. The example suite's results file holds every result; the results
     file of a project suite that names one holds none, since the files are measured
-    together."""
+    together. By default, of the fixture commit."""
+    root, commit = root or ROOT, commit or COMMIT
     policy = check_excel_run.policy_at(root, commit)
     sources = components(root, commit)
     with tempfile.TemporaryDirectory(prefix="excel-run-") as temporary:
@@ -285,7 +329,7 @@ def workbook_bytes(commit: str, clean: bool = True) -> bytes:
     return build_workbook.package(layout, build, b"not a VBA project")
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class RebuildTest(unittest.TestCase):
     """Identity without an export: the workbook equals a rebuild of the commit."""
 
@@ -415,7 +459,7 @@ class RebuildTest(unittest.TestCase):
                             for item in result.findings), result.findings)
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class BindingTest(unittest.TestCase):
     def bound(self, change: Callable[[Path, Path], None] | None = None, *, workbook: bool = True,
               manifest: bool = True, require: bool = False,
@@ -519,7 +563,7 @@ class BindingTest(unittest.TestCase):
         self.assertIn("Binding: UNVERIFIED", output.getvalue())
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class EvidenceTest(unittest.TestCase):
     def assertFinding(self, change: Callable[[Path], None], text: str) -> None:
         found = findings(change)
@@ -799,23 +843,18 @@ class EvidenceTest(unittest.TestCase):
 def commit_change(root: Path, base: str, changes: dict[str, bytes | None]) -> str:
     """A commit on top of ``base`` that writes each file of ``changes``, or deletes
     it when its bytes are None."""
-    subprocess.run(["git", "-C", str(root), "checkout", "-q", "--detach", base],
-                   capture_output=True, check=True)
+    gitfixture.git(root, "checkout", "-q", "--detach", base)
     for name, data in changes.items():
         if data is None:
             (root / name).unlink()
         else:
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_bytes(data)
-    for command in (["add", "-A"],
-                    ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                     "-c", "commit.gpgsign=false", "commit", "-qm", "Change"]):
-        subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
-    return subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True,
-                          check=True, text=True).stdout.strip()
+    gitfixture.commit(root, "Change")
+    return gitfixture.head(root)
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class EquivalenceTest(unittest.TestCase):
     """--equivalent-to: one run certifies a commit whose run inputs are identical."""
 
@@ -951,7 +990,7 @@ def folder_state(folder: Path) -> dict[str, bytes]:
             for path in sorted(folder.rglob("*")) if path.is_file()}
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class CarriedTest(unittest.TestCase):
     """--carried-to: a run carried to a commit that changes VBA comments or layout only."""
 
@@ -1155,7 +1194,7 @@ def accuracy_files(contracts: Contracts) -> dict[str, bytes]:
     return files
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class ResultsTest(unittest.TestCase):
     """The results of a commit whose registry holds the synthetic EXAMPLE_CONTRACTS."""
 
@@ -1296,7 +1335,7 @@ def frozen_files() -> dict[str, bytes]:
     return files
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class HoldoutExposureTest(unittest.TestCase):
     """A frozen contract's holdout is measured on an Excel run only once its first
     exposure is recorded, and a run of a later candidate records nothing."""
@@ -1309,14 +1348,8 @@ class HoldoutExposureTest(unittest.TestCase):
                 unrecorded = check_excel_run.check(root, first, folder)
                 recorded = check_accuracy.record_holdout(root, ["ACC-01"],
                                                          [folder / POLICY.results], first)
-            for command in (["add", "-A"],
-                            ["-c", "user.name=Fixture", "-c",
-                             "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                             "commit", "-qm", "Record the holdout exposure"]):
-                subprocess.run(["git", "-C", str(root), *command], capture_output=True,
-                               check=True)
-            second = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                                    capture_output=True, check=True, text=True).stdout.strip()
+            gitfixture.commit(root, "Record the holdout exposure")
+            second = gitfixture.head(root)
             before = record.read_bytes()
             with evidence(None, root, second) as folder:
                 later = check_excel_run.check(root, second, folder)
@@ -1372,7 +1405,7 @@ class HoldoutExposureTest(unittest.TestCase):
                             in item for item in differs.findings), differs.findings)
 
 
-@unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+@needs_commit
 class SuiteTest(unittest.TestCase):
     def test_suite_matches_the_documented_counts(self) -> None:
         examples = suite()
@@ -1614,7 +1647,7 @@ class PolicyTest(unittest.TestCase):
             lambda data: (data.update(schema_version=1), data.pop("suites"))))
         self.assertEqual(old.project_suites, ())
 
-    @unittest.skipUnless(COMMIT, "needs Git and the modules of tests/modules/")
+    @needs_commit
     def test_the_commit_policy_judges_the_evidence(self) -> None:
         def run(root: Path, commit: str) -> list[str]:
             try:
@@ -1889,7 +1922,7 @@ class SourceIdentityTest(unittest.TestCase):
         expected = {Path(path).name: subprocess.run(
             ["git", "-C", str(self.root), "show", f"{self.commit}:{path}"],
             capture_output=True, check=True).stdout for path in listed
-            if path.lower().endswith(check_excel_run.VBA_SUFFIXES +
+            if path.lower().endswith(vba_lexer.VBA_SUFFIXES +
                                      check_excel_run.RESOURCE_SUFFIXES)}
         with mock.patch.object(subprocess, "run", wraps=subprocess.run) as run:
             found = components(self.root, self.commit)
@@ -1905,12 +1938,9 @@ class SourceIdentityTest(unittest.TestCase):
         for name, data in files.items():
             (root / name).parent.mkdir(parents=True, exist_ok=True)
             (root / name).write_bytes(data)
-        for command in (["init", "-q"], ["add", "-A"],
-                        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
-                         "-c", "commit.gpgsign=false", "commit", "-q", "-m", "Fixture"]):
-            subprocess.run(["git", "-C", str(root), *command], capture_output=True, check=True)
-        commit = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
-                                capture_output=True, check=True, text=True).stdout.strip()
+        gitfixture.init(root)
+        gitfixture.commit(root)
+        commit = gitfixture.head(root)
         self.assertEqual(components(root, commit),
                          {"odd\nname.bas": files["src/odd\nname.bas"],
                           "plain.bas": files["src/plain.bas"]})
@@ -1944,6 +1974,21 @@ class SourceIdentityTest(unittest.TestCase):
         found = self.checked(edit("exported/ThisWorkbook.cls", 'VB_Name = "ThisWorkbook"',
                                   'VB_Name = "thisworkbook"')).findings
         self.assertTrue(any("ThisWorkbook.cls: differs" in item for item in found), found)
+
+
+class ImportTest(unittest.TestCase):
+    def test_importing_the_module_creates_no_temporary_directory(self) -> None:
+        """Test discovery, and tools/check_verification_depth.py, import the module
+        without running its tests, so tearDownModule would never remove a fixture
+        built on import."""
+        with tempfile.TemporaryDirectory(prefix="excel-run-import-") as directory:
+            completed = subprocess.run(
+                [sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); "
+                 "import test_check_excel_run", str(SOURCE / "tests")],
+                env={**os.environ, "TMPDIR": directory, "TEMP": directory, "TMP": directory},
+                capture_output=True, text=True, check=False)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertEqual(sorted(path.name for path in Path(directory).iterdir()), [])
 
 
 if __name__ == "__main__":

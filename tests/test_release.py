@@ -26,6 +26,7 @@ sys.path.insert(0, str(ROOT / "tests"))
 
 import check_excel_run  # noqa: E402
 import release  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 
 try:
     import yaml
@@ -62,34 +63,24 @@ class ReleaseTest(unittest.TestCase):
         base = Path(directory.name)
         self.origin = base / "origin.git"
         self.root = base / "work"
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(self.origin)],
-                       check=True)
-        self.root.mkdir()
-        for command in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
-                        ["config", "user.email", "fixture@example.invalid"],
-                        ["config", "commit.gpgsign", "false"],
-                        ["config", "tag.gpgsign", "false"],
-                        ["remote", "add", "origin", str(self.origin)]):
-            self.git(*command)
+        init(self.origin, "--bare")
+        init(self.root)
+        git(self.root, "remote", "add", "origin", str(self.origin))
         self.commit({"CHANGELOG.md": CHANGELOG, "VERSION": "1.2.0\n", "README.md": "x\n"})
-        self.git("push", "-q", "origin", "main")
-        self.sha = self.git("rev-parse", "HEAD").strip()
-
-    def git(self, *args: str) -> str:
-        return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True,
-                              text=True, check=True).stdout
+        git(self.root, "push", "-q", "origin", "main")
+        self.sha = git(self.root, "rev-parse", "HEAD").strip()
 
     def commit(self, files: dict[str, str]) -> None:
         for name, text in files.items():
             (self.root / name).write_text(text, encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-qm", "Fixture")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "Fixture")
 
     def tag(self, name: str = "v1.2.0", message: str | None = None) -> None:
         text = message if message is not None else (
-            f"{name} - Release\n\nCandidate {self.git('rev-parse', 'HEAD').strip()}.\n"
+            f"{name} - Release\n\nCandidate {git(self.root, 'rev-parse', 'HEAD').strip()}.\n"
             "Deviations: none.\n")
-        self.git("tag", "-a", name, "-m", text)
+        git(self.root, "tag", "-a", name, "-m", text)
 
     def problems(self, tag: str = "v1.2.0") -> list[str]:
         return release.verify(self.root, tag, "main")
@@ -99,7 +90,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual(self.problems(), [])
 
     def test_the_tag_must_be_annotated_and_well_named(self) -> None:
-        self.git("tag", "v1.2.0")
+        git(self.root, "tag", "v1.2.0")
         self.assertTrue(any("not an annotated tag" in p for p in self.problems()))
         self.assertEqual(self.problems("1.2.0"), ["tag '1.2.0' is not vX.Y.Z"])
 
@@ -111,14 +102,14 @@ class ReleaseTest(unittest.TestCase):
         self.assertTrue(any("VERSION at v1.3.0 is 1.2.0, not 1.3.0" in p for p in found), found)
 
     def test_version_must_exist(self) -> None:
-        self.git("rm", "-q", "VERSION")
-        self.git("commit", "-qm", "Drop VERSION")
-        self.git("push", "-q", "origin", "main")
+        git(self.root, "rm", "-q", "VERSION")
+        git(self.root, "commit", "-qm", "Drop VERSION")
+        git(self.root, "push", "-q", "origin", "main")
         self.tag()
         self.assertEqual(self.problems(), ["VERSION at v1.2.0 is missing, not 1.2.0"])
 
     def test_the_commit_must_be_on_the_default_branch(self) -> None:
-        self.git("switch", "-q", "-c", "side")
+        git(self.root, "switch", "-q", "-c", "side")
         self.commit({"README.md": "side\n"})
         self.tag()
         self.assertTrue(any("is not on origin/main" in p for p in self.problems()))
@@ -130,14 +121,14 @@ class ReleaseTest(unittest.TestCase):
         self.assertTrue(any("no 'Deviations:' line" in p for p in found), found)
 
     def test_deviations_may_be_a_list_on_the_next_lines(self) -> None:
-        head = self.git("rev-parse", "HEAD").strip()
+        head = git(self.root, "rev-parse", "HEAD").strip()
         self.tag(message=f"v1.2.0 - Release\n\nCandidate {head}.\nDeviations:\n"
                          "- Invariant 8: the published workbook was not checked.\n"
                          "* Invariant 4: the run names another build.\n")
         self.assertEqual(self.problems(), [])
 
     def test_deviations_without_text_or_a_list_fail(self) -> None:
-        head = self.git("rev-parse", "HEAD").strip()
+        head = git(self.root, "rev-parse", "HEAD").strip()
         self.tag(message=f"v1.2.0 - Release\n\nCandidate {head}.\nDeviations:\n\nSigned.\n")
         self.assertEqual(self.problems(),
                          ["the message of v1.2.0 has no 'Deviations:' line followed by text, "
@@ -147,15 +138,15 @@ class ReleaseTest(unittest.TestCase):
         """Commit a VBA component on main, push it and return the new commit."""
         (self.root / path).parent.mkdir(parents=True, exist_ok=True)
         self.commit({path: 'Attribute VB_Name = "MExample"\nOption Explicit\n'})
-        self.git("push", "-q", "origin", "main")
-        return self.git("rev-parse", "HEAD").strip()
+        git(self.root, "push", "-q", "origin", "main")
+        return git(self.root, "rev-parse", "HEAD").strip()
 
     def message(self, head: str, *lines: str, deviations: str = "Deviations: none.") -> str:
         return "\n".join(["v1.2.0 - Release", "", f"Candidate {head}.", *lines, deviations, ""])
 
     def retag(self, message: str) -> None:
-        if self.git("tag", "-l", "v1.2.0"):
-            self.git("tag", "-d", "v1.2.0")
+        if git(self.root, "tag", "-l", "v1.2.0"):
+            git(self.root, "tag", "-d", "v1.2.0")
         self.tag(message=message)
 
     def test_a_vba_component_needs_excel_evidence_or_an_invariant_4_deviation(self) -> None:
@@ -173,8 +164,8 @@ class ReleaseTest(unittest.TestCase):
             with self.subTest(path=path):
                 head = self.with_vba(path)
                 self.assertEqual(release.holds_vba(self.root, head), component)
-                self.git("rm", "-q", path)
-                self.git("commit", "-qm", "Remove")
+                git(self.root, "rm", "-q", path)
+                git(self.root, "commit", "-qm", "Remove")
 
     def test_another_deviation_does_not_waive_the_excel_run(self) -> None:
         head = self.with_vba()
@@ -216,7 +207,7 @@ class ReleaseTest(unittest.TestCase):
                 found = self.problems()
                 self.assertEqual(len(found), 1, found)
                 self.assertIn(f"has a malformed line {line!r}", found[0])
-        self.git("tag", "-d", "v1.2.0")
+        git(self.root, "tag", "-d", "v1.2.0")
         line = f"Excel evidence: {digest} (run {head})."
         self.tag(message=self.message(head, line, line))
         self.assertEqual(self.problems(),
@@ -224,12 +215,12 @@ class ReleaseTest(unittest.TestCase):
 
     def test_without_a_vba_component_no_excel_evidence_is_needed(self) -> None:
         self.commit({"MExample.bas.orig": "x\n", "frmX.frx": "x\n"})
-        self.git("push", "-q", "origin", "main")
-        head = self.git("rev-parse", "HEAD").strip()
+        git(self.root, "push", "-q", "origin", "main")
+        head = git(self.root, "rev-parse", "HEAD").strip()
         self.tag(message=self.message(head))
         self.assertEqual(self.problems(), [])
         # A malformed declaration fails all the same.
-        self.git("tag", "-d", "v1.2.0")
+        git(self.root, "tag", "-d", "v1.2.0")
         self.tag(message=self.message(head, "Excel evidence: pending."))
         self.assertEqual(len(self.problems()), 1)
 
@@ -249,7 +240,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertEqual(len(found), 1, found)
         self.assertIn(f"declares Excel evidence {gate.digest}, but", found[0])
         # A tag with only a deviation declares no evidence to check.
-        self.git("tag", "-d", "v1.2.0")
+        git(self.root, "tag", "-d", "v1.2.0")
         self.tag(message=self.message(head, deviations="Deviations:\n- Invariant 4: x."))
         found = release.verify(self.root, "v1.2.0", "main", (folder, workbook), checker)
         self.assertEqual(found, [f"the message of v1.2.0 declares no Excel evidence to check "
@@ -258,8 +249,8 @@ class ReleaseTest(unittest.TestCase):
     def test_verify_with_evidence_checks_an_equivalent_run(self) -> None:
         run = self.with_vba()
         self.commit({"README.md": "later\n"})
-        self.git("push", "-q", "origin", "main")
-        head = self.git("rev-parse", "HEAD").strip()
+        git(self.root, "push", "-q", "origin", "main")
+        head = git(self.root, "rev-parse", "HEAD").strip()
         folder, workbook = self.evidence_files()
         checker = FakeChecker(equivalence="identical")
         gate = release.excel_gate(self.root, head, folder, workbook, run, checker)
@@ -286,7 +277,7 @@ class ReleaseTest(unittest.TestCase):
         self.assertNotIn("A bug.", text)
         self.assertNotIn("releases/tag", text)
         with self.assertRaisesRegex(release.ReleaseError, "no section for 1.3.0"):
-            self.git("tag", "-a", "v1.3.0", "-m", "x")
+            git(self.root, "tag", "-a", "v1.3.0", "-m", "x")
             release.notes(self.root, "v1.3.0")
 
     def test_bundle_is_reproducible(self) -> None:
@@ -369,15 +360,11 @@ class ExcelGateTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.base = Path(directory.name)
         self.root = self.base / "work"
-        self.root.mkdir()
-        for command in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
-                        ["config", "user.email", "fixture@example.invalid"],
-                        ["config", "commit.gpgsign", "false"]):
-            self.git(*command)
+        init(self.root)
         self.commit("first")
-        self.run_sha = self.git("rev-parse", "HEAD").strip()
+        self.run_sha = git(self.root, "rev-parse", "HEAD").strip()
         self.commit("second")
-        self.head = self.git("rev-parse", "HEAD").strip()
+        self.head = git(self.root, "rev-parse", "HEAD").strip()
         self.folder = self.base / "excel-run"
         (self.folder / "exported").mkdir(parents=True)
         (self.folder / "host.txt").write_bytes(b"outcome=PASS\n")
@@ -385,15 +372,11 @@ class ExcelGateTest(unittest.TestCase):
         self.workbook = self.base / "Workbook-development.xlsm"
         self.workbook.write_bytes(b"workbook")
 
-    def git(self, *args: str) -> str:
-        return subprocess.run(["git", "-C", str(self.root), *args], capture_output=True,
-                              text=True, check=True).stdout
-
     def commit(self, text: str) -> None:
         (self.root / "src").mkdir(exist_ok=True)
         (self.root / "src" / "MExample.bas").write_text(text, encoding="utf-8")
-        self.git("add", "-A")
-        self.git("commit", "-qm", text)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", text)
 
     def gate(self, checker: FakeChecker, run: str | None = None) -> release.ExcelGate:
         return release.excel_gate(self.root, "HEAD", self.folder, self.workbook, run, checker)
@@ -497,10 +480,12 @@ class ExcelGateRunTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        loaded = "test_check_excel_run" in sys.modules
         import test_check_excel_run as fixtures
 
-        if not loaded:
+        # The fixture module builds its repository in setUpModule, which runs only
+        # with its own tests, and removes it once they have run.
+        if not fixtures.COMMIT:
+            fixtures.setUpModule()
             cls.addClassCleanup(fixtures.tearDownModule)
         if not fixtures.COMMIT:
             raise unittest.SkipTest("needs the modules of tests/modules/")

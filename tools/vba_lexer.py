@@ -9,12 +9,15 @@ enforce, and its *Static checks* section lists what they cannot see.
 from __future__ import annotations
 
 import re
-import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-VBA_SUFFIXES = frozenset({".bas", ".cls", ".frm"})
+from gitio import tracked
+
+# The exported VBA components; a form's binary .frx goes with its .frm. A tuple,
+# so that str.endswith takes it and a message lists it in a fixed order.
+VBA_SUFFIXES = (".bas", ".cls", ".frm")
 HOUSE_STYLE = "docs/VBA_HOUSE_STYLE.md"
 # The facade prefix of the house style's naming table, such as SACCR_; the
 # <REGIME>_ placeholder, until it is replaced, stands for any project prefix.
@@ -22,6 +25,8 @@ FACADE_ROW = re.compile(r"^\|\s*Public facade module\s*\|\s*`([^`]*)_`", re.M)
 RESERVED_PREFIXES = ("CORE", "TEST", "EX", "M")
 REM = re.compile(r"Rem(?=\s|$)", re.IGNORECASE)
 CONTINUATION = re.compile(r"\s_\s*$")
+# A string literal, its "" escapes included; an unclosed one runs to the line end.
+STRING = re.compile(r'"(?:[^"]|"")*"?')
 LINE_NUMBER = re.compile(r"\s*\d+(?=\s)")
 
 
@@ -68,19 +73,9 @@ def facade_pattern(root: Path) -> tuple[str, str]:
     return "<REGIME>_<Subject>", rf"(?!(?:{reserved})_)[A-Z][A-Z0-9]*_[A-Z][A-Za-z0-9_]*"
 
 
-def tracked_files(root: Path) -> list[str]:
-    """Paths tracked by Git (staged ones included), sorted, with "/" separators."""
-    completed = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
-                               capture_output=True, check=False)
-    if completed.returncode:
-        raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
-    return sorted(item.decode("utf-8", errors="surrogateescape")
-                  for item in completed.stdout.split(b"\0") if item)
-
-
 def tracked_components(root: Path) -> list[str]:
     """Tracked exported VBA components: .bas, .cls and .frm files."""
-    return [path for path in tracked_files(root) if Path(path).suffix.lower() in VBA_SUFFIXES]
+    return [path for path in tracked(root) if Path(path).suffix.lower() in VBA_SUFFIXES]
 
 
 def read_component(root: Path, path: str) -> str:

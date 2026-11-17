@@ -2,7 +2,7 @@ name: Keep milestones issue-only
 
 # Milestones belong to issues only (docs/repo_governance/ISSUE_LABELS.md).
 # Removes any milestone set on a pull request: on each pull-request event, and
-# for every pull request on a daily scan, a manual run, or a change to this
+# for every pull request on a weekly scan, a manual run, or a change to this
 # file on the default branch. The job summary lists each removal. pull_request_target runs this file from the
 # base branch; the job never checks out or runs pull-request code.
 
@@ -12,7 +12,8 @@ on:
   pull_request_target:
     types: [opened, reopened, edited, milestoned]
   schedule:
-    - cron: "17 3 * * *"
+    # Weekly on Friday, off the hour; GitHub may start scheduled runs late.
+    - cron: "37 3 * * 5"
   workflow_dispatch:
 
 permissions: {}
@@ -121,7 +122,7 @@ jobs:
                   if error.code != 403 or "pull_request" not in event:
                       raise
                   message = (f"The workflow token cannot change {scope} (HTTP 403, read-only token). "
-                             "The daily scan or a manual run of this workflow removes its milestone.")
+                             "The weekly scan or a manual run of this workflow removes its milestone.")
                   print(f"::warning title=Milestone not removed::{message}")
                   publish(f"{TITLE}\n\n{message}\n")
                   return

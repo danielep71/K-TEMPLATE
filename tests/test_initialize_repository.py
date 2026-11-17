@@ -28,12 +28,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import check_changelog  # noqa: E402
 import check_repository  # noqa: E402
+import gitio  # noqa: E402
 import initialize_repository as initialize  # noqa: E402
 import vba_lexer  # noqa: E402
 from check_repository import Check, Context  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 from initialize_repository import InitializeError, Options  # noqa: E402
 
 REPOSITORY = "owner/new-workbook"
@@ -310,9 +313,7 @@ class AdaptationTests(unittest.TestCase):
 
 
 def copy_tracked_tree(destination: Path) -> None:
-    names = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True,
-                           check=True).stdout.decode("utf-8").split("\0")
-    for name in filter(None, names):
+    for name in gitio.tracked(ROOT):
         if (ROOT / name).is_file():
             (destination / name).parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(ROOT / name, destination / name)
@@ -335,22 +336,15 @@ class ReleaseBranchWarningTests(unittest.TestCase):
         self.origin = self.base / "origin.git"
         work = self.base / "work"
         work.mkdir()
-        self.git(self.base, "init", "-q", "--bare", str(self.origin))
-        for command in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
-                        ["config", "user.email", "fixture@example.invalid"],
-                        ["config", "commit.gpgsign", "false"],
-                        ["commit", "-q", "--allow-empty", "-m", "Created"],
-                        ["push", "-q", str(self.origin), "HEAD:refs/heads/main",
-                         "HEAD:refs/heads/release/0.1.0"]):
-            self.git(work, *command)
-
-    @staticmethod
-    def git(root: Path, *args: str) -> None:
-        subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, check=True)
+        git(self.base, "init", "-q", "--bare", str(self.origin))
+        init(work)
+        git(work, "commit", "-q", "--allow-empty", "-m", "Created")
+        git(work, "push", "-q", str(self.origin), "HEAD:refs/heads/main",
+            "HEAD:refs/heads/release/0.1.0")
 
     def clone(self, *options: str) -> Path:
         target = self.base / "clone"
-        self.git(self.base, "clone", "-q", *options, str(self.origin), str(target))
+        git(self.base, "clone", "-q", *options, str(self.origin), str(target))
         return target
 
     def test_a_branch_only_on_origin_gives_no_warning(self) -> None:
@@ -366,7 +360,7 @@ class ReleaseBranchWarningTests(unittest.TestCase):
 
     def test_no_answer_from_origin_is_a_warning_that_says_so(self) -> None:
         clone = self.clone()
-        self.git(clone, "remote", "remove", "origin")
+        git(clone, "remote", "remove", "origin")
         found = initialize.warnings(clone, OPTIONS)
         self.assertEqual(len(found), 1)
         self.assertIn("origin cannot be asked whether branch release/0.1.0 exists", found[0])
@@ -383,27 +377,20 @@ class GeneratedRepositoryTest(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
         copy_tracked_tree(self.root)
-        for command in (["init", "-q", "-b", "main"], ["config", "user.name", "Fixture"],
-                        ["config", "user.email", "fixture@example.invalid"],
-                        ["config", "core.autocrlf", "false"],
-                        ["config", "commit.gpgsign", "false"]):
-            self.git(*command)
+        init(self.root)
         self.commit("Created from the template")
         # An origin with the release branch that Dependabot targets; the push
         # also makes it a fetched remote branch.
         origin = tempfile.TemporaryDirectory(prefix="initialize-repository-origin-")
         self.addCleanup(origin.cleanup)
-        self.git("init", "-q", "--bare", origin.name)
-        self.git("remote", "add", "origin", origin.name)
-        self.git("push", "-q", "origin", "HEAD:refs/heads/main", "HEAD:refs/heads/release/0.1.0")
-
-    def git(self, *args: str) -> str:
-        return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True,
-                              check=True).stdout
+        git(self.root, "init", "-q", "--bare", origin.name)
+        git(self.root, "remote", "add", "origin", origin.name)
+        git(self.root, "push", "-q", "origin", "HEAD:refs/heads/main",
+            "HEAD:refs/heads/release/0.1.0")
 
     def commit(self, message: str) -> None:
-        self.git("add", "-A")
-        self.git("commit", "-qm", message)
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", message)
 
     def initialize(self, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, "tools/initialize_repository.py", "--repository",
@@ -449,13 +436,13 @@ class GeneratedRepositoryTest(unittest.TestCase):
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
         self.assertIn("- AGENTS.md: delete the template-only section", dry_run.stdout)
         self.assertIn("dry run, nothing written", dry_run.stdout)
-        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=all"), "")
+        self.assertEqual(git(self.root, "status", "--porcelain", "--untracked-files=all"), "")
 
         (self.root / "notes.txt").write_text("unrelated\n", encoding="utf-8")
         refused = self.initialize("--apply")
         self.assertEqual(refused.returncode, 2)
         self.assertIn("the working tree differs from the commit", refused.stderr)
-        self.assertEqual(self.git("status", "--porcelain"), "?? notes.txt\n")
+        self.assertEqual(git(self.root, "status", "--porcelain"), "?? notes.txt\n")
         (self.root / "notes.txt").unlink()
 
         applied = self.initialize("--apply")
@@ -473,7 +460,7 @@ class GeneratedRepositoryTest(unittest.TestCase):
         again = self.initialize("--apply")
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertIn("nothing to change", again.stdout)
-        self.assertEqual(self.git("status", "--porcelain", "--untracked-files=all"), "")
+        self.assertEqual(git(self.root, "status", "--porcelain", "--untracked-files=all"), "")
 
         code, printed, statuses = self.integrity()
         self.assertEqual(code, 0, printed)

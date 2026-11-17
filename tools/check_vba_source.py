@@ -16,24 +16,23 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import gitio
 from format_vba import header_length
 from vba_lexer import (
+    VBA_SUFFIXES,
     Finding,
     facade_pattern,
     logical_units,
     read_component,
     report,
     split_statements,
-    tracked_files,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-COMPONENT_SUFFIXES = frozenset({".bas", ".cls", ".frm"})
 # Component name pattern by (home, suffix): docs/VBA_HOUSE_STYLE.md, Naming and
 # visibility. The facade's prefix comes from that table (vba_lexer.facade_pattern).
 # Any other suffix in a home, or a component outside these homes, is misplaced.
@@ -212,12 +211,8 @@ def storage(root: Path, paths: list[str]) -> list[Finding]:
     """Exported VBA is stored with LF and checked out with CRLF (.gitattributes)."""
     if not paths:
         return []
-    completed = subprocess.run(["git", "-C", str(root), "ls-files", "--eol", "-z", "--", *paths],
-                               capture_output=True, check=False)
-    if completed.returncode:
-        raise RuntimeError(completed.stderr.decode("utf-8", errors="replace").strip())
     findings = []
-    for record in completed.stdout.split(b"\0"):
+    for record in gitio.git(root, "ls-files", "--eol", "-z", "--", *paths).split(b"\0"):
         if not record:
             continue
         info, _, path = record.decode("utf-8", errors="surrogateescape").partition("\t")
@@ -231,15 +226,15 @@ def storage(root: Path, paths: list[str]) -> list[Finding]:
 
 
 def check(root: Path) -> tuple[list[Finding], int]:
-    tracked = tracked_files(root)
+    tracked = gitio.tracked(root)
     tracked_set = set(tracked)
-    components = [p for p in tracked if Path(p).suffix.lower() in COMPONENT_SUFFIXES]
+    components = [p for p in tracked if Path(p).suffix.lower() in VBA_SUFFIXES]
     findings: list[Finding] = []
     label, pattern = facade_pattern(root)
     naming = {**NAMING, ("src/modules/", ".bas"): (label, re.compile(pattern))}
     for path in tracked:
         suffix = Path(path).suffix.lower()
-        if suffix in COMPONENT_SUFFIXES or suffix == ".frx":
+        if suffix in VBA_SUFFIXES or suffix == ".frx":
             findings.extend(placement(path, naming))
         if suffix in WORKBOOK_SUFFIXES and path not in APPROVED_WORKBOOKS and \
                 not path.startswith(SOURCE_COPIES):
