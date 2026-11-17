@@ -9,13 +9,11 @@ in an issue or pull request.
 
 ## 🐞 Issues
 
-Open issues with the issue forms. Each issue is triaged automatically: it needs
-an assignee, exactly one priority label, an open milestone, a start date, a
-target end date earlier than the milestone's due date, and a dependency
-section. The
-[issue guide](docs/repo_governance/ISSUE_LABELS.md) explains the labels, the
-priorities (`P1` only for a confirmed calculation bug) and how an issue is
-closed, with a *Resolution* section.
+Open issues with the issue forms. **Issue triage** checks each open issue
+against the [triage rules](docs/repo_governance/ISSUE_LABELS.md#triage-rules).
+The [issue guide](docs/repo_governance/ISSUE_LABELS.md) also explains the
+labels, the priorities and how an issue is closed, with a *Resolution*
+section.
 
 ## 🌿 Branches and pull requests
 
@@ -86,28 +84,20 @@ defective code in one of two ways:
   `git worktree remove ../base-check`.
 - **A mutant.** When the base cannot run the test, for example because the
   test needs code that the fix adds, put the defect back into a copy of the
-  fixed file:
+  fixed file. `tools/make_mutant.py` writes it under `test-results/mutants/`
+  and prints its SHA-256; its docstring says what it refuses:
 
   ```sh
   python tools/make_mutant.py src/core/CORE_Example.bas --find "a - b" --replace "a + b"
   ```
 
-  The tool writes the copy under `test-results/mutants/`, which Git ignores,
-  at the source's relative path, and never over the source or through a
-  symbolic link. It refuses unless the text occurs exactly once, overlapping
-  occurrences included, and it keeps every other byte, CRLF line endings and
-  `Attribute VB_Name` included. It prints the changed lines
-  and the SHA-256 of the source and of the mutant. The text is literal; for a
-  text that spans lines, pass `--find-file` and `--replace-file` with files
-  that hold it. It exits with 0 when it writes the mutant, 1 when it refuses
-  and 2 on a usage error; its docstring lists every refusal.
-
-  To run a mutated VBA component, import the mutant into a development
-  workbook in place of its source component, as
-  [importing VBA into Excel](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
-  describes, and run the suite. Build or import the workbook from source again
-  for the run on the fix. For another file, copy the mutant over its source in
-  a detached worktree of your branch and run the test there.
+  Run a mutated VBA component in a development workbook in place of its
+  source component, built with `--override`
+  ([building a workbook from source](INSTALLATION.md#building-a-workbook-from-source))
+  or [imported by hand](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel),
+  and build the workbook from source again for the run on the fix. For another
+  file, copy the mutant over its source in a detached worktree of your branch
+  and run the test there.
 
 Record in *Validated* which way you used, the command, and the failing result
 on the defective code; for a mutant, also its SHA-256. When no test can fail on
@@ -115,22 +105,11 @@ the defect, write NOT APPLICABLE with the reason.
 
 A negative control proves one fix. `tools/verification_depth.json` keeps the
 standing record: for each check of **Repository integrity** that can fail the
-run, what it runs, its negative proofs, the violations they show rejected and
-its state. A proof is a unittest id, such as
-`tests.test_check_links.CheckTests.test_missing_files_anchors_and_paths_are_errors`,
-of a test that shows the check rejecting a bad input, or `probe` for a check
-whose probe the run makes the tool reject first. The state is `green`, or
-`green_in_ci` when a proof is skipped where a tool it needs is missing and runs
-in CI. The `verification-depth` check, `python tools/check_verification_depth.py`,
-takes the checks from `tools/check_repository.py` as CI runs them, less the
-advisory ones, and fails when one has no entry; when an entry names no such
-check, is listed twice, has a missing or empty field, a checker that differs
-from what the check runs, another state or a claim too short to be specific;
-or when a proof names a test that `python -m unittest discover -s tests` does
-not collect. It does not run the proofs: the `tests` check does. A pull request
-that adds a check, or renames or deletes a proof, updates the inventory in the
-same change; to write a missing proof, make its defective input with
-`tools/make_mutant.py`.
+run, the tests that prove it can fail. The `verification-depth` check fails
+while such a check has no entry; the docstring of
+`tools/check_verification_depth.py` gives the fields and what it rejects. A
+pull request that adds a check, or renames or deletes a proof, updates the
+inventory in the same change.
 
 ## 📐 Contract changes
 
@@ -155,11 +134,7 @@ none of these is not a contract change.
 
 ## 🧪 Local checks
 
-Run these before opening a pull request. The tests need Node.js for the label
-scripts. The tests that read YAML and the `codeql-default-branch` check need the
-pinned configuration parser; without it they are skipped locally.
-The quality checks need Ruff and mypy, whose hashes cover CPython 3.13 on
-Linux x86_64, and actionlint:
+Run every check of **Repository integrity** before opening a pull request:
 
 ```sh
 python -m pip install --require-hashes -r .github/requirements.txt
@@ -167,17 +142,22 @@ python -m pip install --only-binary=:all: --require-hashes -r tools/requirements
 python tools/check_repository.py
 ```
 
-For actionlint, download the release that `ACTIONLINT_VERSION` names in
-`.github/workflows/repository-integrity.yml` and put it on your `PATH`. On
-Linux x86_64, first check the archive against `ACTIONLINT_LINUX_AMD64_SHA256`
-there, as CI does.
+- **Tools.** The first command installs the pinned configuration parser, which
+  the tests that read YAML need. The second installs Ruff and mypy, whose
+  hashes cover CPython 3.13 on Linux x86_64. The tests also need Node.js, for
+  the label scripts.
+- **actionlint.** Download the release that `ACTIONLINT_VERSION` names in
+  `.github/workflows/repository-integrity.yml` and put it on your `PATH`. On
+  Linux x86_64, first check the archive against `ACTIONLINT_LINUX_AMD64_SHA256`
+  there, as CI does.
+- **Results.** A check whose tool is missing is reported as skipped. The run
+  writes a log for each check, `report.json` and `summary.md` under
+  `test-results/integrity/`, which Git ignores; the docstring of
+  `tools/check_repository.py` says how it runs.
 
-The last command runs every check of **Repository integrity**, the tests
-included, and writes a log for each, `report.json` and `summary.md` under
-`test-results/integrity/`, which Git ignores. It runs these checks, in this
-order. `OWNER/REPOSITORY` is the repository that `--repository` names, as CI
-passes it, or else the GitHub repository of the `origin` remote; without
-either, `changelog` runs without `--repository`.
+It runs these checks, in this order. `OWNER/REPOSITORY` is the repository that
+`--repository` names, as CI passes it, or else the GitHub repository of the
+`origin` remote.
 
 <!-- BEGIN generated: integrity-checks -->
 | Check | Runs |
@@ -190,7 +170,7 @@ either, `changelog` runs without `--repository`.
 | `labels-catalogue` | `node .github/scripts/labels-sync.mjs --mode validate` |
 | `labels-drift-self-test` | `node .github/scripts/labels-drift.mjs --self-test` |
 | `issue-configuration` | `python tools/check_issues.py --check-config` |
-| `template-only-content` | Built in: Only the template keeps the template-only section of AGENTS.md. |
+| `template-only-content` | Built in: Only the template keeps the template-only sections of AGENTS.md and README.md. |
 | `issue-contact-links` | Built in: The issue forms' contact links point to this repository. |
 | `readme-traffic-badges` | Built in: The README's traffic badges read this repository's traffic. |
 | `binaries` | `python tools/check_binaries.py` |
@@ -225,33 +205,20 @@ either, `changelog` runs without `--repository`.
 | `whitespace-local` | `git diff --check HEAD` |
 <!-- END generated: integrity-checks -->
 
-`python tools/render_docs.py --write` regenerates this table and the other
-blocks between `BEGIN generated` and `END generated` markers from the code;
-**Repository integrity** fails while one differs from a fresh render. Edit
-the renderer in `tools/render_docs.py`, never the block. Outside a block, link
-a count's source instead of copying the count: `restated-counts` fails on a
-count of cases, assertions, modes, checks, datasets or finding codes written
-by hand, as the docstring of `tools/check_restated_counts.py` lists, and
-`template-wording` fails on a phrase that describes the repository template
-rather than the repository the file is in, as the docstring of
-`tools/check_template_wording.py` lists. A check whose tool or GitHub
-context is missing locally, such as Ruff or the default branch, is reported as
-skipped, as is `dependabot-target-branches` when a `target-branch` has no
-remote-tracking branch and the `origin` remote cannot be asked whether it
-exists; `--strict` fails it instead, as CI does. The commands run in
-parallel, up to four at a time, and the output, the logs and the report list
-the checks in the table's order. CI also passes `--ci`, which adds a last
-check, `clean-working-tree`, run alone once every other check has finished:
-it fails when a file is changed, deleted, or added and not ignored, so that
-the results describe the commit itself. To run a single check, use
-its own command, for example `python -m unittest discover -s tests` or
-`python tools/format_vba.py --check`.
+A table between `BEGIN generated` and `END generated` markers is rendered from
+the code: edit its renderer in `tools/render_docs.py`, never the block, and run
+`python tools/render_docs.py --write`. Outside a block, link a count's source
+instead of copying the count (`restated-counts`), and word each sentence for
+the repository it is in (`template-wording`); each tool's docstring lists what
+it rejects.
 
-`python tools/format_vba.py --write` fixes what the last command reports;
+To run one check, use its own command, such as
+`python tools/format_vba.py --check`, or
+`python -m unittest tests.test_check_links` for one test module.
+`python tools/format_vba.py --write` fixes what `vba-format` reports;
 re-import a rewritten module into the VBE before committing
-([house style](docs/VBA_HOUSE_STYLE.md#source-representation)).
-
-To run Ruff and strict mypy on their own, see the
+([house style](docs/VBA_HOUSE_STYLE.md#source-representation)). To run Ruff
+and strict mypy on their own, see the
 [setup guide](docs/setup/REPOSITORY_SETUP.md#-maintain-the-baseline).
 
 ## 📄 Data and licensing

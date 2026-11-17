@@ -24,6 +24,10 @@ check that fails when the working tree differs from the commit, so that the
 result describes the commit and nothing a step changed. The run covers the
 repository only: it compiles no VBA, runs no Excel and certifies no figure.
 
+The repository is --repository, as CI passes it, or else the GitHub repository
+of the origin remote; without either, the changelog check runs without
+--repository, and the checks that need the repository are skipped.
+
 The command checks run in parallel, up to four at a time; the checks written
 as functions run one at a time, and that last check runs alone, once every
 other check has finished. The console, the logs and the report list the
@@ -67,6 +71,10 @@ ACTIONLINT_PROBE = ".github/actionlint/invalid-workflow.yml"
 ACTIONLINT_PROBE_FINDING = 'unexpected key "bogus-key"'
 REQUIRED_DOCUMENTS = ("README.md", "LICENSE", "docs/repo_governance/SETTINGS.md")
 BADGE = re.compile(r"raw\.githubusercontent\.com/([^/\s]+/[^/\s]+)/traffic-history/")
+# The optional traffic collection, whose badges readme-traffic-badges checks.
+TRAFFIC_WORKFLOW = ".github/workflows/traffic-history.yml"
+# The files whose template-only sections only the template keeps.
+TEMPLATE_ONLY_FILES = ("AGENTS.md", "README.md")
 CONTACT_URL = re.compile(r'^\s*url:\s*"?([^"\s]+)"?\s*$', re.M)
 TARGET_BRANCH = re.compile(r'^\s*target-branch:\s*"?([^"\s]+)"?\s*$', re.M)
 GITHUB_REMOTE = re.compile(r"github\.com[:/]([\w.-]+/[\w.-]+?)(?:\.git)?/?$")
@@ -143,13 +151,16 @@ class Result:
 # Checks that read files or Git, without a separate tool.
 
 def template_only(context: Context) -> list[Finding]:
-    """Only the template keeps the template-only section of AGENTS.md."""
-    text = (context.root / "AGENTS.md").read_text(encoding="utf-8") \
-        if (context.root / "AGENTS.md").is_file() else ""
-    if context.is_template is False and "template-only:start" in text:
-        return [("AGENTS.md", "Delete the template-only section of AGENTS.md, including its "
-                              "markers: only the template keeps it.")]
-    return []
+    """Only the template keeps the template-only sections of AGENTS.md and README.md."""
+    if context.is_template is not False:
+        return []
+    findings = []
+    for name in TEMPLATE_ONLY_FILES:
+        path = context.root / name
+        if path.is_file() and "template-only:start" in path.read_text(encoding="utf-8"):
+            findings.append((name, f"Replace or delete the template-only sections of {name}, "
+                                   "including their markers: only the template keeps them."))
+    return findings
 
 
 def contact_links(context: Context) -> list[Finding]:
@@ -162,6 +173,13 @@ def contact_links(context: Context) -> list[Finding]:
                    "there.")
             for url in CONTACT_URL.findall((context.root / path).read_text(encoding="utf-8"))
             if not url.lower().startswith(expected)]
+
+
+def has_traffic(root: Path) -> bool:
+    """Whether the repository keeps the traffic collection or a badge that reads one."""
+    readme = root / "README.md"
+    return (root / TRAFFIC_WORKFLOW).is_file() or \
+        (readme.is_file() and BADGE.search(readme.read_text(encoding="utf-8")) is not None)
 
 
 def traffic_badges(context: Context) -> list[Finding]:
@@ -444,7 +462,9 @@ def checks(context: Context) -> list[Check]:
               missing=None if context.is_template is not None
               else "whether this is the template is unknown (--template)"),
         Check("issue-contact-links", function=contact_links, missing=no_repository),
-        Check("readme-traffic-badges", function=traffic_badges, missing=no_repository),
+        # Listed while the traffic collection, or a badge of one, is there.
+        *([Check("readme-traffic-badges", function=traffic_badges, missing=no_repository)]
+          if has_traffic(context.root) else []),
         Check("binaries", [python, "tools/check_binaries.py"]),
         Check("secret-files", function=secret_files),
         Check("vba-format", [python, "tools/format_vba.py", "--check"]),

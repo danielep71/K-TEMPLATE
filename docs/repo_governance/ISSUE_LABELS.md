@@ -10,7 +10,7 @@ This repository defines 20 issue labels, each with a name, description, and colo
 | --- | --- |
 | Sync issue labels | Reconciles labels after a catalogue change lands on the default branch or a manual run on the default branch; pull requests are validated by **Repository integrity**, which runs the script's self-test and validates the catalogue. Refuses to delete a label in use. Verifies the exact live result. |
 | Detect issue-label drift | Checks weekly and manually; **Repository integrity** runs its offline fixtures on every pull request. Reports drift without modifying labels. Each report is cross-checked against the reconciler's plan on the same snapshot: the script writes the live labels it read to a temporary file, runs `labels-sync.mjs --mode plan` on it, and fails (status `fail`) if the two plans differ; the evidence then carries both plans under `cross_check`. |
-| Issue triage | Audits open issues on issue and milestone events or manual runs. Reports a missing assignee, open milestone, start date, target end date or dependency section; a start date after the target end date; an empty dependency section; not exactly one priority, or `P1` without `bug`; a target end date not before the milestone's due date; a dependency naming an issue that does not exist; open issues whose dependency sections form a cycle; invalid labels; and inconsistent blocked status. |
+| Issue triage | Audits open issues against the [triage rules](#triage-rules) on issue and milestone events or manual runs. Changes no issue. |
 | Keep milestones issue-only | Removes any milestone set on a pull request when the pull request is opened, reopened, edited, or given a milestone, and in a weekly and manual scan of every pull request. It reads each pull request again after the change and fails if the milestone is still set; its job summary lists each pull request and the milestone removed. If GitHub gives a pull-request run a read-only token, the run warns instead of failing, and the next weekly or manual scan removes the milestone. It never checks out pull-request code. |
 | Dependabot (`.github/dependabot.yml`) | Opens weekly grouped pull requests for the SHA-pinned GitHub Actions, the hash-locked configuration parser, and the hash-locked Python quality tools, labelled `ci` and `P3` and assigned to me. Nothing merges automatically. |
 
@@ -21,7 +21,7 @@ Among these workflows, only synchronization has `issues: write` and only *Keep m
 1. Run **Sync issue labels** from the default branch to bring the live labels to the catalogue: once Actions is enabled, and again whenever the live labels must be brought back to it.
 2. To add labels for this repository, add them as an overlay in `.github/labels.json`, such as one overlay per regulatory regime: an entry of `overlays` whose name maps to a label array sorted case-insensitively by name, with the same fields as the core. List the overlay's name in `selected_overlays`, sorted case-insensitively; an overlay that is not selected adds nothing. Then add each selected label to the catalogue and usage tables below and update the label counts, the badge included, to the resolved total. Leave the `core` list as it is. **Repository integrity** checks all three.
 3. My GitHub account, `danielep71`, is the assignee in the four issue forms (`assignees`) and in `.github/dependabot.yml`; the triage check reads it from `bug.yml`. If someone else maintains this repository, replace my account in those five files. **Repository integrity** fails if they disagree.
-4. Create project milestones with due dates, give each open issue exactly one priority, an open milestone, a start date, and a target end date before that milestone's due date, and assign it to me (or the account configured in those five files). Use `blocked` only for a named open prerequisite or `External condition:`. P1 is reserved for confirmed calculation bugs.
+4. Create project milestones with due dates, and give each open issue what the [triage rules](#triage-rules) require.
 5. Label validation and the offline drift fixtures run in **Repository integrity** on every pull request, to any branch. Live synchronization runs only on the current default branch, including after a rename.
 
 **Keep** the label manifest, scripts, all four workflows, issue forms, triage checker/tests, and this guide after bootstrap. They provide ongoing maintenance and must not be deleted with one-time repository setup files.
@@ -49,7 +49,7 @@ Every open issue also needs a start date and a target end date: ISO `YYYY-MM-DD`
 - Target end date: YYYY-MM-DD (Europe/Rome)
 ```
 
-When both a line and a form field are present, the line takes precedence, so edit the line to reschedule. Each date takes one line: two lines for the same date with different values are reported under that date's rule. Triage reports a missing or invalid start date, or one after the target end date (`start-date`), a missing or invalid target end date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`). A missing or invalid date does not hide a milestone without a due date: triage reports both in the same run.
+When both a line and a form field are present, the line takes precedence, so edit the line to reschedule. Each date takes one line. The `start-date`, `target-date` and `milestone-due` [triage rules](#triage-rules) check the dates.
 
 ### Types
 
@@ -89,7 +89,7 @@ When both a line and a form field are present, the line takes precedence, so edi
 
 A section with nothing but blank lines, or only `_No response_`, which GitHub writes for an empty form field, is a `dependencies` finding: write `None`, link each prerequisite or add an `External condition:` line.
 
-Open issues whose dependency sections name each other in a cycle, such as #1 waiting for #2 and #2 for #1, can never be unblocked by finishing work: **Issue triage** reports each issue of the cycle until one dependency is removed or replaced with an `External condition:` line.
+Open issues whose dependency sections name each other in a cycle can never be unblocked by finishing work. **Issue triage** reports each issue of the cycle (`dependency-cycle`) until one dependency is removed or replaced with an `External condition:` line.
 
 A blocked issue, for example:
 
@@ -100,6 +100,28 @@ A blocked issue, for example:
 - External condition: waiting for access to an Excel host
 - Related: #34, the pull request that started this work
 ```
+
+<a id="triage-rules"></a>
+
+## 🔍 Triage rules
+
+**Issue triage** audits every open issue on issue and milestone events and on manual runs. It is read-only: a failed run is the signal, and I resolve each finding by hand. Each finding names one of these rules, which `tools/check_issues.py` defines:
+
+<!-- BEGIN generated: triage-rules -->
+| Rule | What every open issue needs |
+| --- | --- |
+| `assignee` | An assignee: the account that the issue forms assign, read from `bug.yml`. |
+| `priority` | Exactly one of the priority labels `P1`, `P2` and `P3`. |
+| `p1-reserved` | `P1` only together with `bug`: it is reserved for a confirmed calculation bug. |
+| `milestone` | A milestone, and an open one. |
+| `target-date` | One valid ISO `YYYY-MM-DD` target end date (Europe/Rome), in a planning line or the issue form's field. |
+| `milestone-due` | A milestone with a due date, and a target end date before it. |
+| `start-date` | One valid ISO `YYYY-MM-DD` start date (Europe/Rome), not after the target end date. |
+| `dependencies` | A dependency section that is not empty, in which every issue or pull request named exists. |
+| `blocked` | The `blocked` label exactly while the dependency section names an open prerequisite issue or an `External condition:` line. |
+| `catalogue` | Only labels of the catalogue that `.github/labels.json` resolves: the core and the selected overlays. |
+| `dependency-cycle` | No cycle among the dependency sections of open issues. |
+<!-- END generated: triage-rules -->
 
 ## ✅ Closing issues
 

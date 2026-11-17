@@ -87,7 +87,7 @@
       "proofs": [
         "tests.test_check_repository.FileCheckTest.test_template_only_content"
       ],
-      "negative_claim": "with --template false, an AGENTS.md that keeps the template-only section is reported",
+      "negative_claim": "with --template false, an AGENTS.md or a README.md that keeps a template-only section is reported",
       "state": "green"
     },
     {
@@ -315,10 +315,12 @@
       "proofs": [
         "tests.test_render_docs.RenderTest.test_main_exit_codes",
         "tests.test_render_docs.RenderTest.test_a_stale_block_fails_and_write_renders_it",
-        "tests.test_render_docs.RenderTest.test_marker_problems"
+        "tests.test_render_docs.RenderTest.test_marker_problems",
+        "tests.test_render_docs.TriageRulesTest.test_a_new_rule_makes_the_table_stale",
+        "tests.test_render_docs.WorkflowTriggersTest.test_a_changed_trigger_makes_the_block_stale"
       ],
-      "negative_claim": "a stale generated block, and markers that are unbalanced, repeated or name no renderer, fail --check",
-      "state": "green"
+      "negative_claim": "a stale generated block, among them the triage rules after a rule is added and the workflow triggers after a trigger changes, and markers that are unbalanced, repeated or name no renderer, fail --check",
+      "state": "green_in_ci"
     },
     {
       "check": "restated-counts",
@@ -339,12 +341,12 @@
       "proofs": [
         "tests.test_check_template_wording.TemplateWording.test_the_old_sentences_fail_with_file_line_and_phrase",
         "tests.test_check_template_wording.TemplateWording.test_case_line_breaks_comment_marks_and_apostrophes",
-        "tests.test_check_template_wording.TemplateWording.test_only_the_template_only_section_of_agents_is_left_out",
+        "tests.test_check_template_wording.TemplateWording.test_only_the_template_only_sections_of_agents_and_readme_are_left_out",
         "tests.test_check_template_wording.TemplateWording.test_allowed_uses",
         "tests.test_check_template_wording.TemplateWording.test_tracked_files_that_cannot_be_listed_fail",
         "tests.test_check_template_wording.TemplateWording.test_main_reports_and_exits"
       ],
-      "negative_claim": "a tracked text file that holds one of the phrases of PHRASES, also across a line break or comment marks, outside the template-only section of AGENTS.md, is reported with its file, line and phrase; an allowed use that matches nothing or has no reason, and tracked files that cannot be listed, are reported",
+      "negative_claim": "a tracked text file that holds one of the phrases of PHRASES, also across a line break or comment marks, outside the template-only sections of AGENTS.md and README.md, is reported with its file, line and phrase; an allowed use that matches nothing or has no reason, and tracked files that cannot be listed, are reported",
       "state": "green"
     },
     {

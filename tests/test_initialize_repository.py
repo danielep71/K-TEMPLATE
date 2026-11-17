@@ -1,16 +1,18 @@
 """Tests for tools/initialize_repository.py.
 
-Each adaptation is tested on a small text. One test copies the tracked tree
-to a temporary Git repository, initializes it, and runs the Repository
-integrity checks there with --template false, as a generated repository's CI
-does. That run leaves out three checks: the test suite, which would run this
-test again inside itself, and Ruff and mypy. They read only the Python code
-of tools/ and tests/, which the initializer never changes, so the template's
-own run of them already covers the copy. In place of the suite it runs the
-test modules that compare the adapted files with each other; the integrity
-checks of the copy cover the rest. The same run is
-repeated after deleting the initializer and this test, which a generated
-repository may do once it is initialized; there, this copy test is skipped.
+Each adaptation is tested on a small text, and each option also on a small
+tree, with a negative control. One test copies the tracked tree to a
+temporary Git repository, initializes it with every option, --remove-traffic
+and --assignee included, and runs the Repository integrity checks there with
+--template false, as a generated repository's CI does. The initializer has
+deleted itself and this test by then, as it does once it has run. That run
+leaves out three checks: the test suite, which would run this test again
+inside itself, and Ruff and mypy. They read only the Python code of tools/
+and tests/, which the initializer only deletes, never edits, so the
+template's own run of them already covers the copy. In place of the suite it
+runs the test modules that compare the adapted files with each other; the
+integrity checks of the copy cover the rest. Once a repository is
+initialized, this test is gone, and the copy test is skipped anywhere else.
 """
 
 from __future__ import annotations
@@ -25,12 +27,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import check_changelog  # noqa: E402
+import check_issues  # noqa: E402
 import check_repository  # noqa: E402
 import gitio  # noqa: E402
 import initialize_repository as initialize  # noqa: E402
@@ -47,8 +51,9 @@ CLEANUP_CHECKS = ("template-only-content", "issue-contact-links", "readme-traffi
 # Read only code the initializer never changes; see the module docstring.
 NOT_RUN = {"tests", "ruff", "mypy"}
 ADAPTED_FILE_TESTS = ("test_repository_consistency", "test_workflow_controls",
-                      "test_check_issues")
-INITIALIZER = ("tools/initialize_repository.py", "tests/test_initialize_repository.py")
+                      "test_check_issues", "test_setup_repository", "test_check_doc_commands")
+INITIALIZER = initialize.INITIALIZER
+FORMS = [f"{initialize.ISSUE_FORMS}/{name}" for name in sorted(check_issues.FORM_PRIORITIES)]
 # Only the template still holds the template-only section; once it is
 # initialized, a copy of this tree has nothing left to adapt.
 IS_TEMPLATE = (ROOT / "AGENTS.md").is_file() and \
@@ -172,6 +177,65 @@ VALIDATION_PLAN = """# Validation plan
 """
 
 
+# A section of whole lines with a replacement, one within a paragraph with a
+# replacement, and one within a table cell without one.
+README_SECTIONS = """# Project
+
+[Intro](#intro) \u00b7<!-- template-only:start -->
+[Start](#start)<!-- template-only:replacement
+[Guides](#guides)--><!-- template-only:end -->
+\u00b7 [End](#end)
+
+<!-- template-only:start -->
+## Start
+
+Template steps.
+<!-- template-only:replacement
+## Guides
+
+| I want to | Read |
+| --- | --- |
+| Build | [Guide](GUIDE.md) |
+-->
+<!-- template-only:end -->
+
+## Later
+
+| Document | Covers |
+| --- | --- |
+| [Guide](GUIDE.md) | All<!-- template-only:start --> |
+| [Wiki](https://example.com/wiki) | Tour<!-- template-only:end --> |
+"""
+
+# The traffic collection and what names it, in small.
+TRAFFIC_TREE = {
+    **{path: "traffic\n" for path in initialize.TRAFFIC_FILES},
+    "README.md": "# Project\n\n| Area | What |\n| --- | --- |\n| Traffic | Clones |\n"
+                 "| Links | Checked |\n",
+    initialize.SETTINGS_CONFIG: json.dumps({"rulesets": [
+        {"name": "Protect main", "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"]}}},
+        {"name": "Protect traffic history",
+         "conditions": {"ref_name": {"include": [initialize.TRAFFIC_REF]}}}]}, indent=2) + "\n",
+    initialize.SETUP_GUIDE: "| **Protection \u00b7 2 rulesets** | Default branch. |\n",
+    initialize.VERIFICATION_DEPTH: json.dumps({"checks": [
+        {"check": "changelog"}, {"check": initialize.TRAFFIC_CHECK}]}, indent=2) + "\n",
+    initialize.NOTICE: f"Files:\n\n{check_repository.TRAFFIC_WORKFLOW}\nSECURITY.md\n",
+    initialize.PROVENANCE: json.dumps({"sources": [{"files": [
+        "SECURITY.md", check_repository.TRAFFIC_WORKFLOW]}]}, indent=2) + "\n",
+    "docs/GUIDE.md": "Collect the traffic weekly.\n",
+}
+
+# The issue forms, Dependabot and the label guide, which name the assignee.
+ASSIGNEE_TREE = {
+    **{form: 'name: "Form"\nlabels: ["P2"]\nassignees: ["maintainer"]\nbody: []\n'
+       for form in FORMS},
+    initialize.DEPENDABOT: "version: 2\nupdates:\n  - package-ecosystem: pip\n"
+                           "    assignees:\n      - maintainer\n      - other\n"
+                           "    commit-message:\n      prefix: ci\n",
+    initialize.ISSUE_LABELS: "My account, `maintainer`, is the assignee.\n",
+}
+
+
 def write(root: Path, files: dict[str, str]) -> None:
     for name, text in files.items():
         path = root / name
@@ -188,14 +252,55 @@ class AdaptationTests(unittest.TestCase):
         return adapted
 
     def test_agents_loses_the_template_only_section_and_its_markers(self) -> None:
-        adapted = self.assertIdempotent(initialize.adapt_agents, AGENTS)
+        adapt = initialize.template_only("AGENTS.md")
+        adapted = self.assertIdempotent(adapt, AGENTS)
         self.assertEqual(adapted, "# Instructions\n\n- A rule.\n")
         middle = AGENTS.replace("<!-- template-only:end -->\n",
                                 "<!-- template-only:end -->\n\n## Later\n\n- Kept.\n")
-        self.assertEqual(initialize.adapt_agents(middle, OPTIONS)[0],
+        self.assertEqual(adapt(middle, OPTIONS)[0],
                          "# Instructions\n\n- A rule.\n\n## Later\n\n- Kept.\n")
-        with self.assertRaisesRegex(InitializeError, "has no <!-- template-only:end -->"):
-            initialize.adapt_agents("<!-- template-only:start -->\n", OPTIONS)
+        with self.assertRaisesRegex(InitializeError, "AGENTS.md: .* has no "
+                                    "<!-- template-only:end -->"):
+            adapt("<!-- template-only:start -->\n", OPTIONS)
+        # Without a section, nothing changes.
+        self.assertEqual(adapt("# Instructions\n", OPTIONS), ("# Instructions\n", []))
+
+    def test_a_section_with_a_replacement_is_replaced_by_it(self) -> None:
+        adapt = initialize.template_only("README.md")
+        adapted, notes = adapt(README_SECTIONS, OPTIONS)
+        self.assertEqual(adapted, (
+            "# Project\n\n[Intro](#intro) \u00b7\n[Guides](#guides)\n\u00b7 [End](#end)\n\n"
+            "## Guides\n\n| I want to | Read |\n| --- | --- |\n| Build | [Guide](GUIDE.md) |\n\n"
+            "## Later\n\n| Document | Covers |\n| --- | --- |\n| [Guide](GUIDE.md) | All |\n"))
+        self.assertEqual(notes, [
+            "replace 2 template-only section(s) with the replacement each holds, with their "
+            "markers",
+            "delete 1 template-only section(s), with their markers"])
+        self.assertEqual(adapt(adapted, OPTIONS), (adapted, []))
+        # The replacement must close just before the end marker.
+        unclosed = README_SECTIONS.replace("[Guides](#guides)-->", "[Guides](#guides)")
+        with self.assertRaisesRegex(InitializeError, "README.md: <!-- template-only:replacement "
+                                    "is not closed by -->"):
+            adapt(unclosed, OPTIONS)
+
+    @unittest.skipUnless(IS_TEMPLATE, "this repository is already initialized")
+    def test_the_real_readme_gets_a_table_of_guides_in_place_of_its_template_sections(
+            self) -> None:
+        text = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(initialize.SECTION_START, text)
+        adapted = self.assertIdempotent(initialize.template_only("README.md"), text)
+        self.assertNotIn("template-only", adapted)
+        self.assertNotIn("/wiki", adapted)
+        self.assertNotIn("## \U0001f680 Start a new repository", adapted)
+        self.assertIn("\n[Find your way](#-find-your-way)\n", adapted)
+        table = adapted.split("## \U0001f4cd Find your way\n\n", 1)[1].split("\n\n", 1)[0]
+        rows = table.splitlines()[2:]
+        self.assertTrue(6 <= len(rows) <= 8, rows)
+        # Each row links a guide that a new repository keeps.
+        for row in rows:
+            with self.subTest(row=row):
+                target = row.rsplit("](", 1)[1].split(")", 1)[0]
+                self.assertTrue((ROOT / target).is_file(), target)
 
     def test_contact_links_point_at_the_new_repository(self) -> None:
         adapted = self.assertIdempotent(initialize.adapt_contact_links, CONFIG)
@@ -211,6 +316,9 @@ class AdaptationTests(unittest.TestCase):
         removing = Options(REPOSITORY, "LCR", remove_traffic_badges=True)
         removed = self.assertIdempotent(initialize.adapt_badges, README, removing)
         self.assertEqual(removed, "# Template\n\nI use this template.\n")
+        # Removing the collection removes its badges too.
+        everything = Options(REPOSITORY, "LCR", remove_traffic=True)
+        self.assertEqual(initialize.adapt_badges(README, everything)[0], removed)
 
     def test_dependabot_target_branch_is_set_added_or_removed(self) -> None:
         adapted = self.assertIdempotent(initialize.adapt_dependabot, DEPENDABOT)
@@ -289,6 +397,122 @@ class AdaptationTests(unittest.TestCase):
             with self.subTest(options=options), self.assertRaises(InitializeError):
                 initialize.validate(options)
         initialize.validate(OPTIONS)
+
+    def test_the_assignee_must_be_a_github_login(self) -> None:
+        for login in ("", "-lead", "trail-", "two--hyphens", "under_score", "a space", "a" * 40,
+                      "\u00e9t\u00e9"):
+            with self.subTest(login=login), \
+                    self.assertRaisesRegex(InitializeError, "--assignee must be a GitHub login"):
+                initialize.validate(Options(REPOSITORY, "LCR", assignee=login))
+        for login in ("a", "someone", "Some-One-2", "a" * 39):
+            with self.subTest(login=login):
+                initialize.validate(Options(REPOSITORY, "LCR", assignee=login))
+        refused = io.StringIO()
+        with contextlib.redirect_stderr(refused):
+            code = initialize.main(["--repository", REPOSITORY, "--regime", "LCR",
+                                    "--assignee", "bad--login", "--root", str(ROOT)])
+        self.assertEqual(code, 2)
+        self.assertIn("--assignee must be a GitHub login", refused.getvalue())
+
+    def test_the_assignee_is_set_in_the_forms_dependabot_and_the_label_guide(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="initialize-assignee-") as directory:
+            root = Path(directory)
+            write(root, ASSIGNEE_TREE)
+            # Without --assignee, nothing that names the assignee changes.
+            self.assertEqual(initialize.plan(root, Options(REPOSITORY, "LCR")), [])
+            options = Options(REPOSITORY, "LCR", assignee="someone")
+            changes = initialize.plan(root, options)
+            self.assertEqual([change.path for change in changes],
+                             [*FORMS, initialize.DEPENDABOT, initialize.ISSUE_LABELS])
+            initialize.apply(root, changes)
+            self.assertEqual(check_issues.configured_assignee(root), "someone")
+            for form in FORMS:
+                text = (root / form).read_text(encoding="utf-8")
+                self.assertEqual(check_issues.flow_list(text, "assignees"), ["someone"], form)
+            self.assertEqual((root / initialize.DEPENDABOT).read_text(encoding="utf-8"),
+                             "version: 2\nupdates:\n  - package-ecosystem: pip\n"
+                             "    assignees:\n      - someone\n"
+                             "    commit-message:\n      prefix: ci\n")
+            self.assertEqual((root / initialize.ISSUE_LABELS).read_text(encoding="utf-8"),
+                             "My account, `someone`, is the assignee.\n")
+            self.assertEqual(initialize.plan(root, options), [])
+
+    def test_remove_traffic_removes_the_collection_and_what_names_it(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="initialize-traffic-") as directory:
+            root = Path(directory)
+            write(root, TRAFFIC_TREE)
+            # Without --remove-traffic, the collection and its ruleset stay.
+            self.assertEqual(initialize.plan(root, Options(REPOSITORY, "LCR")), [])
+            options = Options(REPOSITORY, "LCR", remove_traffic=True)
+            changes = initialize.plan(root, options)
+            notes = [f"{change.path}: {note}" for change in changes for note in change.notes]
+            self.assertIn(f"{initialize.SETTINGS_CONFIG}: a ruleset \"Protect traffic history\" "
+                          "already created on GitHub is left to you: tools/setup_repository.py "
+                          "reports it as unmanaged and never deletes it; delete it in Settings > "
+                          "Rules > Rulesets if it exists", notes)
+            # A mention it cannot place is a warning, to edit by hand.
+            self.assertEqual(initialize.traffic_mentions(root, changes), ["docs/GUIDE.md:1"])
+            initialize.apply(root, changes)
+            for path in initialize.TRAFFIC_FILES:
+                self.assertFalse((root / path).exists(), path)
+            self.assertEqual((root / "README.md").read_text(encoding="utf-8"),
+                             "# Project\n\n| Area | What |\n| --- | --- |\n| Links | Checked |\n")
+            config = json.loads((root / initialize.SETTINGS_CONFIG).read_text(encoding="utf-8"))
+            self.assertEqual([ruleset["name"] for ruleset in config["rulesets"]], ["Protect main"])
+            self.assertEqual((root / initialize.SETUP_GUIDE).read_text(encoding="utf-8"),
+                             "| **Protection \u00b7 1 rulesets** | Default branch. |\n")
+            depth = json.loads((root / initialize.VERIFICATION_DEPTH).read_text(encoding="utf-8"))
+            self.assertEqual(depth, {"checks": [{"check": "changelog"}]})
+            self.assertEqual((root / initialize.NOTICE).read_text(encoding="utf-8"),
+                             "Files:\n\nSECURITY.md\n")
+            register = json.loads((root / initialize.PROVENANCE).read_text(encoding="utf-8"))
+            self.assertEqual(register["sources"][0]["files"], ["SECURITY.md"])
+            self.assertEqual(initialize.plan(root, options), [])
+
+    def test_the_initializer_removes_itself_last_and_only_with_apply(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="initialize-itself-") as directory:
+            root = Path(directory)
+            write(root, {"AGENTS.md": AGENTS, **dict.fromkeys(INITIALIZER, "# initializer\n")})
+            init(root)
+            git(root, "add", "-A")
+            git(root, "commit", "-qm", "Created")
+            changes = initialize.plan(root, OPTIONS)
+            self.assertEqual([(change.path, change.last) for change in changes],
+                             [("AGENTS.md", False), *((path, True) for path in INITIALIZER)])
+
+            def run(write: bool) -> tuple[int | None, str, str]:
+                printed, refused = io.StringIO(), io.StringIO()
+                code = None
+                with contextlib.redirect_stdout(printed), contextlib.redirect_stderr(refused):
+                    code = initialize.main(["--repository", REPOSITORY, "--regime", "LCR",
+                                            "--root", str(root), *(["--apply"] if write else [])])
+                return code, printed.getvalue(), refused.getvalue()
+
+            def kept() -> list[str]:
+                return [path for path in INITIALIZER if (root / path).is_file()]
+
+            # The dry run lists the deletion and deletes nothing.
+            code, printed, _ = run(False)
+            self.assertEqual(code, 0)
+            self.assertIn("- tools/initialize_repository.py: delete it, last", printed)
+            self.assertEqual(kept(), list(INITIALIZER))
+            # A write that fails, or generated blocks that cannot be rendered, keep it.
+            with mock.patch.object(Path, "write_bytes", side_effect=OSError("disk full")):
+                code, _, refused = run(True)
+            self.assertEqual((code, kept()), (2, list(INITIALIZER)))
+            self.assertIn("AGENTS.md cannot be written: disk full", refused)
+            code, _, refused = run(True)
+            self.assertEqual((code, kept()), (2, list(INITIALIZER)))
+            self.assertIn("the generated blocks cannot be rendered", refused)
+            self.assertIn("CONTRIBUTING.md: missing", refused)
+            git(root, "checkout", "-q", "--", ".")
+            # Once every other change is written and the blocks rendered, it goes.
+            with mock.patch.object(initialize, "render", return_value=[]) as rendered:
+                code, printed, _ = run(True)
+            self.assertEqual((code, kept()), (0, []))
+            rendered.assert_called_once()
+            self.assertEqual((root / "AGENTS.md").read_text(encoding="utf-8"),
+                             "# Instructions\n\n- A rule.\n")
 
     def test_a_released_template_changelog_becomes_a_fresh_one(self) -> None:
         with tempfile.TemporaryDirectory(prefix="initialize-changelog-") as directory:
@@ -431,23 +655,40 @@ class GeneratedRepositoryTest(unittest.TestCase):
     def test_an_initialized_copy_passes_repository_integrity(self) -> None:
         code, _, statuses = self.integrity(list(CLEANUP_CHECKS))
         self.assertEqual((code, statuses), (1, dict.fromkeys(CLEANUP_CHECKS, "fail")))
+        options = ("--remove-traffic", "--assignee", "someone")
+        traffic_ruleset = "Protect traffic history"
 
-        dry_run = self.initialize()
+        # Negative controls: without the options, the collection and the assignee stay.
+        plain = {change.path for change in initialize.plan(self.root, OPTIONS)}
+        self.assertFalse(plain & {*initialize.TRAFFIC_FILES, initialize.SETTINGS_CONFIG,
+                                  initialize.VERIFICATION_DEPTH, *FORMS}, plain)
+        self.assertTrue(set(INITIALIZER) <= plain)
+
+        dry_run = self.initialize(*options)
         self.assertEqual(dry_run.returncode, 0, dry_run.stderr)
-        self.assertIn("- AGENTS.md: delete the template-only section", dry_run.stdout)
+        self.assertIn("- AGENTS.md: delete 1 template-only section(s)", dry_run.stdout)
+        self.assertIn(f"- {check_repository.TRAFFIC_WORKFLOW}: delete it", dry_run.stdout)
+        self.assertIn(f'a ruleset "{traffic_ruleset}" already created on GitHub is left to you',
+                      dry_run.stdout)
+        self.assertIn("- tools/initialize_repository.py: delete it, last", dry_run.stdout)
         self.assertIn("dry run, nothing written", dry_run.stdout)
+        self.assertNotIn("WARNING", dry_run.stdout)
         self.assertEqual(git(self.root, "status", "--porcelain", "--untracked-files=all"), "")
 
         (self.root / "notes.txt").write_text("unrelated\n", encoding="utf-8")
-        refused = self.initialize("--apply")
+        refused = self.initialize("--apply", *options)
         self.assertEqual(refused.returncode, 2)
         self.assertIn("the working tree differs from the commit", refused.stderr)
         self.assertEqual(git(self.root, "status", "--porcelain"), "?? notes.txt\n")
         (self.root / "notes.txt").unlink()
 
-        applied = self.initialize("--apply")
+        applied = self.initialize("--apply", *options)
         self.assertEqual(applied.returncode, 0, applied.stderr)
         self.assertIn("Nothing on GitHub was changed", applied.stdout)
+        self.assertNotIn("WARNING", applied.stdout)
+        # Last, it removed itself and its test.
+        for path in (*INITIALIZER, *initialize.TRAFFIC_FILES):
+            self.assertFalse((self.root / path).exists(), path)
         # No evidence row cites a commit or an issue of the template.
         installation = (self.root / initialize.INSTALLATION).read_text(encoding="utf-8")
         rows = installation.split(initialize.TESTED_HEADER, 1)[1].split("\n")[2]
@@ -456,8 +697,26 @@ class GeneratedRepositoryTest(unittest.TestCase):
         host = [line for line in plan.split("\n") if line.startswith("| `HB-")]
         self.assertTrue(host)
         self.assertTrue(all(line.endswith(f"| {initialize.NO_EVIDENCE} |") for line in host), host)
+        # The README's template-only sections gave way to the table of guides.
+        readme = (self.root / "README.md").read_text(encoding="utf-8")
+        self.assertNotIn("template-only", readme)
+        self.assertIn("Find your way", readme)
+        # Nothing but the setup guide's record of this initializer names the collection.
+        self.assertEqual(initialize.traffic_mentions(self.root, []), [])
+        self.assertNotIn(traffic_ruleset, (self.root / initialize.SETTINGS_CONFIG)
+                         .read_text(encoding="utf-8"))
+        self.assertEqual(check_issues.configured_assignee(self.root), "someone")
+        for form in FORMS:
+            text = (self.root / form).read_text(encoding="utf-8")
+            self.assertEqual(check_issues.flow_list(text, "assignees"), ["someone"], form)
+        self.assertNotIn(check_issues.configured_assignee(ROOT),
+                         (self.root / initialize.DEPENDABOT).read_text(encoding="utf-8"))
         self.commit("Initialize the repository")
-        again = self.initialize("--apply")
+        # A second run, from the template, finds nothing left to change.
+        again = subprocess.run([sys.executable, str(ROOT / INITIALIZER[0]), "--repository",
+                                REPOSITORY, "--regime", "LCR", "--release-branch",
+                                "release/0.1.0", "--root", str(self.root), "--apply", *options],
+                               capture_output=True, text=True, check=False)
         self.assertEqual(again.returncode, 0, again.stderr)
         self.assertIn("nothing to change", again.stdout)
         self.assertEqual(git(self.root, "status", "--porcelain", "--untracked-files=all"), "")
@@ -465,14 +724,8 @@ class GeneratedRepositoryTest(unittest.TestCase):
         code, printed, statuses = self.integrity()
         self.assertEqual(code, 0, printed)
         self.assertNotIn("fail", statuses.values(), printed)
-
-        # Once run, the initializer can be deleted.
-        for name in INITIALIZER:
-            (self.root / name).unlink()
-        self.commit("Delete the initializer")
-        code, printed, _ = self.integrity()
-        self.assertEqual(code, 0, printed)
-
+        self.assertNotIn("readme-traffic-badges", statuses)
+        self.assertEqual(statuses["issue-configuration"], "pass", printed)
 
 if __name__ == "__main__":
     unittest.main()

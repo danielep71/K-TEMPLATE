@@ -2,7 +2,8 @@
 """Check issue metadata and dependency status that issue forms cannot enforce.
 
 Read-only: the check never changes an issue. It reports findings for me to
-resolve by hand (docs/repo_governance/ISSUE_LABELS.md).
+resolve by hand (docs/repo_governance/ISSUE_LABELS.md). Each finding names one
+rule of RULES, which the triage rules table of that guide lists.
 """
 
 from __future__ import annotations
@@ -64,11 +65,40 @@ class Issue:
     milestone_state: str = "open"
 
 
+# The triage rules, by the code each finding names, with what the rule
+# requires of every open issue. docs/repo_governance/ISSUE_LABELS.md shows
+# them in a table that tools/render_docs.py renders from this registry, and a
+# finding with a code that is not registered here is refused.
+RULES: dict[str, str] = {
+    "assignee": "An assignee: the account that the issue forms assign, read from `bug.yml`.",
+    "priority": "Exactly one of the priority labels `P1`, `P2` and `P3`.",
+    "p1-reserved": "`P1` only together with `bug`: it is reserved for a confirmed calculation "
+                   "bug.",
+    "milestone": "A milestone, and an open one.",
+    "target-date": "One valid ISO `YYYY-MM-DD` target end date (Europe/Rome), in a planning "
+                   "line or the issue form's field.",
+    "milestone-due": "A milestone with a due date, and a target end date before it.",
+    "start-date": "One valid ISO `YYYY-MM-DD` start date (Europe/Rome), not after the target "
+                  "end date.",
+    "dependencies": "A dependency section that is not empty, in which every issue or pull "
+                    "request named exists.",
+    "blocked": "The `blocked` label exactly while the dependency section names an open "
+               "prerequisite issue or an `External condition:` line.",
+    "catalogue": "Only labels of the catalogue that `.github/labels.json` resolves: the core and "
+                 "the selected overlays.",
+    "dependency-cycle": "No cycle among the dependency sections of open issues.",
+}
+
+
 @dataclass(frozen=True)
 class Finding:
     number: int
     rule: str
     message: str
+
+    def __post_init__(self) -> None:
+        if self.rule not in RULES:
+            raise ValueError(f"finding rule {self.rule!r} is not registered in RULES")
 
 
 def normalized(body: str) -> str:

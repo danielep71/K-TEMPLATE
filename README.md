@@ -26,8 +26,9 @@
 [What it is](#-what-this-template-is)
 &nbsp;·&nbsp;
 [What you get](#-what-you-get)
-&nbsp;·&nbsp;
-[Quick start](#-start-a-new-repository)
+&nbsp;·&nbsp;<!-- template-only:start -->
+[Quick start](#-start-a-new-repository)<!-- template-only:replacement
+[Find your way](#-find-your-way)--><!-- template-only:end -->
 &nbsp;·&nbsp;
 [Lifecycle](#-from-source-to-release)
 &nbsp;·&nbsp;
@@ -35,9 +36,9 @@
 &nbsp;·&nbsp;
 [Documentation](#-documentation)
 &nbsp;·&nbsp;
-[Status](#-status)
+[Status](#-status)<!-- template-only:start -->
 &nbsp;·&nbsp;
-[Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki)
+[Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki)<!-- template-only:end -->
 
 ---
 
@@ -74,6 +75,7 @@ that keeps them honest.
 | Releases | A release process with a changelog, a certification record, a milestone closeout and a reproducible, attested source bundle |
 | Traffic | Optional daily collection of clones and visitors, with the badges above |
 
+<!-- template-only:start -->
 ## 🚀 Start a new repository
 
 GitHub copies files from a template, not its settings. In order:
@@ -84,9 +86,9 @@ GitHub copies files from a template, not its settings. In order:
    tag when the default branch equals it, so that later template changes
    can be compared with it.
 2. Adapt the files to the new repository, in a clean clone of it. The first
-   command lists the changes and writes nothing; `--apply` makes them. Neither
-   changes anything on GitHub. `PREFIX` is the project's short name, such as
-   `LCR`:
+   command lists the changes and writes nothing; `--apply` makes them, then
+   deletes the initializer and its test, its last change. Neither changes
+   anything on GitHub. `PREFIX` is the project's short name, such as `LCR`:
 
    ```sh
    python tools/initialize_repository.py --repository OWNER/NEW-REPO --regime PREFIX
@@ -94,8 +96,10 @@ GitHub copies files from a template, not its settings. In order:
    ```
 
    Add `--release-branch BRANCH` to point Dependabot at an existing release
-   branch, and `--remove-traffic-badges` to remove the badges. Review the diff
-   and commit it.
+   branch, `--assignee LOGIN` to assign the issue forms and Dependabot's pull
+   requests to another GitHub account, and `--remove-traffic` to remove the
+   optional traffic collection, or `--remove-traffic-badges` to remove only
+   its badges. Review the diff and commit it.
 
    The setup guide's
    [*Template cleanup*](docs/setup/REPOSITORY_SETUP.md#-before-you-start)
@@ -125,10 +129,11 @@ GitHub copies files from a template, not its settings. In order:
 6. Adapt, replace or remove the remaining template files, as the setup
    guide's [handover table](docs/setup/REPOSITORY_SETUP.md#recommended-handover)
    says. The initializer leaves them as they are: among them the title,
-   introduction, banner and wiki links of this README, the social preview
-   in `docs/assets/`, the repository's **About** fields, and the
-   illustrative methodology, cases and contracts.
-7. Optionally, enable traffic collection
+   introduction and banner of this README, the social preview in
+   `docs/assets/`, the repository's **About** fields, and the illustrative
+   methodology, cases and contracts. It replaces this section and the
+   template's wiki links with a table of the main guides.
+7. Unless you removed it, optionally enable traffic collection
    ([traffic history](docs/repo_governance/TRAFFIC.md)).
 8. If Codex reviews your pull requests, check that it reviews the new
    repository's first one; no Codex environment is needed
@@ -136,6 +141,21 @@ GitHub copies files from a template, not its settings. In order:
 
 The [settings reference](docs/repo_governance/SETTINGS.md) and its
 [JSON configuration](docs/setup/repository-settings.json) describe the baseline.
+<!-- template-only:replacement
+## 📍 Find your way
+
+| I want to… | Read |
+| --- | --- |
+| Move VBA source between the repository and Excel, or record an Excel run | [Installation](INSTALLATION.md) |
+| Write VBA that passes the static checks | [VBA house style](docs/VBA_HOUSE_STYLE.md) |
+| Know where a component belongs and what it may call | [Repository structure](docs/REPOSITORY_STRUCTURE.md) |
+| Record the sources, the data and the calculation, and how they are tested | [Methodology](docs/methodology/README.md) |
+| Propose a change and run the checks locally | [Contributing](CONTRIBUTING.md) |
+| Label, triage or plan an issue | [Issue labels](docs/repo_governance/ISSUE_LABELS.md) |
+| Check or reapply the GitHub settings | [Repository setup](docs/setup/REPOSITORY_SETUP.md) |
+| Prepare, certify and publish a release | [Releasing](RELEASING.md) |
+-->
+<!-- template-only:end -->
 
 ## 🔄 From source to release
 
@@ -161,20 +181,40 @@ flowchart LR
 
 ## ✅ Quality gates
 
-| Workflow | When it runs | What it checks |
-| --- | --- | --- |
-| **Repository integrity** | Every pull request, pushes to the default and release branches, and manual runs; the required check | Python, VBA, workflow, link, changelog, test-case and governance checks, with the unit tests |
-| **Minimum Python** | Pull requests that change Python code, the tests, the tools, the label scripts or the Python requirements; pushes to the default branch | The unit tests on the minimum supported Python |
-| **CodeQL** | Pushes to the default branch, pull requests into it and into release branches unless they change only Markdown and `docs/`, and weekly | Code scanning of the Python, JavaScript and workflow code |
-| **OpenSSF Scorecard** | Pushes to the default branch, branch protection changes and weekly | The repository's supply-chain posture |
-| **Link check** | Weekly | External links |
-| **Sync issue labels** · **Detect issue-label drift** | Catalogue changes on the default branch · weekly | The live labels against `.github/labels.json`, never deleting one in use |
-| **Detect settings drift** | Daily | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
-| **Issue triage** | Issue and milestone events | Assignee, one priority, an open milestone, a start date, a target end date and a dependency section on every open issue |
-| **Closing keywords** | Pull request events | The closing keywords a pull request would carry to the default branch: none into a release branch, none for an open issue in an integration |
-| **Keep milestones issue-only** | Pull request events and weekly | Removes any milestone set on a pull request, and lists each removal |
-| **Release** | A pushed `vX.Y.Z` tag | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |
-| **Traffic history** | Daily, optional | Collects clones and visitors for the badges above |
+| Workflow | What it checks |
+| --- | --- |
+| **Repository integrity** | The required check: Python, VBA, workflow, link, changelog, test-case and governance checks, with the unit tests |
+| **Minimum Python** | The unit tests on the minimum supported Python |
+| **CodeQL** | Code scanning of the Python, JavaScript and workflow code |
+| **OpenSSF Scorecard** | The supply-chain posture of the default branch; a run on any other branch skips the analysis |
+| **Link check** | External links |
+| **Sync issue labels** · **Detect issue-label drift** | The live labels against `.github/labels.json`, never deleting one in use |
+| **Detect settings drift** | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
+| **Issue triage** | Every open issue against the [triage rules](docs/repo_governance/ISSUE_LABELS.md#triage-rules) |
+| **Closing keywords** | The closing keywords a pull request would carry to the default branch: none into a release branch, none for an open issue in an integration |
+| **Keep milestones issue-only** | Removes any milestone set on a pull request, and lists each removal |
+| **Release** | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |
+| **Traffic history** | Optional: collects clones and visitors for the badges above |
+
+Each workflow runs on the events of its `on:` block:
+
+<!-- BEGIN generated: workflow-triggers -->
+| Workflow | When it runs |
+| --- | --- |
+| [**Closing keywords**](.github/workflows/closing-keywords.yml) | Pull requests (opened, synchronize, reopened, edited) |
+| [**CodeQL**](.github/workflows/codeql.yml) | Pushes to `main`; pull requests into `main`, `release/**` unless they change only `**/*.md`, `docs/**`; weekly on Wednesday at 04:29 UTC; manual runs |
+| [**Issue triage**](.github/workflows/issue-triage.yml) | Issue events (opened, edited, reopened, closed, labeled, unlabeled, assigned, unassigned, milestoned, demilestoned); milestone events (edited, closed, opened, deleted); manual runs |
+| [**Detect issue-label drift**](.github/workflows/labels-drift.yml) | Weekly on Tuesday at 05:23 UTC; manual runs |
+| [**Sync issue labels**](.github/workflows/labels-sync.yml) | Pushes that change `.github/labels.json`, `.github/scripts/labels-sync.mjs`, `.github/workflows/labels-sync.yml`; manual runs |
+| [**Link check**](.github/workflows/link-check.yml) | Weekly on Monday at 06:43 UTC; manual runs |
+| [**Minimum Python**](.github/workflows/minimum-python.yml) | Pull requests that change `**/*.py`, `tests/**`, `tools/**`, `.github/scripts/**`, `pyproject.toml`, `.github/requirements.txt`, `.github/workflows/minimum-python.yml`; pushes to `main`; manual runs |
+| [**Keep milestones issue-only**](.github/workflows/pr-milestones.yml) | Pushes that change `.github/workflows/pr-milestones.yml`; pull requests (opened, reopened, edited, milestoned), run from the base branch; weekly on Friday at 03:37 UTC; manual runs |
+| [**Release**](.github/workflows/release.yml) | Pushes of the tags `v*.*.*`; manual runs |
+| [**Repository integrity**](.github/workflows/repository-integrity.yml) | Every pull request; pushes to `main`, `release/**`; manual runs |
+| [**OpenSSF Scorecard**](.github/workflows/scorecard.yml) | Branch protection rule changes; every push; weekly on Thursday at 05:41 UTC; manual runs |
+| [**Detect settings drift**](.github/workflows/settings-drift.yml) | Daily at 04:41 UTC; manual runs |
+| [**Traffic history**](.github/workflows/traffic-history.yml) | Daily at 06:17 UTC; manual runs |
+<!-- END generated: workflow-triggers -->
 
 ## 🧩 VBA development
 
@@ -215,8 +255,8 @@ The full layout and its rules are in
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, checks, rules of evidence and pull requests |
 | [`SECURITY.md`](SECURITY.md) | Private vulnerability reporting, runtime risk surface and data handling |
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Participant behaviour and conduct reporting |
-| [`CHANGELOG.md`](CHANGELOG.md) | Change history |
-| [Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki) | A guided tour of the template, page by page; the documents above govern where it differs |
+| [`CHANGELOG.md`](CHANGELOG.md) | Change history<!-- template-only:start --> |
+| [Template wiki](https://github.com/danielep71/K-TEMPLATE/wiki) | A guided tour of the template, page by page; the documents above govern where it differs<!-- template-only:end --> |
 
 ## 📌 Status
 

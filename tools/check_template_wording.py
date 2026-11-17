@@ -17,8 +17,10 @@ longer word, such as "in the template-only section", is not.
 
 Scope: every tracked file that is UTF-8 text without a NUL byte, in the
 template and in every repository created from it alike, except the paths of
-EXCLUDED, each with its reason. The template-only section of AGENTS.md,
-between its markers, is left out: only the template keeps it.
+EXCLUDED, each with its reason. The template-only sections of AGENTS.md and
+README.md, between their markers, are left out: only the template keeps
+them, and the replacement a section holds is read once
+tools/initialize_repository.py has put it in their place.
 
 ALLOWED lists the reviewed uses that stay, each as a file, a phrase of
 PHRASES and the reason, such as "the template's" meaning the workbook
@@ -37,6 +39,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from check_repository import TEMPLATE_ONLY_FILES
 from gitio import GitError, tracked
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -105,7 +108,7 @@ def excluded(path: str, scope: dict[str, str]) -> bool:
 
 
 def text_of(root: Path, path: str) -> str | None:
-    """The file's text, without the template-only section of AGENTS.md; None if not text."""
+    """The file's text, without its template-only sections; None if not text."""
     file = root / path
     if not file.is_file():
         return None
@@ -116,7 +119,7 @@ def text_of(root: Path, path: str) -> str | None:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return None
-    if path == "AGENTS.md":
+    if path in TEMPLATE_ONLY_FILES:
         text = TEMPLATE_ONLY.sub(lambda section: re.sub(r"[^\n]", " ", section.group(0)), text)
     return text
 

@@ -298,7 +298,7 @@ class RepositoryTests(unittest.TestCase):
     def test_removed_once_run_matches_the_setup_guide(self) -> None:
         guide_text = SETUP_GUIDE.read_text(encoding="utf-8")
         rows = [row.split("|")[1] for row in guide_text.splitlines()
-                if row.startswith("|") and "| **Remove once run** |" in row]
+                if row.startswith("|") and "| **Removes itself once run** |" in row]
         tools = {name for row in rows for name in re.findall(r"`(tools/[^`]+\.py)`", row)}
         self.assertEqual(tools, set(check_doc_commands.REMOVED_ONCE_RUN))
 

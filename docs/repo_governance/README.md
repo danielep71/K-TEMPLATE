@@ -10,6 +10,7 @@ Ongoing repository rules and maintenance guidance live here. One-time initializa
 | [⚙️ Settings](SETTINGS.md) | Repository settings and branch/tag protection baseline. |
 | [🏷️ Issue labels](ISSUE_LABELS.md) | Label catalogue, synchronization, drift detection, and issue triage. |
 | [🔎 Pull request review](PULL_REQUESTS.md) | Final-head review before merging, and the exceptions to record. |
+| [🧾 Excel run](EXCEL_RUN.md) | An Excel run recorded by hand, what the evidence check rejects, and when a run counts for another commit. |
 | [📈 Traffic history](TRAFFIC.md) | Optional daily traffic collection on the `traffic-history` branch, with alerts. |
 | [🚀 Repository setup](../setup/REPOSITORY_SETUP.md) | Preview, apply and verify the settings baseline, and what to keep, adapt or remove. |
 | [📋 Settings configuration](../setup/repository-settings.json) | Machine-readable baseline used by the setup script. |

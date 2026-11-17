@@ -19,9 +19,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import check_excel_run  # noqa: E402
+import check_issues  # noqa: E402
 import check_repository  # noqa: E402
 import render_docs  # noqa: E402
 from render_docs import Block  # noqa: E402
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - exercised only without the parser
+    yaml = None
 
 
 def suite_counts() -> tuple[int, int, int]:
@@ -250,6 +256,142 @@ class DataContractTest(unittest.TestCase):
         self.assertIn("| `weight` | Decimal | Decimal fraction | No | 0 to 1 |  |", fields)
         self.assertIn("| `cap` | Integer | — | No | ≤ 9 |  |", fields)
         self.assertNotIn("Illustrative", fields)
+
+
+class TriageRulesTest(unittest.TestCase):
+    """The triage rules table of the issue guide follows check_issues.RULES."""
+
+    GUIDE = "docs/repo_governance/ISSUE_LABELS.md"
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory(prefix="render-triage-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        (self.root / self.GUIDE).parent.mkdir(parents=True)
+        shutil.copyfile(ROOT / self.GUIDE, self.root / self.GUIDE)
+        patcher = mock.patch.dict(render_docs.BLOCKS, {"triage-rules": render_docs.BLOCKS[
+            "triage-rules"]}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def problems(self, write: bool = False) -> list[str]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return render_docs.run(self.root, write)
+
+    def test_the_rendered_table_lists_every_registered_rule(self) -> None:
+        text = render_docs.triage_rules(ROOT)
+        rows = re.findall(r"^\| `([a-z0-9-]+)` \| (.+) \|$", text, re.M)
+        self.assertEqual(rows, list(check_issues.RULES.items()))
+        self.assertIn(f"{begin('triage-rules')}\n{text}\n{end('triage-rules')}",
+                      (ROOT / self.GUIDE).read_text(encoding="utf-8"))
+
+    def test_a_new_rule_makes_the_table_stale(self) -> None:
+        self.assertEqual(self.problems(), [])
+        rules = {**check_issues.RULES, "estimate": "An estimate of the work."}
+        with mock.patch.object(check_issues, "RULES", rules):
+            self.assertEqual(self.problems(), [
+                f"{self.GUIDE}: block triage-rules differs from a fresh render; run "
+                "python tools/render_docs.py --write"])
+            self.assertEqual(self.problems(write=True), [])
+        self.assertIn("| `estimate` | An estimate of the work. |",
+                      (self.root / self.GUIDE).read_text(encoding="utf-8"))
+
+
+@unittest.skipIf(yaml is None, "PyYAML is not installed (.github/requirements.txt)")
+class WorkflowTriggersTest(unittest.TestCase):
+    """The trigger table of the README follows each workflow's on: block."""
+
+    def setUp(self) -> None:
+        directory = tempfile.TemporaryDirectory(prefix="render-triggers-")
+        self.addCleanup(directory.cleanup)
+        self.root = Path(directory.name)
+        shutil.copyfile(ROOT / "README.md", self.root / "README.md")
+        shutil.copytree(ROOT / render_docs.WORKFLOWS, self.root / render_docs.WORKFLOWS)
+        patcher = mock.patch.dict(render_docs.BLOCKS, {"workflow-triggers": render_docs.BLOCKS[
+            "workflow-triggers"]}, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def problems(self, write: bool = False) -> list[str]:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return render_docs.run(self.root, write)
+
+    def edit(self, name: str, old: str, new: str) -> None:
+        path = self.root / render_docs.WORKFLOWS / name
+        text = path.read_text(encoding="utf-8")
+        self.assertEqual(text.count(old), 1, old)
+        path.write_text(text.replace(old, new), encoding="utf-8")
+
+    def test_a_changed_trigger_makes_the_block_stale(self) -> None:
+        self.assertEqual(self.problems(), [])
+        stale = ["README.md: block workflow-triggers differs from a fresh render; run "
+                 "python tools/render_docs.py --write"]
+        changes = [
+            ("link-check.yml", '- cron: "43 6 * * 1"', '- cron: "43 6 * * 2"'),
+            ("repository-integrity.yml", "  pull_request:\n",
+             "  pull_request:\n    types: [opened]\n"),
+            ("minimum-python.yml", '      - "tools/**"\n', ""),
+            ("release.yml", "  workflow_dispatch:\n", "  workflow_call:\n"),
+        ]
+        for name, old, new in changes:
+            with self.subTest(workflow=name):
+                path = self.root / render_docs.WORKFLOWS / name
+                original = path.read_text(encoding="utf-8")
+                self.edit(name, old, new)
+                self.assertEqual(self.problems(), stale)
+                path.write_text(original, encoding="utf-8")
+                self.assertEqual(self.problems(), [])
+
+    def test_a_new_workflow_makes_the_block_stale_and_write_lists_it(self) -> None:
+        (self.root / render_docs.WORKFLOWS / "nightly.yml").write_text(
+            "name: Nightly\non:\n  schedule:\n    - cron: '5 1 * * *'\njobs: {}\n",
+            encoding="utf-8")
+        self.assertEqual(len(self.problems()), 1)
+        self.assertEqual(self.problems(write=True), [])
+        self.assertIn("| [**Nightly**](.github/workflows/nightly.yml) | Daily at 01:05 UTC |",
+                      (self.root / "README.md").read_text(encoding="utf-8"))
+
+    def test_a_workflow_with_a_duplicate_key_cannot_be_rendered(self) -> None:
+        self.edit("link-check.yml", "  workflow_dispatch:\n",
+                  "  workflow_dispatch:\n  workflow_dispatch:\n")
+        found = self.problems()
+        self.assertEqual(len(found), 1)
+        self.assertIn("README.md: block workflow-triggers cannot be rendered: "
+                      ".github/workflows/link-check.yml:", found[0])
+        self.assertIn("found duplicate key 'workflow_dispatch'", found[0])
+
+    def test_how_each_event_and_filter_reads(self) -> None:
+        def text(event: str, config: object) -> str:
+            return render_docs.event_text(event, config, "w.yml")
+        self.assertEqual(text("push", None), "every push")
+        self.assertEqual(text("push", {"branches": ["main"], "paths": ["a/**"]}),
+                         "pushes to `main` that change `a/**`")
+        self.assertEqual(text("push", {"tags": ["v*"]}), "pushes of the tags `v*`")
+        self.assertEqual(text("pull_request", {"branches-ignore": ["x"]}),
+                         "pull requests except into `x`")
+        self.assertEqual(text("pull_request", {"paths-ignore": ["docs/**"]}),
+                         "pull requests unless they change only `docs/**`")
+        self.assertEqual(text("pull_request_target", {"types": ["opened", "edited"]}),
+                         "pull requests (opened, edited), run from the base branch")
+        self.assertEqual(text("workflow_dispatch", {"inputs": {"ref": {}}}), "manual runs")
+        self.assertEqual(text("workflow_run", {"workflows": ["CI"]}),
+                         "`workflow_run` events with `workflows` `CI`")
+        self.assertEqual(text("schedule", [{"cron": "0 3 * * *"}, {"cron": "30 4 * * 0"},
+                                           {"cron": "0 */6 * * *"}]),
+                         "daily at 03:00 UTC, weekly on Sunday at 04:30 UTC, on the schedule "
+                         "`0 */6 * * *`")
+        with self.assertRaisesRegex(ValueError, "w.yml: on.push.branches is not a list"):
+            text("push", {"branches": []})
+
+    def test_without_pyyaml_the_block_is_skipped_and_left_as_it_is(self) -> None:
+        before = (self.root / "README.md").read_text(encoding="utf-8")
+        self.edit("link-check.yml", '- cron: "43 6 * * 1"', '- cron: "43 6 * * 2"')
+        with mock.patch.dict(sys.modules, {"strict_yaml": None}), \
+                contextlib.redirect_stdout(io.StringIO()) as output:
+            self.assertEqual(render_docs.run(self.root, write=True), [])
+        self.assertIn("skipped: README.md: block workflow-triggers: PyYAML is not installed",
+                      output.getvalue())
+        self.assertEqual((self.root / "README.md").read_text(encoding="utf-8"), before)
 
 
 class RepositoryTest(unittest.TestCase):

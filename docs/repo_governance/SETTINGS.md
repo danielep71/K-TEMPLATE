@@ -87,8 +87,8 @@ Sources: [Actions permissions REST API][actions-api] and
 
 ## 🛡️ Custom active protection
 
-The baseline has no corresponding custom active rulesets. The following five
-rulesets are explicit additions. All are **Active**, have **no excluded refs**
+The baseline has no corresponding custom active rulesets. The rulesets below
+are explicit additions. All are **Active**, have **no excluded refs**
 and **no bypass actors**. Default-valued supporting parameters below are
 included only to describe each custom rule completely; they are not counted
 as separate deviations from GitHub defaults.

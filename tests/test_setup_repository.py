@@ -21,6 +21,18 @@ sys.path.insert(0, str(ROOT / 'tools'))
 import setup_repository as setup  # noqa: E402
 
 REPO = 'repos/example/project'
+CONFIGURED = [ruleset['name'] for ruleset in setup.load_config(setup.CONFIG)['rulesets']]
+RULESETS = len(CONFIGURED)
+# What a first apply writes: the rulesets, vulnerability alerts, security updates and
+# the general settings.
+WRITES = RULESETS + 3
+# A ruleset that only blocks deletion and force pushes on one branch. The tests of
+# coverage add it to the configuration, so that they rely on no ruleset of it.
+DATA_BRANCH = 'Protect data branch'
+DATA_BRANCH_RULESET: dict[str, Any] = {
+    'name': DATA_BRANCH, 'target': 'branch', 'enforcement': 'active',
+    'conditions': {'ref_name': {'exclude': [], 'include': ['refs/heads/data']}},
+    'rules': [{'type': 'deletion'}, {'type': 'non_fast_forward'}], 'bypass_actors': []}
 NOW = datetime(2026, 11, 6, 9, 30, 0, tzinfo=timezone.utc)
 # GitHub's documented defaults for a new repository, for the settings the configuration manages.
 GITHUB_DEFAULTS = {
@@ -231,6 +243,10 @@ class SetupTests(unittest.TestCase):
         self.api.writes.clear()
         self.args.apply = False
 
+    def add_data_branch_ruleset(self) -> None:
+        """Configure DATA_BRANCH as well, for the rest of the test."""
+        self.use_config(lambda config: config['rulesets'].append(copy.deepcopy(DATA_BRANCH_RULESET)))
+
     def use_config(self, change: Callable[[dict[str, Any]], None]) -> None:
         """Run with a changed copy of the configuration, kept for the rest of the test."""
         directory = tempfile.TemporaryDirectory()
@@ -252,21 +268,21 @@ class SetupTests(unittest.TestCase):
     def test_apply_verify_and_second_run_is_noop(self) -> None:
         self.approve()
         self.assertEqual(self.run_setup(), 0)
-        # Five rulesets, vulnerability alerts, security updates, general settings.
-        self.assertEqual([w[0] for w in self.api.writes], ['POST'] * 5 + ['PUT', 'PUT', 'PATCH'])
-        self.assertEqual([w[1].rsplit('/', 1)[1] for w in self.api.writes[5:7]],
+        # The rulesets, vulnerability alerts, security updates, general settings.
+        self.assertEqual([w[0] for w in self.api.writes], ['POST'] * RULESETS + ['PUT', 'PUT', 'PATCH'])
+        self.assertEqual([w[1].rsplit('/', 1)[1] for w in self.api.writes[RULESETS:RULESETS + 2]],
                          ['vulnerability-alerts', 'automated-security-fixes'])
         record = self.journal()
         self.assertEqual([(w['method'], w['status']) for w in record['writes']],
                          [(method, 'done') for method, _, _ in self.api.writes])
-        # Each ruleset write names its ruleset; the five POSTs share one endpoint.
+        # Each ruleset write names its ruleset; the POSTs share one endpoint.
         names = [ruleset['name'] for ruleset in setup.load_config(setup.CONFIG)['rulesets']]
         self.assertEqual([w.get('ruleset') for w in record['writes']], names + [None] * 3)
         # Each created ruleset also records the ID GitHub answered with.
         created = {rule['name']: rule['id'] for rule in self.api.rules}
         self.assertEqual([w.get('ruleset_id') for w in record['writes']],
                          [created[name] for name in names] + [None] * 3)
-        self.assertEqual(len(set(created.values())), 5)
+        self.assertEqual(len(set(created.values())), RULESETS)
         self.assertEqual(record['readback'], 'VERIFIED')
         self.api.writes.clear()
         # The same plan is stale once applied: the second apply approves the empty one.
@@ -322,7 +338,7 @@ class SetupTests(unittest.TestCase):
         self.approve()
         self.assertEqual(self.run_setup(), 0)
         methods = [(method, endpoint.removeprefix(REPO)) for method, endpoint, _ in self.api.writes]
-        self.assertEqual(methods, [('PATCH', '')] + [('POST', '/rulesets')] * 5
+        self.assertEqual(methods, [('PATCH', '')] + [('POST', '/rulesets')] * RULESETS
                          + [('PUT', '/vulnerability-alerts'), ('PUT', '/automated-security-fixes'),
                             ('PATCH', '')])
         self.assertEqual(self.api.writes[0][2], {'allow_merge_commit': True, 'allow_squash_merge': True})
@@ -503,7 +519,7 @@ class SetupTests(unittest.TestCase):
                      f'({setup.WORKFLOW_UNREAD})'):
             with self.subTest(line=line):
                 self.assertIn(line, output)
-        self.assertEqual(output.count('NOT CHECKED ruleset'), 5)
+        self.assertEqual(output.count('NOT CHECKED ruleset'), RULESETS)
         # The settings that GitHub reports to the token are compared, not listed.
         self.assertNotIn('NOT CHECKED setting has_wiki', output)
         # It plans nothing and never reads an endpoint that needs Administration: read.
@@ -703,11 +719,12 @@ class SetupTests(unittest.TestCase):
         self.assertIn('DIFF security automated_security_fixes: observed null', output)
 
     def test_differences_are_printed_by_path_before_the_plan(self) -> None:
+        self.add_data_branch_ruleset()
         self.configure()
         main = next(r for r in self.api.rules if r['name'] == 'Protect main')
         pull_request = next(rule for rule in main['rules'] if rule['type'] == 'pull_request')
         pull_request['parameters']['allowed_merge_methods'] = ['merge', 'squash']
-        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        self.api.rules = [r for r in self.api.rules if r['name'] != DATA_BRANCH]
         self.api.repo['has_projects'] = True
         code, output = self.run_output()
         self.assertEqual(code, 0)
@@ -715,7 +732,7 @@ class SetupTests(unittest.TestCase):
         self.assertIn(f'DIFF ruleset "Protect main" ({main["id"]}) '
                       'rules.pull_request.allowed_merge_methods: observed ["merge", "squash"], '
                       'configured ["merge"]', lines)
-        self.assertIn('DIFF ruleset "Protect traffic history": missing', lines)
+        self.assertIn(f'DIFF ruleset "{DATA_BRANCH}": missing', lines)
         self.assertIn('DIFF setting has_projects: observed true, configured false', lines)
         last_difference = max(i for i, line in enumerate(lines) if line.startswith('DIFF '))
         self.assertLess(last_difference, lines.index(f'PUT {REPO}/rulesets/{main["id"]}'))
@@ -877,7 +894,7 @@ class SetupTests(unittest.TestCase):
         self.approve()
         with self.assertRaisesRegex(setup.SetupError, 'Read-back.*sha_pinning_required to true'):
             self.run_setup()
-        self.assertEqual(len(self.api.writes), 8)
+        self.assertEqual(len(self.api.writes), WRITES)
         self.assertFalse(any('actions' in endpoint for _, endpoint, _ in self.api.writes))
         self.args.apply, self.args.check = False, True
         code, output = self.run_output()
@@ -958,7 +975,8 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(self.run_setup(), 0)
             verified = self.args.report.read_text(encoding='utf-8')
             self.assertIn('- Result: **VERIFIED**', verified)
-            self.assertIn('| Protect main | 5 | matches |', verified)
+            # Created in the order of the configuration, so numbered by it.
+            self.assertIn(f'| Protect main | {CONFIGURED.index("Protect main") + 1} | matches |', verified)
             self.assertIn('| `vulnerability_alerts` | on | on |', verified)
             self.assertIn('| `retention_days` | 90 | 90 |', verified)
             self.assertFalse((Path(directory) / 'evidence' / 'settings.json').exists())
@@ -1149,7 +1167,7 @@ class SetupTests(unittest.TestCase):
         # The digest preview printed is accepted in either letter case.
         self.args.approve_plan = self.digest().upper()
         self.assertEqual(self.run_setup(), 0)
-        self.assertEqual(len(self.api.writes), 8)
+        self.assertEqual(len(self.api.writes), WRITES)
 
     def test_a_repository_changed_since_the_plan_is_refused_before_any_write(self) -> None:
         journal = self.approve()
@@ -1161,7 +1179,7 @@ class SetupTests(unittest.TestCase):
         self.assertFalse(journal.exists())
         self.api.repo['has_wiki'] = True
         self.assertEqual(self.run_setup(), 0)
-        self.assertEqual(len(self.api.writes), 8)
+        self.assertEqual(len(self.api.writes), WRITES)
 
     def test_the_journal_exists_before_a_failing_write_and_records_it(self) -> None:
         journal = self.approve()
@@ -1179,7 +1197,7 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(record['repository'], 'example/project')
         self.assertEqual(record['configuration_sha256'], hashlib.sha256(setup.CONFIG.read_bytes()).hexdigest())
         self.assertEqual(record['started_at'], '2026-11-06T09:30:00Z')
-        self.assertEqual([w['status'] for w in record['writes']], ['done', 'failed'] + ['pending'] * 6)
+        self.assertEqual([w['status'] for w in record['writes']], ['done', 'failed'] + ['pending'] * (WRITES - 2))
         self.assertEqual(record['writes'][1]['method'], 'POST')
         self.assertEqual(record['writes'][1]['endpoint'], REPO + '/rulesets')
         self.assertEqual(record['writes'][1]['ruleset'], setup.load_config(setup.CONFIG)['rulesets'][1]['name'])
@@ -1234,8 +1252,9 @@ class SetupTests(unittest.TestCase):
         return row
 
     def test_a_differently_named_ruleset_that_covers_a_configured_one_needs_no_write(self) -> None:
+        self.add_data_branch_ruleset()
         self.configure()
-        history = self.rename('Protect traffic history', 'History')
+        history = self.rename(DATA_BRANCH, 'History')
         self.args.check = True
         with tempfile.TemporaryDirectory() as directory:
             self.args.evidence = Path(directory) / 'evidence.json'
@@ -1244,15 +1263,15 @@ class SetupTests(unittest.TestCase):
             evidence = json.loads(self.args.evidence.read_text(encoding='utf-8'))
             record = self.args.report.read_text(encoding='utf-8')
         self.assertEqual(code, 0)
-        self.assertIn('NOTE: ruleset "Protect traffic history" is covered by "History": every configured '
+        self.assertIn(f'NOTE: ruleset "{DATA_BRANCH}" is covered by "History": every configured '
                       'rule is enforced at least as strictly there, so no write is planned for it.', output)
         self.assertNotIn('DIFF', output)
         self.assertIn('unmanaged ruleset "History"', output)
-        row = next(r for r in evidence['rulesets'] if r['name'] == 'Protect traffic history')
-        self.assertEqual(row, {'name': 'Protect traffic history', 'id': None, 'status': 'covered',
+        row = next(r for r in evidence['rulesets'] if r['name'] == DATA_BRANCH)
+        self.assertEqual(row, {'name': DATA_BRANCH, 'id': None, 'status': 'covered',
                                'differences': [], 'covered_by': ['History']})
         self.assertEqual((evidence['result'], evidence['planned_changes']), ('VERIFIED', []))
-        self.assertIn('| Protect traffic history | — | covered by "History" |', record)
+        self.assertIn(f'| {DATA_BRANCH} | — | covered by "History" |', record)
         self.args.evidence = self.args.report = None
         self.approve()
         self.assertEqual(self.run_setup(), 0)
@@ -1260,20 +1279,21 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(history['name'], 'History')
 
     def test_the_digest_binds_the_definition_of_a_covering_ruleset(self) -> None:
+        self.add_data_branch_ruleset()
         self.configure()
         other: dict[str, Any] = {
             'name': 'Tags', 'target': 'tag', 'enforcement': 'active', 'bypass_actors': [],
             'conditions': {'ref_name': {'include': ['~ALL'], 'exclude': []}},
             'rules': [{'type': 'deletion'}], 'source_type': 'Repository', 'id': 99}
         self.api.rules.append(other)
-        history = self.rename('Protect traffic history', 'History')
+        history = self.rename(DATA_BRANCH, 'History')
         before = self.digest()
         # A ruleset that covers no configured one leaves the approval valid when its rules change.
         other['rules'].append({'type': 'update'})
         self.assertEqual(self.digest(), before)
         # Stricter still covers, so the plan stays empty, but the approval must go stale.
         history['rules'].append({'type': 'update'})
-        self.assertEqual(self.ruleset_row('Protect traffic history')['status'], 'covered')
+        self.assertEqual(self.ruleset_row(DATA_BRANCH)['status'], 'covered')
         self.assertNotEqual(self.digest(), before)
         self.args.approve_plan = before
         self.args.journal = self.journals / 'stale.json'
@@ -1326,15 +1346,16 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(self.ruleset_row('Protect main')['status'], 'missing')
 
     def test_rulesets_that_together_cover_a_configured_one_count(self) -> None:
+        self.add_data_branch_ruleset()
         self.configure()
-        history = self.rename('Protect traffic history', 'No deletion')
+        history = self.rename(DATA_BRANCH, 'No deletion')
         history['rules'] = [{'type': 'deletion'}]
-        self.assertEqual(self.ruleset_row('Protect traffic history')['status'], 'missing')
+        self.assertEqual(self.ruleset_row(DATA_BRANCH)['status'], 'missing')
         self.api.rules.append({
             'name': 'Fast forward only', 'id': 9, 'source_type': 'Repository', 'target': 'branch',
             'enforcement': 'active', 'bypass_actors': [], 'rules': [{'type': 'non_fast_forward'}],
-            'conditions': {'ref_name': {'include': ['refs/heads/traffic-history'], 'exclude': []}}})
-        row = self.ruleset_row('Protect traffic history')
+            'conditions': {'ref_name': {'include': ['refs/heads/data'], 'exclude': []}}})
+        row = self.ruleset_row(DATA_BRANCH)
         self.assertEqual((row['status'], row['covered_by']), ('covered', ['Fast forward only', 'No deletion']))
         self.approve()
         self.assertEqual(self.run_setup(), 0)
@@ -1362,8 +1383,9 @@ class SetupTests(unittest.TestCase):
         self.assertEqual(rules['pull_request']['parameters']['required_approving_review_count'], 1)
 
     def test_a_candidate_with_bypass_actors_or_excluded_refs_never_counts(self) -> None:
+        self.add_data_branch_ruleset()
         self.configure()
-        history = self.rename('Protect traffic history', 'History')
+        history = self.rename(DATA_BRANCH, 'History')
         bypass = [{'actor_id': 5, 'actor_type': 'RepositoryRole', 'bypass_mode': 'always'}]
         cases: dict[str, Callable[[], Any]] = {
             'bypass actors': lambda: history.update(bypass_actors=bypass),
@@ -1376,7 +1398,7 @@ class SetupTests(unittest.TestCase):
             with self.subTest(case=case):
                 saved = copy.deepcopy(history)
                 change()
-                self.assertEqual(self.ruleset_row('Protect traffic history')['status'], 'missing')
+                self.assertEqual(self.ruleset_row(DATA_BRANCH)['status'], 'missing')
                 history.clear()
                 history.update(saved)
         # The named ruleset with stronger parameters and a bypass actor differs, as before.
@@ -1394,28 +1416,29 @@ class SetupTests(unittest.TestCase):
     def test_coverage_is_judged_against_the_rulesets_the_plan_leaves(self) -> None:
         # Live "Protect main" reaches every branch and differs from the configuration, so
         # the plan replaces it with the default-branch definition: the live reach is not
-        # coverage for a missing "Protect traffic history", which must be created, first.
+        # coverage for a missing data-branch ruleset, which must be created, first.
+        self.add_data_branch_ruleset()
         self.configure()
-        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        self.api.rules = [r for r in self.api.rules if r['name'] != DATA_BRANCH]
         main = next(r for r in self.api.rules if r['name'] == 'Protect main')
         main['conditions']['ref_name']['include'] = ['~ALL']
         next(rule for rule in main['rules'] if rule['type'] == 'pull_request')['parameters'][
             'required_review_thread_resolution'] = False
         self.assertEqual(self.ruleset_row('Protect main')['status'], 'differs')
-        history = self.ruleset_row('Protect traffic history')
+        history = self.ruleset_row(DATA_BRANCH)
         self.assertEqual((history['status'], history['covered_by']), ('missing', []))
         self.args.update_existing = True
         self.approve()
         self.assertEqual(self.run_setup(), 0)
         self.assertEqual([(method, endpoint) for method, endpoint, _ in self.api.writes],
                          [('POST', f'{REPO}/rulesets'), ('PUT', f'{REPO}/rulesets/{main["id"]}')])
-        self.assertEqual(self.api.writes[0][2]['name'], 'Protect traffic history')
+        self.assertEqual(self.api.writes[0][2]['name'], DATA_BRANCH)
         # Once the plan would leave main matching, a live reach it keeps does cover.
-        self.api.rules = [r for r in self.api.rules if r['name'] != 'Protect traffic history']
+        self.api.rules = [r for r in self.api.rules if r['name'] != DATA_BRANCH]
         main = next(r for r in self.api.rules if r['name'] == 'Protect main')
         main['conditions']['ref_name']['include'] = ['~ALL']
         self.assertEqual(self.ruleset_row('Protect main')['covered_by'], ['Protect main'])
-        self.assertEqual(self.ruleset_row('Protect traffic history')['covered_by'], ['Protect main'])
+        self.assertEqual(self.ruleset_row(DATA_BRANCH)['covered_by'], ['Protect main'])
 
     def test_a_weaker_named_ruleset_is_replaced_whatever_else_enforces_it(self) -> None:
         self.configure()

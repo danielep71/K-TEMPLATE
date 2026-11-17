@@ -172,34 +172,24 @@ described below, run the regression cases of the
 [validation plan](docs/methodology/VALIDATION_PLAN.md), and fill in the
 record from the runs themselves.
 
-Build the development workbook from the candidate with
-`tools/devbuild/build_workbook.py`
-([building a workbook from source](INSTALLATION.md#building-a-workbook-from-source)).
-[Importing VBA into Excel](INSTALLATION.md#%EF%B8%8F-importing-vba-into-excel)
-by hand is only for a project with forms, which the build does not write, or
-when the build fails. Such a workbook has no build stamp, so its run cannot
-reach `Binding: VERIFIED`, and while the commit holds
-`tests/accuracy/contracts.json` it ends `excel-run: FAIL`, because its results
-name no commit ([recording an Excel run](INSTALLATION.md#recording-an-excel-run),
-steps 3 and 9 of *By hand*). Such a run cannot certify a release.
-Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md)
-as [recording an Excel run](INSTALLATION.md#recording-an-excel-run)
-describes: with `python tools/devbuild/excel_run.py`, which builds, runs,
-checks and proves identity by rebuild, or by hand, with the export bound to
-the workbook by `tools/devbuild/export_manifest.py`. Then check the evidence
-folder against the candidate (the command does this itself):
+Record the run of the [VBA test harness](docs/methodology/TEST_HARNESS.md) on
+the candidate with `python tools/devbuild/excel_run.py`, which builds the
+workbook, runs it and checks it
+([recording an Excel run](INSTALLATION.md#recording-an-excel-run)), or
+[by hand](docs/repo_governance/EXCEL_RUN.md#by-hand), with the export bound to
+the workbook by `tools/devbuild/export_manifest.py`. Import the VBA by hand
+instead of building the workbook only for a project with forms, which the
+build does not write, or when the build fails. Such a workbook has no build
+stamp, so its run cannot reach `Binding: VERIFIED` and cannot certify a
+release. If a case or the check fails, fix it through a task pull request and
+start again at step 2.
 
-```sh
-python tools/check_excel_run.py test-results/excel-run --commit CANDIDATE_SHA \
-  --workbook test-results/build/Workbook-development.xlsm --require-binding
-```
-
-It must end with `Binding: VERIFIED` and `excel-run: PASS`: the workbook, or
-the export, came from a clean build of the candidate, and the run is
-consistent with it. This check is a release gate, not a
-**Repository integrity** step, because the evidence exists only for a
-candidate. If a case or the check fails, fix it through a task pull request
-and start again at step 2.
+A run of an earlier commit certifies the candidate only when
+`--equivalent-to` proves every run input identical
+([a run for another commit](docs/repo_governance/EXCEL_RUN.md#a-run-for-another-commit)).
+[Carried evidence](docs/repo_governance/EXCEL_RUN.md#carried-evidence) never
+certifies a candidate: after a change to the VBA components, even to their
+comments, record a new run of the candidate.
 
 When the candidate freezes an accuracy contract, or names a new decision for
 one, its holdout has no exposure recorded under that decision: the check
@@ -218,34 +208,12 @@ run certifies the new candidate through `--equivalent-to` when nothing else
 changed; the check then reads the candidate's record and measures the
 holdout as a regression, recording nothing.
 
-A run made on an earlier commit certifies the candidate only when every run
-input of the candidate has the same Git blob as at the run's commit, for
-example when the candidate adds only a fix to a workflow or a guide outside
-`docs/methodology/`. Check it from a clean checkout of the candidate, with
-`--commit` naming the run's commit
-([a run for another commit](INSTALLATION.md#a-run-for-another-commit)):
-
-```sh
-python tools/check_excel_run.py test-results/excel-run --commit RUN_SHA \
-  --equivalent-to CANDIDATE_SHA \
-  --workbook test-results/build/Workbook-development.xlsm --require-binding
-```
-
-It must also print
-`Equivalent: CANDIDATE_SHA (N run inputs identical to RUN_SHA)`. The
-certification record names both commits. Any other earlier run does not
-count. In particular, carried evidence does not certify a candidate: a run
-that `--carried-to` accepts because the candidate's VBA components differ
-from the run's only in comments or layout
-([carried evidence](INSTALLATION.md#carried-evidence)), and a report with a
-`Carried from` line, are evidence for a pull request only. After such a
-change, record a new run of the candidate.
-
 <a id="excel-evidence-gate"></a>
 
-Then run the Excel evidence gate on the same machine, from the same clean
-checkout. It runs the same checks with `--require-binding`, fails on any
-finding, and prints the line the tag message must carry:
+Then run the Excel evidence gate on the same machine, from a clean checkout
+of the candidate. It runs `tools/check_excel_run.py` with `--require-binding`
+on the evidence folder and the workbook, fails on any finding, and prints the
+line the tag message must carry:
 
 ```sh
 python tools/release.py evidence CANDIDATE_SHA --excel-evidence test-results/excel-run --workbook test-results/build/Workbook-development.xlsm
@@ -533,18 +501,7 @@ Logs and artifacts expire, so copy the decisive lines.
 
 ## ✅ Checklist
 
-| # | Gate | Done |
-| ---: | --- | :---: |
-| 1 | I decided to prepare the version | ☐ |
-| 2 | Maintenance audit reported on the closeout issue; each finding fixed, tracked or accepted | ☐ |
-| 3 | Changelog section dated and `VERSION` created or updated | ☐ |
-| 4 | Release branch integrated into the default branch, and synced back | ☐ |
-| 5 | Candidate frozen: the integration merge commit's full SHA | ☐ |
-| 6 | Repository checks and **Repository integrity** pass on the candidate; CodeQL alerts assessed | ☐ |
-| 7 | Release certification recorded for the candidate | ☐ |
-| 8 | Distribution review recorded and closed | ☐ |
-| 9 | I decided to publish | ☐ |
-| 10 | Annotated tag on the candidate, with the `Excel evidence:` line or an invariant 4 deviation, and `tools/release.py verify` passed with the evidence before the push | ☐ |
-| 11 | Milestone closeout checklist complete for the candidate, then milestone N closed with no open issue; the release records are in the next milestone | ☐ |
-| 12 | GitHub Release published from the tag, and `tools/release.py verify-published` passes | ☐ |
-| 13 | Published workbook bound to the candidate and checked as downloaded, or none attached | ☐ |
+Each step above ends with its gate. The checklist of the
+[milestone closeout](docs/release/CLOSEOUT.md#template) records the gates for
+the candidate, and the [evidence record](#%EF%B8%8F-evidence-record) lists what
+to keep.
