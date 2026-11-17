@@ -245,7 +245,8 @@ BRANCH_CLASS = re.compile(r"(?:[A-Za-z0-9](?:-[A-Za-z0-9])?)+")
 
 def branch_pattern(pattern: str) -> re.Pattern[str]:
     """One branch pattern of a workflow filter, as GitHub's filter pattern rules
-    read it: ``*`` matches within a path segment, ``**`` across them, ``?`` and
+    read it: ``*`` matches within a path segment, ``**`` across them (``**/``
+    also matches no segment, so ``**/main`` matches ``main``), ``?`` and
     ``+`` repeat the character before them, ``[...]`` lists characters and
     ranges, and ``\\`` escapes the next character. ValueError when malformed."""
     atoms: list[str] = []
@@ -258,6 +259,9 @@ def branch_pattern(pattern: str) -> re.Pattern[str]:
                 raise ValueError(f"{pattern!r} ends with an escape")
             atoms.append(re.escape(pattern[index + 1]))
             repeatable, index = True, index + 2
+        elif pattern.startswith("**/", index):
+            atoms.append("(?:.*/)?")  # zero or more whole path segments
+            repeatable, index = False, index + 3
         elif char == "*":
             double = pattern.startswith("**", index)
             atoms.append(".*" if double else "[^/]*")

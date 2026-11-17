@@ -171,7 +171,9 @@ class FileCheckTest(RepositoryTest):
                  ("release/**", "release/a/b", True), ("**", "feature/x", True),
                  ("v[0-9]+", "v12", True), ("v[0-9]+", "v", False), ("ma?in", "min", True),
                  ("ma?in", "maain", False), ("[a-c]x", "bx", True), (r"a\*b", "a*b", True),
-                 (r"a\*b", "axb", False), ("feat.x", "featxx", False)]
+                 (r"a\*b", "axb", False), ("feat.x", "featxx", False),
+                 ("**/main", "main", True), ("**/main", "a/b/main", True),
+                 ("**/main", "xmain", False), ("a/**/b", "a/b", True), ("a/**/b", "a/x/y/b", True)]
         for pattern, branch, expected in cases:
             with self.subTest(pattern=pattern, branch=branch):
                 self.assertEqual(bool(check_repository.branch_pattern(pattern).fullmatch(branch)),
@@ -189,6 +191,8 @@ class FileCheckTest(RepositoryTest):
                  "push:\n    branches: ['!main', '**']\n": True,
                  "push:\n    branches-ignore: [main]\n": False,
                  "push:\n    branches-ignore: ['release/**']\n": True,
+                 "push:\n    branches: ['**', '!**/main']\n": False,
+                 "push:\n    branches-ignore: ['**/main']\n": False,
                  "push:\n    tags: ['v*']\n": False,
                  "push:\n    tags: ['v*']\n    branches: [main]\n": True,
                  "pull_request_target:\n    branches: ['release/**']\n": False,
