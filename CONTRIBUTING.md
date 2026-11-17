@@ -170,7 +170,7 @@ It runs these checks, in this order. `OWNER/REPOSITORY` is the repository that
 | `labels-catalogue` | `node .github/scripts/labels-sync.mjs --mode validate` |
 | `labels-drift-self-test` | `node .github/scripts/labels-drift.mjs --self-test` |
 | `issue-configuration` | `python tools/check_issues.py --check-config` |
-| `template-only-content` | Built in: Only the template keeps the template-only section of AGENTS.md. |
+| `template-only-content` | Built in: Only the template keeps the template-only sections of AGENTS.md and README.md. |
 | `issue-contact-links` | Built in: The issue forms' contact links point to this repository. |
 | `readme-traffic-badges` | Built in: The README's traffic badges read this repository's traffic. |
 | `binaries` | `python tools/check_binaries.py` |

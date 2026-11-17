@@ -207,6 +207,25 @@ Use only the categories an entry needs.
   package, or is named like one, has a finding, whatever its SHA-256. A
   committed or attached workbook that carries such data fails until it is
   cleaned (#546).
+- `tools/initialize_repository.py` takes two options and does three more
+  things. `--remove-traffic` removes the optional traffic collection: its
+  workflow, guide, tool and test, the README's badges, the ruleset of the
+  `traffic-history` branch in `docs/setup/repository-settings.json` (one
+  already created on GitHub is left, and the preview says so), its files in
+  the license notices, its `tools/verification_depth.json` entry and the
+  rows and sentences of the guides that describe it, and it warns about a
+  mention it cannot place; `--remove-traffic-badges` still removes only the
+  badges. `--assignee LOGIN`, a validated GitHub login, becomes the assignee
+  of the four issue forms and of `.github/dependabot.yml`, and the account
+  `docs/repo_governance/ISSUE_LABELS.md` names. A template-only section may
+  now hold its replacement in a `<!-- template-only:replacement ... -->`
+  comment: the README's *Start a new repository* section and the template's
+  wiki links are template-only, and give way to a table of the main guides.
+  After a successful `--apply`, the initializer renders the generated blocks
+  afresh and, last, deletes itself and its test; the preview lists that
+  deletion. `readme-traffic-badges` runs only while the traffic workflow or a
+  badge is there, `template-only-content` also checks `README.md`, and the
+  settings tests no longer rely on the traffic ruleset (#571).
 
 ### Changed
 
