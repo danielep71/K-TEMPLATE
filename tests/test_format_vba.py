@@ -14,7 +14,6 @@ import contextlib
 import io
 import json
 import re
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,9 +21,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import format_vba  # noqa: E402
 import vba_lexer  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 
 HEAD = ['Attribute VB_Name = "CORE_Probe"', "Option Explicit", "Option Private Module", ""]
 
@@ -57,11 +58,6 @@ def logical_lines(text: str) -> list[tuple[str, list[str]]]:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     return [(kind, vba_lexer.split_statements(code))
             for _, _, kind, code in vba_lexer.logical_units(lines) if code.strip()]
-
-
-def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), "-c", "core.autocrlf=false", *args],
-                   check=True, capture_output=True)
 
 
 class RuleTest(unittest.TestCase):
@@ -376,7 +372,7 @@ class MainTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(prefix="format-vba-")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        git(self.root, "init", "-q")
+        init(self.root)
 
     def track(self, files: dict[str, str], *, add: bool = True) -> None:
         for name, text in files.items():

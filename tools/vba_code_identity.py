@@ -39,8 +39,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import vba_lexer
+from vba_lexer import VBA_SUFFIXES
 
-VBA_SUFFIXES = (".bas", ".cls", ".frm")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # How much of a statement a message quotes.
 QUOTED = 80

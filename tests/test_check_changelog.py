@@ -11,7 +11,6 @@ from __future__ import annotations
 import contextlib
 import io
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,8 +18,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import check_changelog  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 
 REPOSITORY = "example/repository"
 TAGS = f"https://github.com/{REPOSITORY}/releases/tag"
@@ -239,12 +240,6 @@ class VersionTest(unittest.TestCase):
                 self.assertIn(verdict, output.getvalue())
 
 
-def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                    "-c", "tag.gpgsign=false", *args], capture_output=True, check=True)
-
-
 @unittest.skipUnless(shutil.which("git"), "needs Git")
 class FrozenSectionTest(unittest.TestCase):
     """Released sections against CHANGELOG.md at their tags, in temporary repositories."""
@@ -256,7 +251,7 @@ class FrozenSectionTest(unittest.TestCase):
             root = Path(temporary)
             (root / "CHANGELOG.md").write_text(tagged, encoding="utf-8", newline="")
             (root / "VERSION").write_text("0.2.0\n", encoding="utf-8")
-            git(root, "init", "-q")
+            init(root)
             git(root, "add", "-A")
             git(root, "commit", "-qm", "Release")
             for tag in tags:
@@ -314,7 +309,7 @@ class FrozenSectionTest(unittest.TestCase):
             f"[0.1.0]: {TAGS}/v0.1.0\n")
         with tempfile.TemporaryDirectory(prefix="changelog-") as temporary:
             root = Path(temporary)
-            git(root, "init", "-q")
+            init(root)
             for text, version in ((first, "0.1.0"), (RELEASED, "0.2.0")):
                 (root / "CHANGELOG.md").write_text(text, encoding="utf-8")
                 (root / "VERSION").write_text(f"{version}\n", encoding="utf-8")

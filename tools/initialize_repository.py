@@ -33,7 +33,6 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -44,6 +43,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import gitio  # noqa: E402
 from check_changelog import NO_RELEASE, VERSION_HEADING, foreign_references  # noqa: E402
 from check_repository import (  # noqa: E402
     BADGE,
@@ -52,6 +52,7 @@ from check_repository import (  # noqa: E402
     MissingContext,
     origin_has_branch,
 )
+from gitio import GitError  # noqa: E402
 from vba_lexer import FACADE_ROW, HOUSE_STYLE, RESERVED_PREFIXES  # noqa: E402
 
 REPOSITORY = re.compile(r"[\w.-]+/[\w.-]+")
@@ -331,16 +332,12 @@ def plan(root: Path, options: Options) -> list[Change]:
     return changes
 
 
-def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
-                          check=False)
-
-
 def dirty(root: Path) -> list[str]:
-    status = git(root, "status", "--porcelain", "--untracked-files=all")
-    if status.returncode:
-        raise InitializeError(f"{root} is not a Git working tree")
-    return [line for line in status.stdout.splitlines() if line]
+    try:
+        status = gitio.text(root, "status", "--porcelain", "--untracked-files=all")
+    except GitError as error:
+        raise InitializeError(f"{root} is not a Git working tree") from error
+    return [line for line in status.splitlines() if line]
 
 
 def warnings(root: Path, options: Options) -> list[str]:

@@ -97,7 +97,6 @@ import hashlib
 import json
 import math
 import re
-import subprocess
 import sys
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -106,12 +105,15 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from check_data_contract import SNAKE  # noqa: E402
 from check_test_cases import (  # noqa: E402
     LOAD_FAILED,
     Report,
+    is_number,
     load_json,
     read_methodology,
 )
+from gitio import text_or_none  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = Path("tests/accuracy/contracts.json")
@@ -149,7 +151,6 @@ RESULT_KEYS = frozenset({"case", "variant", "quantity", "scope", "value"})
 # trailing line break. Digits are ASCII: \d would also accept other scripts' digits.
 CONTRACT_ID = re.compile(r"ACC-[0-9]+")
 INVARIANT_ID = re.compile(r"INV-[0-9]+")
-SNAKE = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 INDEPENDENT = frozenset({"published", "independent"})
 METRICS = frozenset({"absolute", "relative"})
 STATUSES = frozenset({"draft", "frozen"})
@@ -243,11 +244,6 @@ def label(key: Key) -> str:
     case, variant, quantity, scope = key
     where = case if variant is None else f"{case}[{variant}]"
     return f"{where} {quantity}" + (f" ({scope})" if scope else "")
-
-
-def is_number(value: object) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and \
-        math.isfinite(value)
 
 
 def case_outputs(root: Path, case: str, report: Report) -> tuple[str | None, list[Output]]:
@@ -758,18 +754,9 @@ def frozen_problems(contract: Contract, holdout: list[Output], minimum: int) -> 
     return problems
 
 
-def git(root: Path, *args: str) -> str | None:
-    try:
-        completed = subprocess.run(["git", "-C", str(root), *args], capture_output=True,
-                                   text=True, encoding="utf-8", check=False)
-    except OSError:
-        return None
-    return completed.stdout if completed.returncode == 0 else None
-
-
 def newest_tag(root: Path) -> str | None:
     """The newest vX.Y.Z tag that HEAD contains, by version."""
-    tags = [tag for tag in (git(root, "tag", "--merged", "HEAD") or "").split()
+    tags = [tag for tag in (text_or_none(root, "tag", "--merged", "HEAD") or "").split()
             if TAG.fullmatch(tag)]
     return max(tags, key=lambda tag: tuple(int(part) for part in tag[1:].split(".")),
                default=None)
@@ -1020,7 +1007,8 @@ def record_problems(root: Path, record: Record, contracts: Sequence[Contract],
                 for name in dict.fromkeys(item.contract for item in record.exposures
                                           if item.contract not in known)]
     tag = newest_tag(root) if widening else None
-    text = git(root, "show", f"{tag}:{EXPOSURES.as_posix()}") if tag is not None else None
+    text = text_or_none(root, "show", f"{tag}:{EXPOSURES.as_posix()}") \
+        if tag is not None else None
     tagged = read_record(root, text, Report(), "") if text is not None else None
     if tagged is not None and record.raw[:len(tagged.raw)] != tagged.raw:
         problems.append(f"the exposures recorded at {tag} are not all kept, unchanged, at the "
@@ -1033,7 +1021,7 @@ def widening_problems(root: Path, registry: Registry, report: Report) -> list[st
     tag = newest_tag(root)
     if tag is None:
         return []
-    text = git(root, "show", f"{tag}:{REGISTRY.as_posix()}")
+    text = text_or_none(root, "show", f"{tag}:{REGISTRY.as_posix()}")
     tagged = read_registry(root, text, Report(), f"{REGISTRY.as_posix()} at {tag}") \
         if text is not None else None
     if tagged is None:
@@ -1270,7 +1258,7 @@ def check(root: Path, results_path: Path | Sequence[Path] | None = None,
                                          "holdout is first measured. Restore it from Git: a "
                                          "record is never reset")
     calculations = read_methodology(root, Report()).calculations
-    candidate = commit or (git(root, "rev-parse", "HEAD") or "").strip() or None
+    candidate = commit or (text_or_none(root, "rev-parse", "HEAD") or "").strip() or None
     results = merged_results(paths, root, candidate, report) if paths else None
     lines: list[str] = []
     for contract in registry.contracts:
@@ -1354,7 +1342,7 @@ def record_holdout(root: Path, names: Sequence[str], paths: Sequence[Path],
                             "exposures")
         else:
             chosen.append(contract)
-    candidate = commit or (git(root, "rev-parse", "HEAD") or "").strip() or None
+    candidate = commit or (text_or_none(root, "rev-parse", "HEAD") or "").strip() or None
     read = Report()
     results = merged_results(paths, root, candidate, read)
     refusals += [f"the results are unusable, so nothing is measured: {item}"

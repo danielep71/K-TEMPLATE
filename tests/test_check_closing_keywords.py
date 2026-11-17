@@ -7,7 +7,6 @@ import io
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -19,9 +18,11 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import check_closing_keywords as closing  # noqa: E402
 from check_closing_keywords import Reference, Request  # noqa: E402
+from gitfixture import git, head, init  # noqa: E402
 
 REPOSITORY = "example-org/sample-project"
 KEYWORDS = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves",
@@ -30,12 +31,6 @@ KEYWORDS = ("close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "re
 
 def numbers(text: str, where: str = "abc1234") -> list[int]:
     return [reference.number for reference in closing.references(text, where, REPOSITORY)]
-
-
-def git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
-                           "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                           *args], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def run_main(*args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
@@ -202,11 +197,11 @@ class RepositoryTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory(prefix="closing-keywords-")
         self.root = Path(self.temporary.name)
-        git(self.root, "init", "-q", "-b", "main")
+        init(self.root)
         (self.root / "a.txt").write_text("a\n", encoding="utf-8")
         git(self.root, "add", "-A")
         git(self.root, "commit", "-qm", "chore: start\n\nFixes #100")
-        self.base = git(self.root, "rev-parse", "HEAD")
+        self.base = head(self.root)
         git(self.root, "checkout", "-qb", "release/1.2.0")
         self.commit("feat: add b (#8)\n\nThe body resolves #1 and #2.\n\nRefs #9", "b.txt")
         git(self.root, "checkout", "-qb", "feat/side")
@@ -215,7 +210,7 @@ class RepositoryTests(unittest.TestCase):
         self.commit("fix: other", "d.txt")
         git(self.root, "merge", "--no-ff", "-q", "feat/side", "-m",
             "Merge pull request #10 from feat/side\n\nFIXED #4")
-        self.head = git(self.root, "rev-parse", "HEAD")
+        self.head = head(self.root)
         self.states = self.root.parent / f"{self.root.name}-states.json"
         self.addCleanup(self.states.unlink, missing_ok=True)
         self.addCleanup(self.temporary.cleanup)
@@ -249,7 +244,7 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("Commits read: 4", output)
         self.assertIn("findings: 4", output)
-        sha = git(self.root, "rev-parse", "--short=7", "HEAD")
+        sha = git(self.root, "rev-parse", "--short=7", "HEAD").strip()
         self.assertIn(f'commit {sha}: "FIXED #4"', output)
         self.assertIn('pull request body: "Resolves #5"', output)
 

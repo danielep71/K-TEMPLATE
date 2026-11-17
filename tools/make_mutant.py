@@ -51,18 +51,20 @@ import argparse
 import hashlib
 import os
 import re
-import subprocess
 import sys
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+import gitio
+from gitio import GitError
+from vba_lexer import VBA_SUFFIXES
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT = Path("test-results") / "mutants"
 # The directories that hold authoritative source, as .gitignore lists them.
 SOURCE_DIRECTORIES = ("src", "tests", "tools", "docs", ".github", "examples")
-VBA_SUFFIXES = (".bas", ".cls", ".frm")
 VB_NAME = re.compile(rb'^Attribute VB_Name = "[^"]*"[ \t]*\r?$', re.M)
 
 
@@ -144,10 +146,6 @@ def inside(path: Path, folder: Path) -> bool:
     return path == folder or folder in path.parents
 
 
-def git(root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=False)
-
-
 def check_output(root: Path, output: Path, target: Path) -> None:
     """Refuse an output folder where the mutant could be committed or replace a source."""
     if not inside(output, root):
@@ -157,18 +155,21 @@ def check_output(root: Path, output: Path, target: Path) -> None:
         if inside(output, root / name):
             raise Refusal(f"the output folder {folder.as_posix()} is in the source "
                           f"directory {name}/")
-    tracked = git(root, "ls-files", "--", folder.as_posix())
-    if tracked.returncode != 0:
-        raise Refusal(f"Git cannot list the files of {root}: {tracked.stderr.strip()}")
-    if tracked.stdout.strip():
+    try:
+        tracked = gitio.tracked(root, folder.as_posix())
+    except GitError as error:
+        raise Refusal(f"Git cannot list the files of {root}: {error.stderr.strip()}") from error
+    if tracked:
         raise Refusal(f"the output folder {folder.as_posix()} holds tracked files")
     relative = target.relative_to(root).as_posix()
-    ignored = git(root, "check-ignore", "-q", "--", relative)
-    if ignored.returncode == 1:
-        raise Refusal(f"Git does not ignore {relative}; choose an ignored output folder")
-    if ignored.returncode != 0:
+    try:
+        gitio.git(root, "check-ignore", "-q", "--", relative)
+    except GitError as error:
+        if error.returncode == 1:
+            raise Refusal(f"Git does not ignore {relative}; choose an ignored output "
+                          "folder") from error
         raise Refusal(f"Git cannot check whether {relative} is ignored: "
-                      f"{ignored.stderr.strip()}")
+                      f"{error.stderr.strip()}") from error
 
 
 def check_destination(output: Path, path: Path, source: Path) -> None:

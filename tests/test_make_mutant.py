@@ -15,8 +15,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import make_mutant  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 
 MODULE = "src/modules/M_Sample.bas"
 CRLF_MODULE = (b'Attribute VB_Name = "M_Sample"\r\n'
@@ -29,12 +31,6 @@ CRLF_MODULE = (b'Attribute VB_Name = "M_Sample"\r\n'
                b"End Function\r\n")
 
 
-def git(root: Path, *args: str) -> None:
-    subprocess.run(["git", "-C", str(root), "-c", "user.name=Fixture",
-                    "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false",
-                    *args], capture_output=True, check=True)
-
-
 class Fixture(unittest.TestCase):
     """A temporary Git repository that ignores /test-results/ and holds MODULE."""
 
@@ -44,7 +40,7 @@ class Fixture(unittest.TestCase):
         self.root = Path(temporary.name).resolve()
         (self.root / ".gitignore").write_text("/test-results/\n", encoding="utf-8")
         self.put(MODULE, CRLF_MODULE)
-        git(self.root, "init", "-q")
+        init(self.root)
         git(self.root, "add", "-A")
         git(self.root, "commit", "-q", "-m", "fixture")
 

@@ -23,9 +23,11 @@ from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "tests"))
 
 import check_repository  # noqa: E402
 from check_repository import Check, Context  # noqa: E402
+from gitfixture import git, init  # noqa: E402
 
 # The checks that read YAML need PyYAML, which CI always installs.
 NEEDS_YAML = unittest.skipIf(
@@ -39,14 +41,7 @@ class RepositoryTest(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(prefix="check-repository-")
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
-        self.git("init", "-q", "-b", "main")
-        self.git("config", "user.name", "Fixture")
-        self.git("config", "user.email", "fixture@example.invalid")
-        self.git("config", "core.autocrlf", "false")
-
-    def git(self, *args: str) -> str:
-        return subprocess.run(["git", *args], cwd=self.root, capture_output=True, text=True,
-                              check=True).stdout
+        init(self.root)
 
     def write(self, files: dict[str, str | bytes]) -> None:
         for name, content in files.items():
@@ -59,8 +54,8 @@ class RepositoryTest(unittest.TestCase):
 
     def commit(self, files: dict[str, str | bytes] | None = None) -> None:
         self.write(files or {})
-        self.git("add", "-A")
-        self.git("commit", "-qm", "Fixture", "--allow-empty")
+        git(self.root, "add", "-A")
+        git(self.root, "commit", "-qm", "Fixture", "--allow-empty")
 
     def context(self, **values: object) -> Context:
         base: dict[str, object] = {"repository": "owner/project", "default_branch": "main",
@@ -99,9 +94,9 @@ class FileCheckTest(RepositoryTest):
         self.commit({"README.md": "x\n"})
         bare = self.root.parent / f"{self.root.name}-origin.git"
         self.addCleanup(shutil.rmtree, bare, ignore_errors=True)
-        self.git("init", "-q", "--bare", str(bare))
+        git(self.root, "init", "-q", "--bare", str(bare))
         for branch in ("main", *branches):
-            self.git("push", "-q", str(bare), f"HEAD:refs/heads/{branch}")
+            git(self.root, "push", "-q", str(bare), f"HEAD:refs/heads/{branch}")
         return bare
 
     def single_branch_clone(self, *branches: str) -> Path:
@@ -122,8 +117,8 @@ class FileCheckTest(RepositoryTest):
         return clone
 
     def test_dependabot_target_branches(self) -> None:
-        self.git("remote", "add", "origin", str(self.origin()))
-        self.git("update-ref", "refs/remotes/origin/release/1.0.0", "HEAD")
+        git(self.root, "remote", "add", "origin", str(self.origin()))
+        git(self.root, "update-ref", "refs/remotes/origin/release/1.0.0", "HEAD")
         self.write({".github/dependabot.yml":
                     "updates:\n  - package-ecosystem: pip\n    target-branch: release/1.0.0\n"
                     '  - package-ecosystem: npm\n    target-branch: "release/0.9.0"\n'})
@@ -147,8 +142,7 @@ class FileCheckTest(RepositoryTest):
 
     @NEEDS_YAML
     def test_codeql_default_branch(self) -> None:
-        self.write({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
-                    ".github/workflows/codeql.yml":
+        self.write({".github/workflows/codeql.yml":
                     "on:\n  push:\n    branches: [main]\n  pull_request:\n"
                     "    branches: [main, 'release/**']\n"})
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
@@ -159,8 +153,8 @@ class FileCheckTest(RepositoryTest):
     @NEEDS_YAML
     def test_integrity_push_branches_name_the_default_branch(self) -> None:
         integrity = ".github/workflows/repository-integrity.yml"
-        self.write({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
-                    integrity: "on:\n  pull_request:\n  push:\n    branches: [main, 'release/**']\n"})
+        self.write({integrity:
+                    "on:\n  pull_request:\n  push:\n    branches: [main, 'release/**']\n"})
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
         self.assertEqual(check_repository.codeql_default_branch(self.context(default_branch="trunk")),
                          [(integrity, "push filter {'branches': ['main', 'release/**']} "
@@ -169,8 +163,7 @@ class FileCheckTest(RepositoryTest):
     @NEEDS_YAML
     def test_minimum_python_push_branches_name_the_default_branch(self) -> None:
         minimum = ".github/workflows/minimum-python.yml"
-        self.write({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
-                    minimum: "on:\n  pull_request:\n    paths: ['**/*.py']\n"
+        self.write({minimum: "on:\n  pull_request:\n    paths: ['**/*.py']\n"
                              "  push:\n    branches: [main]\n"})
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
         self.assertEqual(check_repository.codeql_default_branch(self.context(default_branch="trunk")),
@@ -196,7 +189,6 @@ class FileCheckTest(RepositoryTest):
 
     @NEEDS_YAML
     def test_required_workflows_read_filters_as_github_does(self) -> None:
-        loader = (ROOT / "tests/strict_yaml.py").read_text("utf-8")
         codeql = ".github/workflows/codeql.yml"
         cases = {"push:\n    branches: ['**']\n": True,
                  "push:\n    branches: ['**', '!main']\n": False,
@@ -211,7 +203,7 @@ class FileCheckTest(RepositoryTest):
                  "pull_request:\n": True}
         for trigger, runs in cases.items():
             with self.subTest(trigger=trigger):
-                self.write({"tests/strict_yaml.py": loader, codeql: "on:\n  " + trigger})
+                self.write({codeql: "on:\n  " + trigger})
                 findings = check_repository.codeql_default_branch(self.context())
                 self.assertEqual(findings == [], runs, findings)
                 if not runs:
@@ -219,7 +211,6 @@ class FileCheckTest(RepositoryTest):
 
     @NEEDS_YAML
     def test_every_workflow_branch_filter_must_be_well_formed(self) -> None:
-        loader = (ROOT / "tests/strict_yaml.py").read_text("utf-8")
         other = ".github/workflows/other.yml"
         malformed = {"push:\n    branches: [main]\n    branches-ignore: [x]\n": "sets both",
                      "push:\n    branches: ['!main']\n": "lists only negations",
@@ -229,15 +220,14 @@ class FileCheckTest(RepositoryTest):
                      "push:\n    branches: [1]\n": "non-empty list"}
         for trigger, reason in malformed.items():
             with self.subTest(trigger=trigger):
-                self.write({"tests/strict_yaml.py": loader, other: "on:\n  " + trigger})
+                self.write({other: "on:\n  " + trigger})
                 findings = check_repository.codeql_default_branch(self.context())
                 self.assertEqual(len(findings), 1, findings)
                 self.assertEqual(findings[0][0], other)
                 self.assertIn(reason, findings[0][1])
         # A workflow made for release branches only is valid: only CodeQL,
         # Minimum Python and Repository integrity must run on the default branch.
-        self.write({"tests/strict_yaml.py": loader,
-                    other: "on:\n  push:\n    branches: ['release/**']\n"})
+        self.write({other: "on:\n  push:\n    branches: ['release/**']\n"})
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
 
     def test_secret_files(self) -> None:
@@ -252,7 +242,7 @@ class FileCheckTest(RepositoryTest):
                    "docs/pem.txt", "tests/fixtures/CASE-01/base/input.csv")
         # git add -f, as a force-added file bypasses .gitignore.
         self.write(dict.fromkeys([*failing, *passing], "x\n"))
-        self.git("add", "-f", ".")
+        git(self.root, "add", "-f", ".")
         findings = check_repository.secret_files(self.context())
         self.assertEqual(sorted(path for path, _ in findings), sorted(failing))
         for path, message in findings:
@@ -295,7 +285,7 @@ class WhitespaceTest(RepositoryTest):
 
     def test_committed_trailing_white_space_fails_in_a_clean_checkout(self) -> None:
         self.commit({"notes.txt": "trailing \n"})
-        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(git(self.root, "status", "--porcelain"), "")
         self.assertNotEqual(self.outcomes()["whitespace-committed"], 0)
         self.assertEqual(self.outcomes()["whitespace-local"], 0)
 
@@ -317,7 +307,7 @@ class WhitespaceTest(RepositoryTest):
                      "docs/methodology/sources/SRC-02_rules.txt": b"no final newline  ",
                      "src/forms/frmRun.frm": "".join(f"{line}\r\n" for line in header)
                      .encode("ascii")})
-        self.assertEqual(self.git("status", "--porcelain"), "")
+        self.assertEqual(git(self.root, "status", "--porcelain"), "")
         self.assertEqual(self.outcomes(), {"whitespace-committed": 0, "whitespace-local": 0})
 
     def test_ordinary_text_beside_byte_preserved_files_is_checked(self) -> None:
@@ -327,7 +317,7 @@ class WhitespaceTest(RepositoryTest):
             with self.subTest(path=path):
                 self.commit({path: "trailing  \n"})
                 self.assertNotEqual(self.outcomes()["whitespace-committed"], 0)
-                self.git("rm", "-q", path)
+                git(self.root, "rm", "-q", path)
                 self.commit()
 
     def test_local_white_space_fails(self) -> None:
@@ -360,7 +350,7 @@ class RunTest(RepositoryTest):
         self.assertIn("broken: FAIL (exit code 1)", printed)
         self.assertIn("bad input", printed)
         self.assertEqual(report["status"], "fail")
-        self.assertEqual(report["commit"], self.git("rev-parse", "HEAD").strip())
+        self.assertEqual(report["commit"], git(self.root, "rev-parse", "HEAD").strip())
         self.assertIs(report["dirty"], True)
         self.assertEqual(report["pull_request_head"], "f" * 40)
         self.assertEqual(set(report["files_sha256"]), {"README.md"})
@@ -380,8 +370,7 @@ class RunTest(RepositoryTest):
 
     @NEEDS_YAML
     def test_a_check_that_raises_fails_and_the_run_continues(self) -> None:
-        self.commit({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
-                     ".github/workflows/codeql.yml": "on:\n  push: {}\n  push: {}\n"})
+        self.commit({".github/workflows/codeql.yml": "on:\n  push: {}\n  push: {}\n"})
         listed = [Check("codeql-default-branch", function=check_repository.codeql_default_branch),
                   Check("after", [sys.executable, "-c", "print('ran')"])]
         code, printed, report = self.run_checks(listed)
@@ -509,8 +498,7 @@ class RunTest(RepositoryTest):
         self.assertEqual(report["checks"][0]["status"], "fail")
 
     def test_codeql_default_branch_without_pyyaml_is_skipped_unless_strict(self) -> None:
-        self.commit({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
-                     ".github/workflows/codeql.yml": "on:\n  push:\n    branches: [main]\n"})
+        self.commit({".github/workflows/codeql.yml": "on:\n  push:\n    branches: [main]\n"})
         reason = "PyYAML is not installed (.github/requirements.txt)"
         # Block PyYAML, and the loader that imports it, as if neither were installed.
         with mock.patch.dict(sys.modules, {"yaml": None}):
@@ -651,7 +639,7 @@ class RunTest(RepositoryTest):
 
     def test_main_detects_the_repository_and_takes_arguments(self) -> None:
         self.commit()
-        self.git("remote", "add", "origin", "https://github.com/Owner/Project.git")
+        git(self.root, "remote", "add", "origin", "https://github.com/Owner/Project.git")
         seen: list[Context] = []
 
         def listed(context: Context) -> list[Check]:

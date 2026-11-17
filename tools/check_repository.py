@@ -37,7 +37,6 @@ import concurrent.futures
 import datetime
 import fnmatch
 import hashlib
-import importlib
 import importlib.util
 import json
 import os
@@ -50,6 +49,9 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+import gitio
+from gitio import GitError
 
 ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = Path("test-results/integrity")
@@ -137,11 +139,6 @@ class Result:
     log: str = field(default="", repr=False)
 
 
-def git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True,
-                          check=True).stdout
-
-
 # ---------------------------------------------------------------------------
 # Checks that read files or Git, without a separate tool.
 
@@ -189,8 +186,8 @@ def secret_pattern(path: str) -> str | None:
 def secret_files(context: Context) -> list[Finding]:
     """No tracked file is named as a secret or private key file."""
     findings = []
-    for path in git(context.root, "ls-files", "-z").split("\0"):
-        pattern = secret_pattern(path) if path else None
+    for path in gitio.tracked(context.root):
+        pattern = secret_pattern(path)
         if pattern:
             findings.append((path, f"is tracked and named as a secret or key file ({pattern}); "
                                    "remove it from the repository, rotate the secret it holds, "
@@ -219,11 +216,11 @@ def origin_has_branch(root: Path, branch: str) -> bool:
     branch that exists. Raises MissingContext when origin cannot answer: no
     such remote, no network or no access.
     """
-    tracked = subprocess.run(["git", "rev-parse", "--verify", "--quiet",
-                              f"refs/remotes/origin/{branch}"], cwd=root, capture_output=True,
-                             check=False)
-    if not tracked.returncode:
+    try:
+        gitio.git(root, "rev-parse", "--verify", "--quiet", f"refs/remotes/origin/{branch}")
         return True
+    except GitError:
+        pass
     ref = f"refs/heads/{branch}"
     try:
         # --exit-code exits with 2 when origin answers that it has no such branch.
@@ -351,11 +348,9 @@ def codeql_default_branch(context: Context) -> list[Finding]:
         if workflows.is_dir() else []
     if not paths:
         return []
-    sys.path.insert(0, str(context.root / "tests"))
-    try:
-        strict_yaml: Any = importlib.import_module("strict_yaml")
-    finally:
-        sys.path.pop(0)
+    # Imported here, not at the top: it needs PyYAML, and without PyYAML the
+    # check is skipped (codeql_missing) while the others still run.
+    import strict_yaml
     findings = []
     for path in paths:
         document = strict_yaml.load((context.root / path).read_text(encoding="utf-8")) or {}
@@ -388,7 +383,7 @@ def required_documents(context: Context) -> list[Finding]:
 
 def clean_working_tree(context: Context) -> list[Finding]:
     """No file differs from the commit, after every other check has run."""
-    changes = git(context.root, "status", "--porcelain", "--untracked-files=all")
+    changes = gitio.text(context.root, "status", "--porcelain", "--untracked-files=all")
     return [(line[3:], f"differs from the commit (git status {line[:2].strip()}); the checks "
                        "must describe the commit as it is")
             for line in changes.splitlines() if line]
@@ -396,9 +391,7 @@ def clean_working_tree(context: Context) -> list[Finding]:
 
 def whitespace_commands(root: Path) -> list[tuple[str, list[str]]]:
     """Check every committed file, then local changes, without needing history."""
-    empty_tree = subprocess.run(["git", "hash-object", "-t", "tree", "--stdin"], cwd=root,
-                                input="", capture_output=True, text=True,
-                                check=True).stdout.strip()
+    empty_tree = gitio.text(root, "hash-object", "-t", "tree", "--stdin", input="").strip()
     return [("whitespace-committed", ["git", "diff", "--check", empty_tree, "HEAD"]),
             ("whitespace-local", ["git", "diff", "--check", "HEAD"])]
 
@@ -428,7 +421,7 @@ def checks(context: Context) -> list[Check]:
     node = shutil.which("node")
     node_missing = None if node else "node is not on PATH"
     no_repository = None if context.repository else "the repository is unknown (--repository)"
-    # The CodeQL check reads its workflow through tests/strict_yaml.py, which needs PyYAML.
+    # The CodeQL check reads its workflow through tools/strict_yaml.py, which needs PyYAML.
     codeql_missing = "; ".join(reason for found, reason in (
         (context.default_branch, "the default branch is unknown (--default-branch)"),
         (importlib.util.find_spec("yaml"), "PyYAML is not installed (.github/requirements.txt)"),
@@ -564,7 +557,7 @@ def missing_result(check: Check, reason: str, strict: bool) -> Result:
 
 
 def tracked_hashes(root: Path) -> dict[str, str]:
-    names = [name for name in git(root, "ls-files", "-z").split("\0") if name]
+    names = gitio.tracked(root)
     return {name: hashlib.sha256((root / name).read_bytes()).hexdigest()
             for name in names if (root / name).is_file()}
 
@@ -573,8 +566,8 @@ def build_report(context: Context, results: Sequence[Result]) -> dict[str, Any]:
     root = context.root
     return {
         "schema_version": 1,
-        "commit": git(root, "rev-parse", "HEAD").strip(),
-        "dirty": bool(git(root, "status", "--porcelain")),
+        "commit": gitio.text(root, "rev-parse", "HEAD").strip(),
+        "dirty": bool(gitio.text(root, "status", "--porcelain")),
         "pull_request_head": os.environ.get("PR_HEAD_SHA") or None,
         "repository": context.repository,
         "generated_at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds"),
@@ -663,8 +656,8 @@ def run(context: Context, listed: Sequence[Check], out: Path, strict: bool,
 
 def detect_repository(root: Path) -> str | None:
     try:
-        url = git(root, "remote", "get-url", "origin").strip()
-    except subprocess.CalledProcessError:
+        url = gitio.text(root, "remote", "get-url", "origin").strip()
+    except GitError:
         return None
     match = GITHUB_REMOTE.search(url)
     return match.group(1) if match else None
@@ -672,8 +665,8 @@ def detect_repository(root: Path) -> str | None:
 
 def detect_default_branch(root: Path) -> str | None:
     try:
-        ref = git(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
-    except subprocess.CalledProcessError:
+        ref = gitio.text(root, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD").strip()
+    except GitError:
         return None
     return ref.removeprefix("refs/remotes/origin/") or None
 
