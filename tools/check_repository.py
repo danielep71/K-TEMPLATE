@@ -23,11 +23,17 @@ warning and does not fail the run. --ci, which CI also passes, adds a last
 check that fails when the working tree differs from the commit, so that the
 result describes the commit and nothing a step changed. The run covers the
 repository only: it compiles no VBA, runs no Excel and certifies no figure.
+
+The command checks run in parallel, up to four at a time; the checks written
+as functions run one at a time, and that last check runs alone, once every
+other check has finished. The console, the logs and the report list the
+checks in the same order whichever finishes first.
 """
 
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime
 import fnmatch
 import hashlib
@@ -40,7 +46,7 @@ import re
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,6 +55,8 @@ ROOT = Path(__file__).resolve().parents[1]
 REPORT_DIR = Path("test-results/integrity")
 SCOPE = "Repository checks only: no VBA compilation, no Excel run, no numerical certification"
 TIMEOUT_SECONDS = 600
+# The most command checks that run at once, and never more than the CPUs.
+MAX_WORKERS = 4
 # How long to wait for the origin remote to list a branch.
 REMOTE_TIMEOUT_SECONDS = 60
 # A workflow that actionlint must reject; it lives outside .github/workflows/,
@@ -114,6 +122,9 @@ class Check:
     advisory: bool = False
     # Run first; the check fails without running its command unless the probe fails.
     probe: Probe | None = None
+    # Start once every check listed before it has finished, and finish before any
+    # check listed after it starts.
+    alone: bool = False
 
 
 @dataclass
@@ -469,8 +480,8 @@ def checks(context: Context) -> list[Check]:
     ]
     listed += [Check(name, command) for name, command in whitespace_commands(context.root)]
     if context.ci:
-        # Last, so that it also sees what the other checks changed.
-        listed.append(Check("clean-working-tree", function=clean_working_tree))
+        # Last and alone, so that it also sees what the other checks changed.
+        listed.append(Check("clean-working-tree", function=clean_working_tree, alone=True))
     return listed
 
 
@@ -485,7 +496,13 @@ def annotate(finding: Finding) -> str:
 
 
 def run_check(check: Check, context: Context, strict: bool) -> Result:
-    result = run_one(check, context, strict)
+    try:
+        result = run_one(check, context, strict)
+    except Exception as error:  # noqa: BLE001 - reported as a failed check, not raised
+        # A command that cannot be started, like a function that raises, fails
+        # its check and lets the other checks run.
+        result = Result(check.name, "fail", check.command, None, "raised an error",
+                        f"{type(error).__name__}: {error}")
     if check.advisory and result.status == "fail":
         result.status = "warn"
         result.detail = f"advisory, not a failure: {result.detail}"
@@ -588,12 +605,42 @@ def summary(report: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def results_in_order(context: Context, listed: Sequence[Check],
+                     strict: bool) -> Iterator[Result]:
+    """Each check's result, in the listed order, as soon as it and every check
+    before it have finished.
+
+    The command checks run in a pool of threads, up to MAX_WORKERS of them at
+    once and no more than the CPUs; the function checks, which are quick and
+    may change the process's state, run one at a time in this thread, as does
+    a check whose tool or context is missing. A check marked alone splits the
+    list: it runs once the checks before it have finished, and the checks
+    after it start once it has finished.
+    """
+    workers = max(1, min(MAX_WORKERS, os.cpu_count() or 1))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        start = 0
+        while start < len(listed):
+            if listed[start].alone:
+                yield run_check(listed[start], context, strict)
+                start += 1
+                continue
+            end = next((index for index in range(start, len(listed)) if listed[index].alone),
+                       len(listed))
+            futures = {index: pool.submit(run_check, listed[index], context, strict)
+                       for index in range(start, end)
+                       if listed[index].function is None and not listed[index].missing}
+            for index in range(start, end):
+                yield futures[index].result() if index in futures \
+                    else run_check(listed[index], context, strict)
+            start = end
+
+
 def run(context: Context, listed: Sequence[Check], out: Path, strict: bool,
         summary_path: Path | None = None) -> int:
     out.mkdir(parents=True, exist_ok=True)
     results = []
-    for check in listed:
-        result = run_check(check, context, strict)
+    for check, result in zip(listed, results_in_order(context, listed, strict), strict=True):
         command = " ".join(result.command) if result.command else check.name
         (out / f"{check.name}.log").write_text(f"$ {command}\n{result.log}", encoding="utf-8")
         results.append(result)

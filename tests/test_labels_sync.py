@@ -6,6 +6,7 @@ so that the order of its steps is covered too. They need Node.js.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import shutil
@@ -90,7 +91,10 @@ def serve(api: FakeGitHub) -> ThreadingHTTPServer:
             pass
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+    # A short poll, so that server.shutdown() returns at once rather than after
+    # the default half second.
+    threading.Thread(target=functools.partial(server.serve_forever, poll_interval=0.05),
+                     daemon=True).start()
     return server
 
 

@@ -8,6 +8,7 @@ are skipped locally and fail in GitHub Actions.
 # mypy checks the bodies of these tests but does not require them to be annotated.
 # mypy: disallow-untyped-defs=False, disallow-incomplete-defs=False, disallow-untyped-calls=False
 
+import contextlib
 import io
 import json
 import os
@@ -801,7 +802,14 @@ class MilestoneScriptTests(unittest.TestCase):
         return namespace
 
     def reconcile(self):
-        return self.script()['reconcile']
+        """The script's reconcile, with the line it prints for each pull request
+        captured, so that the test log stays readable."""
+        reconcile = self.script()['reconcile']
+
+        def quiet(*args):
+            with contextlib.redirect_stdout(io.StringIO()):
+                return reconcile(*args)
+        return quiet
 
     def run_job(self, api, event):
         """Run the job's logic; return the job summary and what it printed."""
