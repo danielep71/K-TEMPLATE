@@ -1221,13 +1221,15 @@ def copy_cases(root: Path, commit: str, target: Path, record_commit: str | None 
     files = [(commit, name) for name in filter(None, listed.decode("utf-8").split("\0"))
              if name != EXPOSURE_RECORD]
     files += [(record_commit, name) for name in filter(None, record.decode("utf-8").split("\0"))]
-    for source, name in files:
-        path = PurePosixPath(name)
-        if path.is_absolute() or ".." in path.parts:
-            continue
-        destination = target.joinpath(*path.parts)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(git(root, "show", f"{source}:{name}"))
+    files = [(source, name) for source, name in files
+             if not PurePosixPath(name).is_absolute() and ".." not in PurePosixPath(name).parts]
+    # One git cat-file per commit, not one git show per file.
+    for source in dict.fromkeys(source for source, _ in files):
+        names = [name for each, name in files if each == source]
+        for name, content in zip(names, blobs(root, source, names), strict=True):
+            destination = target.joinpath(*PurePosixPath(name).parts)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(content)
 
 
 def results_files(policy: Policy) -> list[str]:

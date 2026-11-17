@@ -11,6 +11,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -380,6 +381,83 @@ class RunTest(RepositoryTest):
         log = (self.root / "test-results/integrity/codeql-default-branch.log").read_text("utf-8")
         self.assertIn("duplicate key", log)
         self.assertIn("codeql-default-branch: FAIL (raised an error)", printed)
+
+    def sleeper(self, name: str, seconds: float, writes: str | None = None) -> Check:
+        """A command check that sleeps, then writes ``writes`` into the working tree,
+        if given, and records when it finished, outside the tree, for
+        ``finish_order``."""
+        if not hasattr(self, "finished"):
+            directory = tempfile.TemporaryDirectory(prefix="check-repository-finished-")
+            self.addCleanup(directory.cleanup)
+            self.finished = Path(directory.name)
+        code = ("import pathlib, sys, time; time.sleep(float(sys.argv[1])); "
+                "[pathlib.Path(name).write_text('late\\n') for name in sys.argv[3:]]; "
+                "pathlib.Path(sys.argv[2]).write_text(str(time.time_ns()))")
+        return Check(name, [sys.executable, "-c", code, str(seconds),
+                            str(self.finished / name), *([writes] if writes else [])])
+
+    def finish_order(self) -> list[str]:
+        times = {path.name: int(path.read_text()) for path in self.finished.iterdir()}
+        return sorted(times, key=times.__getitem__)
+
+    def run_in_parallel(self, listed: list[Check]) -> tuple[int, str, dict[str, Any]]:
+        """run_checks with four workers, however many CPUs this machine has."""
+        with mock.patch("os.cpu_count", return_value=4):
+            return self.run_checks(listed)
+
+    def test_the_report_keeps_the_listed_order_when_checks_finish_out_of_order(self) -> None:
+        self.commit({".gitignore": "/test-results/\n"})
+        listed = [self.sleeper("slowest", 1.2), self.sleeper("slow", 0.8),
+                  Check("function", function=lambda context: []),
+                  Check("missing", ["absent-tool"], missing="absent-tool is not on PATH"),
+                  self.sleeper("quick", 0.4), self.sleeper("quickest", 0)]
+        code, printed, report = self.run_in_parallel(listed)
+        self.assertEqual(code, 0, printed)
+        # The command checks ran together, so the quickest finished first ...
+        self.assertEqual(self.finish_order(), ["quickest", "quick", "slow", "slowest"])
+        # ... yet the console, the report and the summary follow the list.
+        names = ["slowest", "slow", "function", "missing", "quick", "quickest"]
+        self.assertEqual([line.split(":")[0] for line in printed.splitlines()][:-1], names)
+        self.assertEqual([check["name"] for check in report["checks"]], names)
+        self.assertEqual([check["status"] for check in report["checks"]],
+                         ["pass", "pass", "pass", "skip", "pass", "pass"])
+        summary = (self.root / "test-results/integrity/summary.md").read_text("utf-8")
+        self.assertEqual(re.findall(r"^\| `([^`]+)` \|", summary, re.M), names)
+
+    def test_clean_working_tree_runs_after_every_other_check(self) -> None:
+        self.commit({".gitignore": "/test-results/\n", "README.md": "x\n"})
+        clean = check_repository.checks(self.context(ci=True))[-1]
+        self.assertEqual((clean.name, clean.alone), ("clean-working-tree", True))
+        listed = [self.sleeper("late-writer", 0.8, "late.txt"), self.sleeper("quick", 0), clean]
+        code, printed, report = self.run_in_parallel(listed)
+        self.assertEqual(self.finish_order(), ["quick", "late-writer"])
+        # The file written last, by the slowest check, is still seen.
+        self.assertEqual(code, 1, printed)
+        self.assertEqual([(check["name"], check["status"]) for check in report["checks"]],
+                         [("late-writer", "pass"), ("quick", "pass"),
+                          ("clean-working-tree", "fail")])
+        self.assertIn("FAIL: late.txt: differs from the commit (git status ??)", printed)
+
+    def test_a_command_check_that_raises_fails_and_the_run_continues(self) -> None:
+        self.commit({".gitignore": "/test-results/\n"})
+
+        def broken(context: Context) -> list[check_repository.Finding]:
+            raise RuntimeError("cannot read")
+
+        listed = [self.sleeper("slow", 0.4),
+                  # A null byte in an argument cannot reach the operating system.
+                  Check("cannot-start", [sys.executable, "-c", "print('never')\0"]),
+                  Check("raises", function=broken), self.sleeper("after", 0)]
+        code, printed, report = self.run_in_parallel(listed)
+        self.assertEqual(code, 1, printed)
+        self.assertEqual(self.finish_order(), ["after", "slow"])
+        self.assertEqual([(check["name"], check["status"], check["detail"])
+                          for check in report["checks"]],
+                         [("slow", "pass", ""), ("cannot-start", "fail", "raised an error"),
+                          ("raises", "fail", "raised an error"), ("after", "pass", "")])
+        log = (self.root / "test-results/integrity/cannot-start.log").read_text("utf-8")
+        self.assertIn("ValueError", log)
+        self.assertIn("RuntimeError: cannot read", printed)
 
     def test_every_check_that_runs_node_is_skipped_without_it(self) -> None:
         # check_issues.py --check-config validates the catalogue with the label script.

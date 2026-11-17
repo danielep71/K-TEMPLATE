@@ -497,10 +497,12 @@ class ExcelGateRunTest(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        loaded = "test_check_excel_run" in sys.modules
         import test_check_excel_run as fixtures
 
-        if not loaded:
+        # The fixture module builds its repository in setUpModule, which runs only
+        # with its own tests, and removes it once they have run.
+        if not fixtures.COMMIT:
+            fixtures.setUpModule()
             cls.addClassCleanup(fixtures.tearDownModule)
         if not fixtures.COMMIT:
             raise unittest.SkipTest("needs the modules of tests/modules/")

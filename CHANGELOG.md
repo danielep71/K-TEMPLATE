@@ -363,6 +363,20 @@ Use only the categories an entry needs.
   names the prefix, and lists that edit. The README's *Start a new
   repository* links the setup guide's *Template cleanup* for the list of
   edits instead of repeating it (#491).
+- The tests and the repository checks run faster, with the same tests and
+  the same results. `tools/check_repository.py` runs the command checks in
+  parallel, up to four at a time, and still prints, logs and reports every
+  check in the listed order; `clean-working-tree` still runs last and alone,
+  and a command check that cannot start now fails instead of stopping the
+  run. `tools/check_excel_run.py` copies the test cases of a commit with one
+  `git cat-file` instead of one `git show` per file. The tests build the
+  Excel-run fixture repository when they run, not on import, so that
+  importing them leaves no temporary directory; copy one empty `.git` into
+  each VBA fixture instead of running `git init` for each; run mypy once over
+  its probes; stop their HTTP test server without the half-second poll; and
+  keep the milestone workflow's output out of the test log. On a four-CPU
+  machine, the test suite went from about 77 s to about 60 s and
+  `tools/check_repository.py` from about 98 s to about 64 s (#568).
 
 ### Fixed
 

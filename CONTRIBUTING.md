@@ -238,10 +238,12 @@ rather than the repository the file is in, as the docstring of
 context is missing locally, such as Ruff or the default branch, is reported as
 skipped, as is `dependabot-target-branches` when a `target-branch` has no
 remote-tracking branch and the `origin` remote cannot be asked whether it
-exists; `--strict` fails it instead, as CI does. CI also passes `--ci`, which
-adds a last check, `clean-working-tree`: it fails when a file is changed,
-deleted, or added and not ignored, so that the results describe the commit
-itself. To run a single check, use
+exists; `--strict` fails it instead, as CI does. The commands run in
+parallel, up to four at a time, and the output, the logs and the report list
+the checks in the table's order. CI also passes `--ci`, which adds a last
+check, `clean-working-tree`, run alone once every other check has finished:
+it fails when a file is changed, deleted, or added and not ignored, so that
+the results describe the commit itself. To run a single check, use
 its own command, for example `python -m unittest discover -s tests` or
 `python tools/format_vba.py --check`.
 

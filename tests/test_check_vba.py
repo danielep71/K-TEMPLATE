@@ -167,12 +167,38 @@ VALID: dict[str, str | bytes] = {
 }
 
 
+# The .git of an empty repository, made by one git init and copied into each
+# fixture, which takes about half the time of a git init per fixture.
+TEMPLATE: tempfile.TemporaryDirectory[str] | None = None
+
+
+def remove_template() -> None:
+    global TEMPLATE
+    if TEMPLATE is not None:
+        TEMPLATE.cleanup()
+        TEMPLATE = None
+
+
+def empty_git() -> Path:
+    """The template .git, made on first use and removed once the tests of the
+    module that used it have run."""
+    global TEMPLATE
+    if TEMPLATE is None:
+        TEMPLATE = tempfile.TemporaryDirectory(prefix="vba-check-template-")
+        subprocess.run(["git", "init", "-q", TEMPLATE.name], check=True)
+        # Git never runs a sample hook, so the copies do without them.
+        for sample in Path(TEMPLATE.name, ".git", "hooks").glob("*.sample"):
+            sample.unlink()
+        unittest.addModuleCleanup(remove_template)
+    return Path(TEMPLATE.name) / ".git"
+
+
 @contextlib.contextmanager
 def repository(files: Mapping[str, str | bytes], *, attributes: bool = True) -> Iterator[Path]:
     """A Git repository holding ``files``: text written with CRLF, then staged."""
     with tempfile.TemporaryDirectory(prefix="vba-check-") as temporary:
         root = Path(temporary)
-        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        shutil.copytree(empty_git(), root / ".git")
         if attributes:
             shutil.copyfile(ROOT / ".gitattributes", root / ".gitattributes")
         for relative, content in files.items():
