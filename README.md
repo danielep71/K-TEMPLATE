@@ -163,15 +163,16 @@ flowchart LR
 
 | Workflow | When it runs | What it checks |
 | --- | --- | --- |
-| **Repository integrity** | Every push and pull request; the required check | Python, VBA, workflow, link, changelog, test-case and governance checks, with the unit tests; also on the minimum supported Python |
-| **CodeQL** | Pushes, pull requests and weekly | Code scanning of the Python, JavaScript and workflow code |
-| **OpenSSF Scorecard** | Pushes to the default branch and weekly | The repository's supply-chain posture |
+| **Repository integrity** | Every pull request, pushes to the default and release branches, and manual runs; the required check | Python, VBA, workflow, link, changelog, test-case and governance checks, with the unit tests |
+| **Minimum Python** | Pull requests that change Python code, the tests, the tools, the label scripts or the Python requirements; pushes to the default branch | The unit tests on the minimum supported Python |
+| **CodeQL** | Pushes to the default branch, pull requests into it and into release branches unless they change only Markdown and `docs/`, and weekly | Code scanning of the Python, JavaScript and workflow code |
+| **OpenSSF Scorecard** | Pushes to the default branch, branch protection changes and weekly | The repository's supply-chain posture |
 | **Link check** | Weekly | External links |
-| **Sync issue labels** · **Detect issue-label drift** | Catalogue changes · daily | The live labels against `.github/labels.json`, never deleting one in use |
+| **Sync issue labels** · **Detect issue-label drift** | Catalogue changes on the default branch · weekly | The live labels against `.github/labels.json`, never deleting one in use |
 | **Detect settings drift** | Daily | The live rulesets and the other settings a read-only token can read against `docs/setup/repository-settings.json`; the rest is listed as not checked |
 | **Issue triage** | Issue and milestone events | Assignee, one priority, an open milestone, a start date, a target end date and a dependency section on every open issue |
 | **Closing keywords** | Pull request events | The closing keywords a pull request would carry to the default branch: none into a release branch, none for an open issue in an integration |
-| **Keep milestones issue-only** | Pull request events and daily | Removes any milestone set on a pull request, and lists each removal |
+| **Keep milestones issue-only** | Pull request events and weekly | Removes any milestone set on a pull request, and lists each removal |
 | **Release** | A pushed `vX.Y.Z` tag | Verifies the tag, builds a reproducible source bundle, attests it where the repository allows it and drafts the release |
 | **Traffic history** | Daily, optional | Collects clones and visitors for the badges above |
 

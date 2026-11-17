@@ -1,21 +1,16 @@
 name: Detect issue-label drift
 run-name: Label drift — ${{ github.ref_name }} @ ${{ github.sha }}
 
-# Pull requests exercise only deterministic offline fixtures. Scheduled and
-# manual detection read the live label catalogue with read-only permissions.
+# Weekly and manual detection read the live label catalogue with read-only
+# permissions. Pull requests are not run here: Repository integrity runs the
+# deterministic offline drift fixtures on every pull request.
 # This workflow has no repository mutation path; reconciliation remains in
 # labels-sync.yml on trusted events.
 
 on:
-  pull_request:
-    paths:
-      - .github/labels.json
-      - .github/scripts/labels-drift.mjs
-      - .github/scripts/labels-sync.mjs
-      - .github/workflows/labels-drift.yml
-      - .github/workflows/labels-sync.yml
   schedule:
-    - cron: "17 5 * * *"
+    # Weekly on Tuesday, off the hour; GitHub may start scheduled runs late.
+    - cron: "23 5 * * 2"
   workflow_dispatch:
 
 permissions:
@@ -30,32 +25,8 @@ defaults:
     shell: bash
 
 jobs:
-  fixtures:
-    name: Label drift fixtures
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      contents: read
-
-    steps:
-      - name: Check out the exact SHA under review
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "24.22.2"
-          package-manager-cache: false
-
-      - name: Exercise deterministic read-only drift fixtures
-        run: node .github/scripts/labels-drift.mjs --self-test
-
   detect:
     name: Live label drift
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

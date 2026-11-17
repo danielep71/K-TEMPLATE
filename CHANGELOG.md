@@ -363,6 +363,19 @@ Use only the categories an entry needs.
   names the prefix, and lists that edit. The README's *Start a new
   repository* links the setup guide's *Template cleanup* for the list of
   edits instead of repeating it (#491).
+- Fewer workflow runs repeat what **Repository integrity** already checks.
+  **Sync issue labels** and **Detect issue-label drift** no longer run on
+  pull requests, whose label self-tests, catalogue validation and drift
+  fixtures **Repository integrity** runs. **CodeQL** analyzes pushes to the
+  default branch only, and skips a pull request that changes only Markdown
+  files and files under `docs/`. The minimum-Python test job moved to its
+  own workflow, `minimum-python.yml`, which runs on pull requests that
+  change Python code, the tests, the tools, the label scripts or the Python
+  requirements, on pushes to the default branch and on manual dispatch; the
+  `codeql-default-branch` check also requires it to run on the default
+  branch. The label-drift and pull-request milestone scans run weekly
+  instead of daily. The README's workflow table and the setup guide state
+  when each workflow runs (#567).
 
 ### Fixed
 
