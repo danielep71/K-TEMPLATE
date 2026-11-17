@@ -153,7 +153,7 @@ class FileCheckTest(RepositoryTest):
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
         findings = check_repository.codeql_default_branch(self.context(default_branch="trunk"))
         self.assertEqual(len(findings), 2)
-        self.assertIn("omit the default branch trunk", findings[0][1])
+        self.assertIn("excludes the default branch trunk", findings[0][1])
 
     @NEEDS_YAML
     def test_integrity_push_branches_name_the_default_branch(self) -> None:
@@ -162,8 +162,67 @@ class FileCheckTest(RepositoryTest):
                     integrity: "on:\n  pull_request:\n  push:\n    branches: [main, 'release/**']\n"})
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
         self.assertEqual(check_repository.codeql_default_branch(self.context(default_branch="trunk")),
-                         [(integrity, "push branches ['main', 'release/**'] omit the default "
-                                      "branch trunk; add it.")])
+                         [(integrity, "push filter {'branches': ['main', 'release/**']} "
+                                      "excludes the default branch trunk; make it match.")])
+
+    def test_branch_patterns_follow_github_rules(self) -> None:
+        cases = [("main", "main", True), ("main", "mainline", False),
+                 ("release/*", "release/1.1.0", True), ("release/*", "release/a/b", False),
+                 ("release/**", "release/a/b", True), ("**", "feature/x", True),
+                 ("v[0-9]+", "v12", True), ("v[0-9]+", "v", False), ("ma?in", "min", True),
+                 ("ma?in", "maain", False), ("[a-c]x", "bx", True), (r"a\*b", "a*b", True),
+                 (r"a\*b", "axb", False), ("feat.x", "featxx", False)]
+        for pattern, branch, expected in cases:
+            with self.subTest(pattern=pattern, branch=branch):
+                self.assertEqual(bool(check_repository.branch_pattern(pattern).fullmatch(branch)),
+                                 expected)
+        for malformed in ("a\\", "?a", "**+", "[", "[]", "[z-a]", "[a_b]"):
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                check_repository.branch_pattern(malformed)
+
+    @NEEDS_YAML
+    def test_required_workflows_read_filters_as_github_does(self) -> None:
+        loader = (ROOT / "tests/strict_yaml.py").read_text("utf-8")
+        codeql = ".github/workflows/codeql.yml"
+        cases = {"push:\n    branches: ['**']\n": True,
+                 "push:\n    branches: ['**', '!main']\n": False,
+                 "push:\n    branches: ['!main', '**']\n": True,
+                 "push:\n    branches-ignore: [main]\n": False,
+                 "push:\n    branches-ignore: ['release/**']\n": True,
+                 "push:\n    tags: ['v*']\n": False,
+                 "push:\n    tags: ['v*']\n    branches: [main]\n": True,
+                 "pull_request_target:\n    branches: ['release/**']\n": False,
+                 "pull_request:\n": True}
+        for trigger, runs in cases.items():
+            with self.subTest(trigger=trigger):
+                self.write({"tests/strict_yaml.py": loader, codeql: "on:\n  " + trigger})
+                findings = check_repository.codeql_default_branch(self.context())
+                self.assertEqual(findings == [], runs, findings)
+                if not runs:
+                    self.assertIn("excludes the default branch main", findings[0][1])
+
+    @NEEDS_YAML
+    def test_every_workflow_branch_filter_must_be_well_formed(self) -> None:
+        loader = (ROOT / "tests/strict_yaml.py").read_text("utf-8")
+        other = ".github/workflows/other.yml"
+        malformed = {"push:\n    branches: [main]\n    branches-ignore: [x]\n": "sets both",
+                     "push:\n    branches: ['!main']\n": "lists only negations",
+                     "pull_request:\n    branches-ignore: ['!main']\n": "cannot negate",
+                     "pull_request_target:\n    branches: ['v[0-9']\n": "malformed or unclosed",
+                     "push:\n    branches: []\n": "non-empty list",
+                     "push:\n    branches: [1]\n": "non-empty list"}
+        for trigger, reason in malformed.items():
+            with self.subTest(trigger=trigger):
+                self.write({"tests/strict_yaml.py": loader, other: "on:\n  " + trigger})
+                findings = check_repository.codeql_default_branch(self.context())
+                self.assertEqual(len(findings), 1, findings)
+                self.assertEqual(findings[0][0], other)
+                self.assertIn(reason, findings[0][1])
+        # A workflow made for release branches only is valid: only CodeQL and
+        # Repository integrity must run on the default branch.
+        self.write({"tests/strict_yaml.py": loader,
+                    other: "on:\n  push:\n    branches: ['release/**']\n"})
+        self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
 
     def test_secret_files(self) -> None:
         failing = {".env": ".env", "config/.env.local": ".env.*", ".ENV.production": ".env.*",

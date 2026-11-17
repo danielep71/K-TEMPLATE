@@ -234,15 +234,105 @@ def origin_has_branch(root: Path, branch: str) -> bool:
     return any(line.split("\t")[-1] == ref for line in asked.stdout.splitlines())
 
 
-# The workflows whose branch filters must name the default branch.
+# The workflows that must run on the default branch, as their branch filters read.
 DEFAULT_BRANCH_WORKFLOWS = (".github/workflows/codeql.yml",
                             ".github/workflows/repository-integrity.yml")
+# The events whose branch filters select the branch: the pushed one, or the
+# base of a pull request.
+BRANCH_EVENTS = ("push", "pull_request", "pull_request_target")
+BRANCH_CLASS = re.compile(r"(?:[A-Za-z0-9](?:-[A-Za-z0-9])?)+")
+
+
+def branch_pattern(pattern: str) -> re.Pattern[str]:
+    """One branch pattern of a workflow filter, as GitHub's filter pattern rules
+    read it: ``*`` matches within a path segment, ``**`` across them, ``?`` and
+    ``+`` repeat the character before them, ``[...]`` lists characters and
+    ranges, and ``\\`` escapes the next character. ValueError when malformed."""
+    atoms: list[str] = []
+    repeatable = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\":
+            if index + 1 == len(pattern):
+                raise ValueError(f"{pattern!r} ends with an escape")
+            atoms.append(re.escape(pattern[index + 1]))
+            repeatable, index = True, index + 2
+        elif char == "*":
+            double = pattern.startswith("**", index)
+            atoms.append(".*" if double else "[^/]*")
+            repeatable, index = False, index + (2 if double else 1)
+        elif char in "?+":
+            if not repeatable:
+                raise ValueError(f"{pattern!r} has {char!r} with no character to repeat")
+            atoms[-1] = f"(?:{atoms[-1]}){char}"
+            repeatable, index = False, index + 1
+        elif char == "[":
+            close = pattern.find("]", index + 1)
+            listed = pattern[index + 1:close] if close > 0 else ""
+            if not BRANCH_CLASS.fullmatch(listed) or any(
+                    first > last for first, last in re.findall(r"(.)-(.)", listed)):
+                raise ValueError(f"{pattern!r} has a malformed or unclosed [...]")
+            atoms.append(f"[{listed}]")
+            repeatable, index = True, close + 1
+        else:
+            atoms.append(re.escape(char))
+            repeatable, index = True, index + 1
+    return re.compile("".join(atoms))
+
+
+def branch_patterns(value: Any, key: str) -> list[str]:
+    """The patterns of one filter key: a string or a list of non-empty strings."""
+    patterns = [value] if isinstance(value, str) else value
+    if not isinstance(patterns, list) or not patterns or not all(
+            isinstance(item, str) and item for item in patterns):
+        raise ValueError(f"{key} must be a non-empty list of non-empty patterns")
+    return patterns
+
+
+def runs_on_branch(event: str, config: Any, branch: str | None) -> bool:
+    """Whether ``event`` with this configuration runs for ``branch`` (pushed, or
+    the base of a pull request). ValueError for a malformed branch filter; with
+    ``branch`` None, only the filter is checked."""
+    if config is None:
+        return True
+    if not isinstance(config, dict):
+        raise ValueError("must be a mapping of filters")
+    if "branches" in config and "branches-ignore" in config:
+        raise ValueError("sets both branches and branches-ignore, which GitHub rejects")
+    if "branches" in config:
+        patterns = branch_patterns(config["branches"], "branches")
+        if all(pattern.startswith("!") for pattern in patterns):
+            raise ValueError("branches lists only negations; it needs a pattern without !")
+        regexes = [(pattern.startswith("!"), branch_pattern(pattern.removeprefix("!")))
+                   for pattern in patterns]
+        included = False
+        for negated, regex in regexes:  # the last matching pattern decides
+            if branch is not None and regex.fullmatch(branch):
+                included = not negated
+        return included
+    if "branches-ignore" in config:
+        patterns = branch_patterns(config["branches-ignore"], "branches-ignore")
+        if any(pattern.startswith("!") for pattern in patterns):
+            raise ValueError("branches-ignore cannot negate a pattern; use branches with !")
+        ignored = [branch_pattern(pattern) for pattern in patterns]
+        return not any(branch is not None and regex.fullmatch(branch) for regex in ignored)
+    # A push filtered by tags alone runs for tags only, never for a branch.
+    return not (event == "push" and ("tags" in config or "tags-ignore" in config))
 
 
 def codeql_default_branch(context: Context) -> list[Finding]:
-    """codeql.yml and repository-integrity.yml list the default branch, which branch filters
-    cannot name."""
-    paths = [path for path in DEFAULT_BRANCH_WORKFLOWS if (context.root / path).is_file()]
+    """CodeQL and Repository integrity run on the default branch, and every workflow's branch filters are well formed.
+
+    Each branch filter of push, pull_request and pull_request_target is read as
+    GitHub reads it: patterns, ! negations in order, branches-ignore, and a push
+    filtered by tags alone. Branch filters cannot name the default branch
+    generically, so a rename must update them.
+    """
+    workflows = context.root / ".github" / "workflows"
+    paths = sorted(path.relative_to(context.root).as_posix() for path in
+                   [*workflows.glob("*.yml"), *workflows.glob("*.yaml")]) \
+        if workflows.is_dir() else []
     if not paths:
         return []
     sys.path.insert(0, str(context.root / "tests"))
@@ -253,12 +343,24 @@ def codeql_default_branch(context: Context) -> list[Finding]:
     findings = []
     for path in paths:
         document = strict_yaml.load((context.root / path).read_text(encoding="utf-8")) or {}
-        triggers = document.get("on", document.get(True)) or {}
-        for event in ("push", "pull_request"):
-            branches = (triggers.get(event) or {}).get("branches")
-            if branches is not None and context.default_branch not in branches:
-                findings.append((path, f"{event} branches {branches} omit the default branch "
-                                       f"{context.default_branch}; add it."))
+        triggers = document.get("on", document.get(True)) if isinstance(document, dict) else None
+        if not isinstance(triggers, dict):
+            continue  # a list or a single event name sets no filter
+        required = path in DEFAULT_BRANCH_WORKFLOWS
+        for event in BRANCH_EVENTS:
+            if event not in triggers:
+                continue
+            config = triggers[event]
+            try:
+                runs = runs_on_branch(event, config, context.default_branch)
+            except ValueError as error:
+                findings.append((path, f"{event} branch filter {error}."))
+                continue
+            if required and not runs:
+                shown = {key: config[key] for key in ("branches", "branches-ignore", "tags",
+                                                      "tags-ignore") if key in config}
+                findings.append((path, f"{event} filter {shown} excludes the default branch "
+                                       f"{context.default_branch}; make it match."))
     return findings
 
 
