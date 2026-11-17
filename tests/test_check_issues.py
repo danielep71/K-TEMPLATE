@@ -133,6 +133,24 @@ class TargetDateTests(unittest.TestCase):
         self.assertEqual(rules([issue(1, body=empty, target=None, start=None)]),
                          [(1, "start-date")])
 
+    def test_contradictory_planning_lines_are_reported(self) -> None:
+        later_start = START.format("2026-11-02")
+        later_target = "- Target end date: 2026-11-05 (Europe/Rome)\n\n"
+        self.assertEqual(rules([issue(1, body=later_start + READY)]), [(1, "start-date")])
+        self.assertEqual(rules([issue(1, body=later_target + READY)]), [(1, "target-date")])
+        crlf = (later_start + later_target + READY).replace("\n", "\r\n")
+        self.assertEqual(rules([issue(1, body=crlf)]), [(1, "start-date"), (1, "target-date")])
+        finding = check_issues.planning_conflict_findings(issue(1, body=later_start + READY))
+        self.assertIn("2026-11-01, 2026-11-02", finding[0].message)
+
+    def test_repeated_planning_lines_and_a_different_form_field_are_not_contradictions(self) -> None:
+        repeated = START.format("2026-11-01") + PLANNING.format("2026-11-04") + READY
+        self.assertEqual(rules([issue(1, body=repeated)]), [])
+        self.assertEqual(rules([issue(1, body="- Start date: 2026-11-01\n\n" + READY)]), [])
+        form = ("### 🗓️ Start date (Europe/Rome)\n\n2026-11-03\n\n"
+                "### 🗓️ Target end date (Europe/Rome)\n\n2026-11-20\n\n" + READY)
+        self.assertEqual(rules([issue(1, body=form)]), [])
+
     def test_target_date_must_be_before_the_milestone_due_date(self) -> None:
         self.assertEqual(rules([issue(1, milestone_due="2026-11-05")]), [])
         self.assertEqual(rules([issue(1, milestone_due="2026-11-04")]), [(1, "milestone-due")])

@@ -234,6 +234,10 @@ Use only the categories an entry needs.
   issues it is a `- Start date:` line. **Issue triage** reports a missing or
   invalid one, or one after the target end date (`start-date`), and the
   traffic alert writes `- Start date:` in place of `- Planned start:` (#557).
+- **Issue triage** reports an open issue with two `- Start date:` lines, or
+  two `- Target end date:` lines, with different dates (`start-date`,
+  `target-date`). A line that differs from the form field is still the
+  documented way to reschedule (#561).
 - While a release branch is active, commit messages, squash messages and task
   pull requests use only `Refs #N`, as `CONTRIBUTING.md`, the pull request
   guide and the pull request template now say: a closing keyword in a commit

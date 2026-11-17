@@ -164,6 +164,22 @@ def target_date_findings(issue: Issue) -> list[Finding]:
     return []
 
 
+def planning_conflict_findings(issue: Issue) -> list[Finding]:
+    """Two planning lines for the same date must not disagree. A line that differs
+    from the form field is not a conflict: the line takes precedence."""
+    body = normalized(issue.body)
+    findings = []
+    for rule, label, line in (("start-date", "Start date", PLANNED_START),
+                              ("target-date", "Target end date", PLANNED_TARGET)):
+        values = list(dict.fromkeys(ROME_SUFFIX.sub("", match.group(1))
+                                    for match in line.finditer(body)))
+        if len(values) > 1:
+            findings.append(Finding(issue.number, rule,
+                                    f"has `- {label}:` lines with different dates "
+                                    f"({', '.join(values)}); keep one"))
+    return findings
+
+
 def start_date_findings(issue: Issue) -> list[Finding]:
     """The start date must be a real ISO date, not after the target end date."""
     start = iso_date(start_date(issue.body))
@@ -318,6 +334,7 @@ def audit(issues: Sequence[Issue], states: Mapping[int, str], repository: str,
         findings += metadata_findings(issue, assignee)
         findings += target_date_findings(issue)
         findings += start_date_findings(issue)
+        findings += planning_conflict_findings(issue)
         findings += dependency_findings(issue, states, repository, pulls)
         if catalogue is not None:
             findings += [Finding(issue.number, "catalogue", f"has label {label!r}, "
