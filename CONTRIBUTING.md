@@ -219,7 +219,7 @@ either, `changelog` runs without `--repository`.
 | `documented-commands` | `python tools/check_doc_commands.py` |
 | `verification-depth` | `python tools/check_verification_depth.py` |
 | `dependabot-target-branches` | Built in: Every Dependabot target-branch exists. |
-| `codeql-default-branch` | Built in: CodeQL and Repository integrity run on the default branch, and every workflow's branch filters are well formed. |
+| `codeql-default-branch` | Built in: CodeQL, Minimum Python and Repository integrity run on the default branch, and every workflow's branch filters are well formed. |
 | `required-documents` | Built in: The documents the repository requires exist and are not empty. |
 | `whitespace-committed` | `git diff --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD` |
 | `whitespace-local` | `git diff --check HEAD` |

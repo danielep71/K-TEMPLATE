@@ -24,6 +24,9 @@ from urllib.error import HTTPError
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tests'))
+sys.path.insert(0, str(ROOT / 'tools'))
+
+import check_repository  # noqa: E402
 
 try:
     import strict_yaml
@@ -34,6 +37,7 @@ except ImportError:  # pragma: no cover - exercised only without the parser
 WORKFLOWS = ROOT / '.github/workflows'
 REQUIRED_JOB = ('repository-integrity.yml', 'repository-integrity')
 REQUIRED_CHECK = 'Repository integrity'
+MINIMUM_JOB = ('minimum-python.yml', 'minimum-python')
 # The only jobs that may write, and what each may write.
 WRITE_PERMISSIONS = {
     ('labels-sync.yml', 'reconcile'): {'issues'},
@@ -344,8 +348,53 @@ class WorkflowControlTests(unittest.TestCase):
 
     def test_live_label_reconciliation_runs_only_on_the_default_branch(self):
         condition = workflows()['labels-sync.yml']['jobs']['reconcile']['if']
-        self.assertIn("github.event_name != 'pull_request'", condition)
-        self.assertIn('github.event.repository.default_branch', condition)
+        self.assertEqual(condition,
+                         "github.ref == format('refs/heads/{0}', "
+                         "github.event.repository.default_branch)")
+
+    def test_label_workflows_leave_pull_requests_to_repository_integrity(self):
+        documents = workflows()
+        # No pull request runs these workflows: Repository integrity runs their
+        # offline commands on every pull request instead.
+        expected = {'labels-sync.yml': ({'push', 'workflow_dispatch'}, ['reconcile']),
+                    'labels-drift.yml': ({'schedule', 'workflow_dispatch'}, ['detect'])}
+        for name, (triggers, jobs) in expected.items():
+            with self.subTest(workflow=name):
+                document = documents[name]
+                self.assertEqual(set(document['on']), triggers)
+                self.assertNotIn('pull_request', document['on'])
+                self.assertNotIn('pull_request_target', document['on'])
+                self.assertEqual(list(document['jobs']), jobs)
+                self.assertNotIn('pull_request', str(document['jobs']))
+        integrity = {' '.join(['node', *check.command[1:]])
+                     for check in check_repository.checks(check_repository.Context(ROOT))
+                     if check.command and len(check.command) > 1
+                     and check.command[1].startswith('.github/scripts/')}
+        offline = {'node .github/scripts/labels-sync.mjs --self-test',
+                   'node .github/scripts/labels-sync.mjs --mode validate',
+                   'node .github/scripts/labels-drift.mjs --self-test'}
+        self.assertLessEqual(offline, integrity)
+        # The live jobs still exercise the offline paths before reading GitHub.
+        for name, job_id, command in (
+                ('labels-sync.yml', 'reconcile', 'node .github/scripts/labels-sync.mjs --self-test'),
+                ('labels-drift.yml', 'detect', 'node .github/scripts/labels-drift.mjs --self-test')):
+            with self.subTest(workflow=name, command=command):
+                runs = [step.get('run') for step in documents[name]['jobs'][job_id]['steps']]
+                self.assertIn(command, runs)
+
+    def test_scans_run_weekly_off_the_hour(self):
+        # A weekly cron names one weekday; a daily one has * there.
+        documents = workflows()
+        for name in ('labels-drift.yml', 'pr-milestones.yml'):
+            with self.subTest(workflow=name):
+                crons = [entry['cron'] for entry in documents[name]['on']['schedule']]
+                self.assertEqual(len(crons), 1, crons)
+                minute, hour, day, month, weekday = crons[0].split()
+                self.assertNotIn(minute, ('0', '00'), 'schedule off the hour')
+                self.assertRegex(minute, r'^\d{1,2}$')
+                self.assertRegex(hour, r'^\d{1,2}$')
+                self.assertEqual((day, month), ('*', '*'))
+                self.assertRegex(weekday, r'^[0-6]$', f'{name} must run weekly: {crons[0]}')
 
     def test_label_pruning_sees_pull_requests(self):
         # Without pull-requests: read the issues API omits pull requests, so a
@@ -400,6 +449,7 @@ class WorkflowControlTests(unittest.TestCase):
         document = workflows()['pr-milestones.yml']
         self.assertIn('github.event.pull_request.number', document['concurrency']['group'])
         self.assertEqual(set(document['on']), {'push', 'pull_request_target', 'schedule', 'workflow_dispatch'})
+        self.assertEqual(document['on']['push'], {'paths': ['.github/workflows/pr-milestones.yml']})
         self.assertEqual(document['on']['pull_request_target'],
                          {'types': ['opened', 'reopened', 'edited', 'milestoned']})
         self.assertEqual(document['permissions'], {})
@@ -489,12 +539,21 @@ class WorkflowControlTests(unittest.TestCase):
 
     def test_code_scanning_covers_each_language_and_skips_when_unavailable(self):
         document = workflows()['codeql.yml']
+        triggers = document['on']
+        self.assertEqual(set(triggers), {'push', 'pull_request', 'schedule', 'workflow_dispatch'})
         # The default branch is listed by name and may be renamed; Repository
-        # integrity checks that it is present (see the next test).
-        self.assertEqual(document['on']['push'], document['on']['pull_request'])
-        self.assertEqual(set(document['on']['push']), {'branches'})
-        self.assertIn('release/**', document['on']['push']['branches'])
-        self.assertIn('schedule', document['on'])
+        # integrity checks that it is present (see the next test). Pushes are
+        # analyzed on the default branch only, not on the release branches.
+        self.assertEqual(set(triggers['push']), {'branches'})
+        branches = triggers['push']['branches']
+        self.assertEqual(len(branches), 1, branches)
+        self.assertNotIn('*', branches[0])
+        self.assertNotIn('release/**', branches)
+        # Pull requests into the default and release branches are analyzed,
+        # unless they change only Markdown files and files under docs/.
+        self.assertEqual(set(triggers['pull_request']), {'branches', 'paths-ignore'})
+        self.assertEqual(triggers['pull_request']['branches'], [branches[0], 'release/**'])
+        self.assertEqual(triggers['pull_request']['paths-ignore'], ['**/*.md', 'docs/**'])
         jobs = document['jobs']
         gate = jobs['availability']['steps'][0]
         self.assertIn('.visibility', gate['run'])
@@ -603,7 +662,7 @@ class WorkflowControlTests(unittest.TestCase):
     def test_toolchain_versions_are_exact_and_shared(self):
         # Floating versions let a new patch release change CI without a commit.
         exact = re.compile(r'^\d+\.\d+\.\d+$')
-        minimum_job = ('repository-integrity.yml', 'minimum-python')
+        minimum_job = MINIMUM_JOB
         floor = re.search(r'^python_version = "(\d+\.\d+)"$',
                           (ROOT / 'pyproject.toml').read_text(encoding='utf-8'), re.M)
         assert floor, 'pyproject.toml sets no python_version'
@@ -628,6 +687,39 @@ class WorkflowControlTests(unittest.TestCase):
                             node.add(str(settings['node-version']))
         self.assertEqual(len(python), 1, f'one Python version outside the minimum job, found {python}')
         self.assertEqual(len(node), 1, f'one Node.js version everywhere, found {node}')
+
+    def test_minimum_python_runs_apart_from_the_required_check(self):
+        documents = workflows()
+        # Repository integrity holds the required job alone.
+        self.assertEqual(list(documents[REQUIRED_JOB[0]]['jobs']), [REQUIRED_JOB[1]])
+        name, job_id = MINIMUM_JOB
+        document = documents[name]
+        triggers = document['on']
+        self.assertEqual(set(triggers), {'pull_request', 'push', 'workflow_dispatch'})
+        # Only a pull request that changes what Python runs, or its requirements.
+        self.assertEqual(triggers['pull_request'], {'paths': [
+            '**/*.py', 'tests/**', 'tools/**', '.github/scripts/**', 'pyproject.toml',
+            '.github/requirements.txt', '.github/workflows/minimum-python.yml']})
+        # Pushes to the default branch only, listed by name; Repository integrity
+        # checks that it is present.
+        self.assertEqual(set(triggers['push']), {'branches'})
+        branches = triggers['push']['branches']
+        self.assertEqual(len(branches), 1, branches)
+        self.assertNotIn('*', branches[0])
+        self.assertEqual(document['permissions'], {'contents': 'read'})
+        self.assertEqual(list(document['jobs']), [job_id])
+        job = document['jobs'][job_id]
+        self.assertEqual(job['name'], 'Minimum Python (3.11)')
+        self.assertNotEqual(job['name'], REQUIRED_CHECK)
+        self.assertNotIn('if', job)
+        self.assertNotIn('permissions', job)
+        self.assertEqual(job['timeout-minutes'], 5)
+        self.assertEqual(job['steps'][-1]['run'], 'python -m unittest discover -s tests')
+        concurrency = document['concurrency']
+        self.assertIn('github.event.pull_request.number', concurrency['group'])
+        self.assertIn('github.run_id', concurrency['group'])
+        self.assertEqual(concurrency['cancel-in-progress'],
+                         "${{ github.event_name == 'pull_request' }}")
 
     def test_dependabot_covers_each_pinned_dependency_once(self):
         document = strict_yaml.load((ROOT / '.github/dependabot.yml').read_text(encoding='utf-8'))
@@ -783,13 +875,13 @@ class MilestoneScriptTests(unittest.TestCase):
         summary, printed = self.run_job(api, {'number': 6, 'pull_request': {}})
         self.assertIn('::warning title=Milestone not removed::', printed)
         self.assertIn('HTTP 403', summary)
-        self.assertIn('daily scan or a manual run', summary)
+        self.assertIn('weekly scan or a manual run', summary)
         self.assertIsNotNone(api.items[6]['milestone'])
 
     def test_a_read_only_token_fails_a_scan(self):
         api = FakeGitHub([{'number': 6, 'milestone': {'title': 'v1'}}], read_only=True)
         with self.assertRaises(HTTPError):
-            self.run_job(api, {'schedule': '17 3 * * *'})
+            self.run_job(api, {'schedule': '37 3 * * 5'})
 
 
 def traffic_alert_script():

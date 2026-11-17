@@ -236,6 +236,7 @@ def origin_has_branch(root: Path, branch: str) -> bool:
 
 # The workflows that must run on the default branch, as their branch filters read.
 DEFAULT_BRANCH_WORKFLOWS = (".github/workflows/codeql.yml",
+                            ".github/workflows/minimum-python.yml",
                             ".github/workflows/repository-integrity.yml")
 # The events whose branch filters select the branch: the pushed one, or the
 # base of a pull request.
@@ -326,7 +327,7 @@ def runs_on_branch(event: str, config: Any, branch: str | None) -> bool:
 
 
 def codeql_default_branch(context: Context) -> list[Finding]:
-    """CodeQL and Repository integrity run on the default branch, and every workflow's branch filters are well formed.
+    """CodeQL, Minimum Python and Repository integrity run on the default branch, and every workflow's branch filters are well formed.
 
     Each branch filter of push, pull_request and pull_request_target is read as
     GitHub reads it: patterns, ! negations in order, branches-ignore, and a push

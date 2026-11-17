@@ -165,6 +165,17 @@ class FileCheckTest(RepositoryTest):
                          [(integrity, "push filter {'branches': ['main', 'release/**']} "
                                       "excludes the default branch trunk; make it match.")])
 
+    @NEEDS_YAML
+    def test_minimum_python_push_branches_name_the_default_branch(self) -> None:
+        minimum = ".github/workflows/minimum-python.yml"
+        self.write({"tests/strict_yaml.py": (ROOT / "tests/strict_yaml.py").read_text("utf-8"),
+                    minimum: "on:\n  pull_request:\n    paths: ['**/*.py']\n"
+                             "  push:\n    branches: [main]\n"})
+        self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
+        self.assertEqual(check_repository.codeql_default_branch(self.context(default_branch="trunk")),
+                         [(minimum, "push filter {'branches': ['main']} "
+                                    "excludes the default branch trunk; make it match.")])
+
     def test_branch_patterns_follow_github_rules(self) -> None:
         cases = [("main", "main", True), ("main", "mainline", False),
                  ("release/*", "release/1.1.0", True), ("release/*", "release/a/b", False),
@@ -222,8 +233,8 @@ class FileCheckTest(RepositoryTest):
                 self.assertEqual(len(findings), 1, findings)
                 self.assertEqual(findings[0][0], other)
                 self.assertIn(reason, findings[0][1])
-        # A workflow made for release branches only is valid: only CodeQL and
-        # Repository integrity must run on the default branch.
+        # A workflow made for release branches only is valid: only CodeQL,
+        # Minimum Python and Repository integrity must run on the default branch.
         self.write({"tests/strict_yaml.py": loader,
                     other: "on:\n  push:\n    branches: ['release/**']\n"})
         self.assertEqual(check_repository.codeql_default_branch(self.context()), [])
