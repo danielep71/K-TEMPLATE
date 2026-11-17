@@ -402,6 +402,20 @@ Use only the categories an entry needs.
   `tools/check_repository.py` imports directly. The tests create their Git
   repositories through one helper, `tests/gitfixture.py`, which ignores the
   user's and the system's Git configuration (#569).
+- Each repeated rule is written down once, with the same rules. The issue
+  triage rules live in a registry in `tools/check_issues.py`, which refuses a
+  finding with an unregistered code; `tools/render_docs.py` renders them as
+  the *Triage rules* table of `docs/repo_governance/ISSUE_LABELS.md`, and the
+  other guides, the pull request template and the triage workflow link it.
+  The README's workflow triggers are rendered from each workflow's `on:`
+  block. The setup guide's handover table keeps only the rows that need an
+  action. Recording an Excel run by hand, a run for another commit and
+  carried evidence moved from `INSTALLATION.md` to the new
+  `docs/repo_governance/EXCEL_RUN.md`, and `RELEASING.md` step 4 keeps only
+  the release gate. The tool details of *Negative controls* and *Local checks*
+  in `CONTRIBUTING.md` and the link checker's exclusions and exceptions
+  moved to the tools' docstrings. The release checklist now links the
+  closeout checklist (#570).
 
 ### Fixed
 

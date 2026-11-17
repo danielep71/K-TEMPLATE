@@ -54,8 +54,9 @@ form is
                      "reason": "Answers 403 to automated requests",
                      "expires": "2027-06-30"}]}
 
-and the offline check fails while it is malformed or lists a URL that no
-Markdown file links.
+where url is the link without its #fragment, and the expires date itself
+still keeps the warning. The offline check fails while the file is malformed
+or lists a URL that no Markdown file links.
 """
 
 from __future__ import annotations

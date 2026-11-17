@@ -5,8 +5,9 @@ Usage: python tools/devbuild/excel_run.py [--evidence FOLDER] [--timeout SECONDS
                                          [--enable-timeout SECONDS] [--operator NAME]
 
 Run it in a clean checkout of the candidate commit, on Windows with Excel
-installed. It replaces the manual steps of INSTALLATION.md, Recording an
-Excel run, and never needs Trust access to the VBA project object model:
+installed. It replaces the steps of a run by hand
+(docs/repo_governance/EXCEL_RUN.md), and never needs Trust access to the VBA
+project object model:
 
 1. builds the development workbook with build_workbook.py, and stops if the
    build is not evidence-grade (a change in the checkout);

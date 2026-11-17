@@ -24,6 +24,10 @@ check that fails when the working tree differs from the commit, so that the
 result describes the commit and nothing a step changed. The run covers the
 repository only: it compiles no VBA, runs no Excel and certifies no figure.
 
+The repository is --repository, as CI passes it, or else the GitHub repository
+of the origin remote; without either, the changelog check runs without
+--repository, and the checks that need the repository are skipped.
+
 The command checks run in parallel, up to four at a time; the checks written
 as functions run one at a time, and that last check runs alone, once every
 other check has finished. The console, the logs and the report list the

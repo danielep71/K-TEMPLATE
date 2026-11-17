@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Check the evidence of an Excel run of the VBA harness against one commit.
 
-The harness runs only in Excel, by hand or through tools/devbuild/excel_run.py
-(INSTALLATION.md, Recording an Excel run). This reads what that run left in an
+The harness runs only in Excel, through tools/devbuild/excel_run.py
+(INSTALLATION.md, Recording an Excel run) or by hand
+(docs/repo_governance/EXCEL_RUN.md). This reads what that run left in an
 evidence folder and checks it against the candidate commit, without Excel.
 The evidence layout, the suite, the modes and the supported host are
 configured once, in .github/excel-evidence-policy.json as the candidate commit

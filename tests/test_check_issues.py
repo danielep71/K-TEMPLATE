@@ -78,6 +78,45 @@ class MetadataTests(unittest.TestCase):
                          ".github/labels.json resolves (core and selected overlays)")
 
 
+class RuleRegistryTests(unittest.TestCase):
+    """Each finding names a rule of check_issues.RULES, which the guide renders."""
+
+    def test_a_finding_with_an_unregistered_code_is_refused(self) -> None:
+        with self.assertRaisesRegex(ValueError, "'ready' is not registered in RULES"):
+            check_issues.Finding(1, "ready", "has a status label")
+
+    def test_every_finding_code_is_registered_and_every_rule_is_reported(self) -> None:
+        blocked = (BLOCKED_LABEL, "P3")
+        issues = [
+            issue(1, assignees=()),
+            issue(2, "P2", "P3"),
+            issue(3, "P1"),
+            issue(4, milestone=None),
+            issue(5, target="soon"),
+            issue(6, milestone_due=None),
+            issue(7, start="soon"),
+            issue(8, body="## Objective\n\nx\n"),
+            issue(9, *blocked),
+            issue(10, "P3", "unlisted"),
+            issue(11, *blocked, body=blocked_by(12)),
+            issue(12, *blocked, body=blocked_by(11)),
+        ]
+        findings = check_issues.audit(issues, {i.number: i.state for i in issues}, REPOSITORY,
+                                      catalogue={"P1", "P2", "P3", "bug", BLOCKED_LABEL},
+                                      assignee="triage-person")
+        reported = {finding.rule for finding in findings}
+        self.assertLessEqual(reported, set(check_issues.RULES))
+        self.assertEqual(set(check_issues.RULES) - reported, set())
+
+    def test_every_rule_is_described_on_one_line(self) -> None:
+        for code, rule in check_issues.RULES.items():
+            with self.subTest(code=code):
+                self.assertRegex(code, r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+                self.assertTrue(rule.endswith("."), rule)
+                self.assertNotIn("\n", rule)
+                self.assertNotIn("|", rule)
+
+
 class TargetDateTests(unittest.TestCase):
     def test_target_end_date_must_be_a_real_iso_date(self) -> None:
         for date in ("2026-02-30", "04/11/2026", "2026-11-4", "soon"):
