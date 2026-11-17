@@ -49,7 +49,7 @@ Every open issue also needs a start date and a target end date: ISO `YYYY-MM-DD`
 - Target end date: YYYY-MM-DD (Europe/Rome)
 ```
 
-When both a line and a form field are present, the line takes precedence, so edit the line to reschedule. Triage reports a missing or invalid start date, or one after the target end date (`start-date`), a missing or invalid target end date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`). A missing or invalid date does not hide a milestone without a due date: triage reports both in the same run.
+When both a line and a form field are present, the line takes precedence, so edit the line to reschedule. Each date takes one line: two lines for the same date with different values are reported under that date's rule. Triage reports a missing or invalid start date, or one after the target end date (`start-date`), a missing or invalid target end date (`target-date`), and a milestone without a due date or a target end date on or after it (`milestone-due`). A missing or invalid date does not hide a milestone without a due date: triage reports both in the same run.
 
 ### Types
 

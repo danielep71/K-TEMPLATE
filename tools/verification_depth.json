@@ -401,9 +401,12 @@
       "proofs": [
         "tests.test_check_repository.FileCheckTest.test_codeql_default_branch",
         "tests.test_check_repository.FileCheckTest.test_integrity_push_branches_name_the_default_branch",
+        "tests.test_check_repository.FileCheckTest.test_branch_patterns_follow_github_rules",
+        "tests.test_check_repository.FileCheckTest.test_required_workflows_read_filters_as_github_does",
+        "tests.test_check_repository.FileCheckTest.test_every_workflow_branch_filter_must_be_well_formed",
         "tests.test_check_repository.RunTest.test_a_check_that_raises_fails_and_the_run_continues"
       ],
-      "negative_claim": "codeql.yml and repository-integrity.yml branch filters that omit the default branch are reported, and a duplicate YAML key fails the check",
+      "negative_claim": "codeql.yml and repository-integrity.yml filters that exclude the default branch, through a pattern list, a negation, branches-ignore or a tags-only push, are reported; a malformed branch filter in any workflow is reported; and a duplicate YAML key fails the check",
       "state": "green_in_ci"
     },
     {
