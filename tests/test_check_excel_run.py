@@ -1440,17 +1440,18 @@ class SuiteTest(unittest.TestCase):
         self.assertIn(f"Public Sub {POLICY.entry_point}(", source)
         self.assertIn(f'CertifyMode "{next(iter(POLICY.must_pass))}"', source)
         self.assertRegex(source, rf'Const SUITE_NAME\s+As String = "{POLICY.suite}"')
-        installation = (SOURCE / "INSTALLATION.md").read_text(encoding="utf-8")
-        self.assertIn(f"TEST_Examples.{POLICY.entry_point}", installation)
+        self.assertIn(POLICY.office, (SOURCE / "INSTALLATION.md").read_text(encoding="utf-8"))
+        # A run by hand types the entry point, records the references and leaves
+        # in the evidence folder the files the policy names, so the page that
+        # describes it names each.
+        by_hand = (SOURCE / "docs/repo_governance/EXCEL_RUN.md").read_text(encoding="utf-8")
+        self.assertIn(f"TEST_Examples.{POLICY.entry_point}", by_hand)
         for reference in POLICY.references:
-            self.assertIn(reference, installation)
-        # The installation guide tells the reader which files to leave in the
-        # evidence folder, so it must name each one the policy names.
+            self.assertIn(reference, by_hand)
         for name in (*POLICY.logs.values(), POLICY.certification, POLICY.host, POLICY.manifest,
                      POLICY.results, f"{POLICY.exported}\\"):
             with self.subTest(file=name):
-                self.assertIn(f"`{name}", installation)
-        self.assertIn(POLICY.office, installation)
+                self.assertIn(f"`{name}", by_hand)
 
 
 Change = Callable[[dict[str, Any]], object]

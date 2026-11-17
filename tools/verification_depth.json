@@ -315,10 +315,12 @@
       "proofs": [
         "tests.test_render_docs.RenderTest.test_main_exit_codes",
         "tests.test_render_docs.RenderTest.test_a_stale_block_fails_and_write_renders_it",
-        "tests.test_render_docs.RenderTest.test_marker_problems"
+        "tests.test_render_docs.RenderTest.test_marker_problems",
+        "tests.test_render_docs.TriageRulesTest.test_a_new_rule_makes_the_table_stale",
+        "tests.test_render_docs.WorkflowTriggersTest.test_a_changed_trigger_makes_the_block_stale"
       ],
-      "negative_claim": "a stale generated block, and markers that are unbalanced, repeated or name no renderer, fail --check",
-      "state": "green"
+      "negative_claim": "a stale generated block, among them the triage rules after a rule is added and the workflow triggers after a trigger changes, and markers that are unbalanced, repeated or name no renderer, fail --check",
+      "state": "green_in_ci"
     },
     {
       "check": "restated-counts",

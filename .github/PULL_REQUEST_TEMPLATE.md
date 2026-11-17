@@ -43,7 +43,7 @@ define them. Otherwise replace both lines with "No calculation change". -->
 <!-- Commands and checks actually run, with results. Hosted checks run on this pull request.
 Negative controls: CONTRIBUTING.md. -->
 
-- [ ] `python -m unittest discover -s tests` (with `.github/requirements.txt` installed and Node.js available)
+- [ ] `python tools/check_repository.py`, the local checks of CONTRIBUTING.md; name any check it skipped
 - [ ] Ruff, strict mypy and actionlint pass in `Repository integrity`
 - [ ] Negative control, for a defect fix: the new or changed test fails on the defective code (a detached worktree of the base, or a mutant from `tools/make_mutant.py`) and passes on the fix. How, and the failing result:
 - [ ] Other checks specific to this change:
@@ -86,7 +86,7 @@ comment on the pull request. -->
 ## ☑️ Checklist
 
 - [ ] The base is the default branch or the active release branch, as stated above.
-- [ ] Each linked issue has the assignee, exactly one priority label (`P1` only with `bug`), only catalogue labels, an open milestone, a start date, a target end date before the milestone's due date, and a dependency section whose issue links all exist, with `blocked` exactly while a named prerequisite is unresolved; this PR has no milestone, links the relevant issues and carries appropriate labels.
+- [ ] Each linked issue meets the *Triage rules* of `docs/repo_governance/ISSUE_LABELS.md`; this PR has no milestone, links the relevant issues and carries appropriate labels.
 - [ ] Scope is focused: no unrelated changes, local artifacts or generated output.
 - [ ] Documentation affected by the change is updated.
 - [ ] `CHANGELOG.md` has an entry under `[Unreleased]` for this change (in the dated section being released, for a fix of a failed release gate before the tag), or the change is one its maintenance policy says needs none.

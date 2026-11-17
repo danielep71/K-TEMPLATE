@@ -20,7 +20,16 @@ Each NAME has a renderer here that computes the block from the repository:
   docs/methodology/DATA_CONTRACT.md: the Datasets table and one field table
   per dataset, read from docs/methodology/data-contract.json by the code that
   validates input files against it (tools/check_data_contract.py);
-- data-contract-codes, in the same guide: the finding codes of that validator.
+- data-contract-codes, in the same guide: the finding codes of that validator;
+- triage-rules, in docs/repo_governance/ISSUE_LABELS.md: the rules of the
+  issue triage check, by the code each finding names, from the registry of
+  tools/check_issues.py;
+- workflow-triggers, in README.md: when each workflow of .github/workflows/
+  runs, read from its on: block through tools/strict_yaml.py.
+
+The workflow-triggers block needs PyYAML (.github/requirements.txt). Without
+it, the block is reported as skipped and left as it is, as the tests that read
+YAML are skipped; CI installs it, so a stale block fails there.
 
 --check fails when a block differs from a fresh render, when its markers are
 missing, unbalanced or repeated, or when a marker names no renderer. --write
@@ -40,6 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import check_data_contract  # noqa: E402
 import check_excel_run  # noqa: E402
+import check_issues  # noqa: E402
 import check_repository  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +61,36 @@ WINDOWS_SUFFIXES = frozenset({"exe", "cmd", "bat"})
 COUNTS = {1: "One", 2: "Two", 3: "Three", 4: "Four"}
 RESULT_ORDER = ("RESULT", "suite", "operation", "completeness", "cases", "assertions",
                 "failures", "cleanup", "recovery")
+WORKFLOWS = Path(".github/workflows")
+# How each event reads with no filter, and with one; and what follows its filters.
+EVENTS = {
+    "push": ("every push", "pushes", ""),
+    "pull_request": ("every pull request", "pull requests", ""),
+    "pull_request_target": ("every pull request", "pull requests",
+                            ", run from the base branch"),
+    "workflow_dispatch": ("manual runs", "manual runs", ""),
+    "issues": ("issue events", "issue events", ""),
+    "milestone": ("milestone events", "milestone events", ""),
+    "branch_protection_rule": ("branch protection rule changes",
+                               "branch protection rule changes", ""),
+}
+# How each filter of an event reads after it.
+FILTERS = {
+    "branches": "{to}",
+    "branches-ignore": "except {to}",
+    "tags": "of the tags",
+    "tags-ignore": "except the tags",
+    "paths": "that change",
+    "paths-ignore": "unless they change only",
+}
+# A manual run's inputs say what it does, not when it runs.
+IGNORED_FILTERS = frozenset({"inputs"})
+WEEKDAYS = ("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+            "Sunday")
+
+
+class Unavailable(Exception):
+    """A block that cannot be rendered here, for want of a tool CI installs."""
 
 
 @dataclass(frozen=True)
@@ -191,6 +231,98 @@ def data_contract_codes(root: Path) -> str:
     return "\n".join(["| Code | Finding |", "| --- | --- |", *rows])
 
 
+def triage_rules(root: Path) -> str:
+    """The rules of the issue triage check, by the code each finding names."""
+    rows = [f"| `{code}` | {rule} |" for code, rule in check_issues.RULES.items()]
+    return "\n".join(["| Rule | What every open issue needs |", "| --- | --- |", *rows])
+
+
+def code_list(values: object, what: str) -> str:
+    if not isinstance(values, list) or not values:
+        raise ValueError(f"{what} is not a list of values")
+    return ", ".join(f"`{value}`" for value in values)
+
+
+def schedule_text(entries: object, path: str) -> str:
+    """Each cron schedule as a reader says it: daily, weekly, or the expression."""
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(f"{path}: schedule is not a list of cron entries")
+    parts = []
+    for entry in entries:
+        cron = entry.get("cron") if isinstance(entry, dict) else None
+        if not isinstance(cron, str):
+            raise ValueError(f"{path}: a schedule entry has no cron expression")
+        fields = cron.split()
+        if (len(fields) == 5 and fields[0].isdigit() and fields[1].isdigit()
+                and fields[2:4] == ["*", "*"] and (fields[4] == "*" or fields[4] in "01234567")):
+            time = f"{int(fields[1]):02d}:{int(fields[0]):02d} UTC"
+            parts.append(f"daily at {time}" if fields[4] == "*"
+                         else f"weekly on {WEEKDAYS[int(fields[4])]} at {time}")
+        else:
+            parts.append(f"on the schedule `{cron}`")
+    return ", ".join(parts)
+
+
+def event_text(event: str, config: object, path: str) -> str:
+    """One event of a workflow's on: block, with its filters, in words."""
+    if event == "schedule":
+        return schedule_text(config, path)
+    bare, filtered, suffix = EVENTS.get(event, (f"`{event}` events", f"`{event}` events", ""))
+    if config is None:
+        return bare + suffix
+    if not isinstance(config, dict):
+        raise ValueError(f"{path}: on.{event} is neither empty nor a mapping")
+    to = "into" if event.startswith("pull_request") else "to"
+    words = []
+    for key, value in config.items():
+        if key in IGNORED_FILTERS:
+            continue
+        if key == "types":
+            if not isinstance(value, list) or not value:
+                raise ValueError(f"{path}: on.{event}.types is not a list of values")
+            words.append(f"({', '.join(str(item) for item in value)})")
+            continue
+        lead = FILTERS.get(key, f"with `{key}`").format(to=to)
+        words.append(f"{lead} {code_list(value, f'{path}: on.{event}.{key}')}")
+    return " ".join([filtered if words else bare, *words]) + suffix
+
+
+def workflow_triggers(root: Path) -> str:
+    """When each workflow runs, read from its on: block."""
+    try:
+        import strict_yaml
+        import yaml
+    except ImportError as error:  # PyYAML is missing
+        raise Unavailable(f"PyYAML is not installed (.github/requirements.txt): {error}") \
+            from error
+    folder = root / WORKFLOWS
+    paths = sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])
+    if not paths:
+        raise ValueError(f"{WORKFLOWS.as_posix()}: no workflow")
+    rows = []
+    for file in paths:
+        path = file.relative_to(root).as_posix()
+        try:
+            document = strict_yaml.load(file.read_text(encoding="utf-8"))
+        except yaml.YAMLError as error:
+            raise ValueError(f"{path}: {error}") from error
+        if not isinstance(document, dict):
+            raise ValueError(f"{path}: not a mapping")
+        # PyYAML reads the key on as the boolean true.
+        triggers = document.get("on", document.get(True))
+        if isinstance(triggers, str):
+            triggers = {triggers: None}
+        elif isinstance(triggers, list):
+            triggers = dict.fromkeys(triggers)
+        if not isinstance(triggers, dict) or not triggers:
+            raise ValueError(f"{path}: no on: block")
+        events = "; ".join(event_text(str(event), config, path)
+                           for event, config in triggers.items())
+        name = document.get("name") or file.name
+        rows.append(f"| [**{name}**]({path}) | {events[0].upper()}{events[1:]} |")
+    return "\n".join(["| Workflow | When it runs |", "| --- | --- |", *rows])
+
+
 CONTRACT_GUIDE = "docs/methodology/DATA_CONTRACT.md"
 BLOCKS: dict[str, Block] = {
     "example-suite-results": Block("INSTALLATION.md", example_suite_results),
@@ -198,6 +330,8 @@ BLOCKS: dict[str, Block] = {
     "data-contract-datasets": Block(CONTRACT_GUIDE, data_contract_datasets),
     "data-contract-fields": Block(CONTRACT_GUIDE, data_contract_fields),
     "data-contract-codes": Block(CONTRACT_GUIDE, data_contract_codes),
+    "triage-rules": Block("docs/repo_governance/ISSUE_LABELS.md", triage_rules),
+    "workflow-triggers": Block("README.md", workflow_triggers),
 }
 
 
@@ -228,6 +362,7 @@ def blocks_in(text: str, path: str) -> tuple[dict[str, tuple[int, int]], list[st
 
 
 def run(root: Path, write: bool) -> list[str]:
+    """The problems of every block; write, if asked, the stale ones afresh."""
     problems: list[str] = []
     skipped = {".git", "test-results", "node_modules"}
     paths = sorted({block.path for block in BLOCKS.values()} | {
@@ -253,6 +388,9 @@ def run(root: Path, write: bool) -> list[str]:
             begin, end = spans[name]
             try:
                 fresh = "\n" + BLOCKS[name].render(root) + "\n"
+            except Unavailable as reason:
+                print(f"skipped: {path}: block {name}: {reason}")
+                continue
             except (OSError, ValueError, check_excel_run.PolicyError) as error:
                 problems.append(f"{path}: block {name} cannot be rendered: {error}")
                 continue

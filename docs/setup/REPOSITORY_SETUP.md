@@ -19,7 +19,8 @@
 > GitHub's **Use this template** copies files, not repository settings. Run this
 > setup for each new destination after its first integrity workflow succeeds.
 > No workflow applies the baseline: **Detect settings drift** only checks it,
-> with a read-only token. The script never creates or stores credentials.
+> with a read-only token, and fails until you apply it. The script never
+> creates or stores credentials.
 
 ## 🧭 Before you start
 
@@ -267,13 +268,8 @@ inherited policies may impose additional restrictions.
 
 | File or setting | Action in the new repository | Reason / dependency |
 | --- | --- | --- |
-| `tools/check_binaries.py`, `tests/test_check_binaries.py`, `.github/binary-allowlist.json` | **Keep** | Fails **Repository integrity** on a tracked binary outside the approved paths, and on an Office package, other than a regulatory source copy, that carries macros or a finding of `tools/check_workbook_privacy.py`. Add a reviewed binary, such as a documentation image, to the allowlist with its SHA-256 and reason. |
-| `tools/check_workbook_privacy.py`, `tests/test_check_workbook_privacy.py` | **Keep** | Reports, by part and kind but never by value, the OneDrive and SharePoint paths and URLs, absolute user-profile paths, user names, Microsoft Purview sensitivity labels and SharePoint metadata that an Office Open XML package carries. `tools/check_binaries.py` runs it on every committed package and `release.py verify-published` on every attached one; run `python tools/check_workbook_privacy.py FILE` before you share a workbook ([DISTRIBUTION.md](../repo_governance/DISTRIBUTION.md#-workbooks)). |
 | `docs/assets/social-preview.svg`, `docs/assets/social-preview.png` | **Replace or remove** | The template's social preview and README banner, which name the template. Edit the SVG with the project's name and subtitle, export a 1280×640 PNG or larger at 2:1, under 1 MB, and update its SHA-256 in `.github/binary-allowlist.json`. Or delete both, the allowlist entry and the image at the top of `README.md`. |
 | Repository **About** and **Social preview** | **Set** | GitHub copies neither from a template. Set the description, website and topics in the repository page's **About** settings, and upload the PNG in **Settings → General → Social preview**; GitHub offers no API for the preview. |
-| `.gitattributes`, `.gitignore`, `.editorconfig` | **Keep** | Line-ending, binary-file, ignore and editor rules for workbooks, exported VBA source and regulatory source copies. Adjust them only with a layout change that needs it. |
-| `.github/labels.json`, `.github/scripts/`, `.github/ISSUE_TEMPLATE/`, the label, triage and milestone workflows, `tools/check_issues.py`, `tests/test_check_issues.py`, `tests/test_labels_sync.py`, `docs/repo_governance/ISSUE_LABELS.md` | **Keep** | Ongoing label and issue automation and its guide; see *Initialize issue labels* above. |
-| `tests/test_repository_consistency.py` | **Keep** | Cross-file checks in **Repository integrity**: the label guide against the catalogue, with every label's name, colour and description, each label once in *Using the labels*, and every label count the Markdown files state; Dependabot's labels against the catalogue and its assignee against the bug form's; office-type ignore rules for regulatory source copies; `.editorconfig` against `.gitattributes`, so that editors trim the trailing white space `git diff --check` reports in Markdown and leave alone the files Git keeps byte for byte; closed code fences in Markdown, and `--repository` in every `release.py verify-published` command outside the changelog; one GitHub API version; the third-party notice against the files and its provenance register; and where the template may name other repositories, skipped once the template-only section is gone. Adapt a check only together with the files it compares. |
 | `tools/initialize_repository.py`, `tests/test_initialize_repository.py` | **Remove once run** | Makes the *Template cleanup* edits of *Before you start*: it also replaces the changelog's entries and `<REGIME>`, with the house style's request to replace it, restores the changelog's "No version has been released" sentence if it is missing, deletes `VERSION` if it exists, resets the *Current status* of `RELEASING.md` and removes the template's evidence rows, as one diff to review and commit. Without `--apply` it lists them and writes nothing. With `--apply` it refuses a working tree that differs from the commit, and a second run changes nothing. It never changes GitHub or commits. By default it repoints the traffic badges, removes Dependabot's `target-branch` and links the changelog's `[Unreleased]` to `main`; `--remove-traffic-badges`, `--release-branch BRANCH` (an existing branch) and `--default-branch BRANCH` change that. It does not change the label manifest, so the overlays you select stay as you set them. Its test initializes a copy of the template and runs **Repository integrity** on it with `--template false`; it is skipped once the template-only section is gone. Delete both files together after committing the result: nothing else uses them. |
 | `AGENTS.md` | **Adapt** | Delete the template-only section first; keep the remaining instructions that still apply to the project. |
 | `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md` | **Keep and adapt** | The contribution entry point and the Contributor Covenant 2.1 by reference, both shown in GitHub's community profile. Adapt the checks and reporting contact to the project. |
@@ -281,48 +277,53 @@ inherited policies may impose additional restrictions.
 | `docs/repo_governance/DISTRIBUTION.md` | **Keep and adapt** | The review to record before making the repository public, sharing a copy or publishing a release, with the full-history scan. Add the project's own search patterns. |
 | `README.md` | **Adapt** | Replace the template's title and introduction with the project's purpose, installation and usage, and the *Start a new repository* section, which describes creating a repository from the template. Keep or replace setup links deliberately. |
 | `LICENSE` | **Keep or replace** | MPL-2.0 by default. The integrity workflow requires a non-empty `LICENSE`. |
-| `docs/VBA_HOUSE_STYLE.md`, `docs/REPOSITORY_STRUCTURE.md`, `docs/PUBLIC_API.txt`, `INSTALLATION.md` | **Keep and adapt** | VBA naming, contracts, errors and cleanup; component locations and dependency direction; the inventory of the supported and project-public VBA declarations; import, export, upgrade, troubleshooting and removal. Replace `<REGIME>` with the project's short name, and adapt the host policy. The initializer removes the template's tested environments: record the runs of the new repository. |
+| Default branch other than `main` | **Adapt** | Rename `main` in the `push` branch lists of `.github/workflows/repository-integrity.yml`, `.github/workflows/minimum-python.yml` and `.github/workflows/codeql.yml`, and in the `pull_request` branch list of `codeql.yml`. **Repository integrity** fails while they omit the default branch. |
+| Code scanning and release attestations on a private repository | **Set** | Leave GitHub's code scanning default setup off: it rejects the results of `.github/workflows/codeql.yml`. On a private repository, CodeQL needs GitHub Code Security and the repository variable `CODE_SCANNING` set to `enabled`, and release attestations need GitHub Enterprise Cloud and the variable `RELEASE_ATTESTATIONS` set to `enabled`; without them both are skipped ([settings reference](../repo_governance/SETTINGS.md)). |
+| `docs/VBA_HOUSE_STYLE.md`, `docs/REPOSITORY_STRUCTURE.md`, `docs/PUBLIC_API.txt`, `INSTALLATION.md` | **Keep and adapt** | VBA naming, contracts, errors and cleanup; component locations and dependency direction; the inventory of the supported and project-public VBA declarations; import, export, upgrade, troubleshooting and removal. Replace `<REGIME>` with the project's short name, and adapt the host policy. The initializer removes the template's tested environments: record the runs of the new repository. The static checks of VBA source read the facade prefix from the house style's naming table. If you import existing modules that are not in the house-style layout, list them in the [layout baseline](../VBA_HOUSE_STYLE.md#source-representation) instead of reformatting them all at once. |
 | `RELEASING.md`, `CHANGELOG.md`, `docs/release/`, `tools/check_changelog.py`, `tests/test_check_changelog.py` | **Keep and adapt** | The release process, the changelog, and the certification and closeout records. Replace the changelog's entries and its link references with the new repository's: **Repository integrity** fails while a link reference points to another repository. Keep or restore the introduction's "No version has been released" sentence, delete `VERSION` if the template has one (it exists once a template release is prepared), and reset *Current status* in `RELEASING.md` to no release; **Repository integrity** fails while these disagree with a changelog that holds no dated release. Create `VERSION` when you prepare the first release. |
 | `docs/methodology/` | **Keep and adapt** | Sources, data contract, calculation contracts, validation plan, the numerical test-case format, the workbook contract and the VBA test harness guide. Replace each illustrative row with the project's entries as decisions are taken. The *Datasets* table and the field tables of `DATA_CONTRACT.md` are rendered from `docs/methodology/data-contract.json`: replace its illustrative dataset `DS-01` there with the project's datasets, each with its file or sheet, encoding, delimiter and decimal separator and its fields, then run `python tools/render_docs.py --write`. In the same change, remove both illustrative cases and their row of the *Traceability* table, and replace `ACC-01`, as the next row says. **Repository integrity** fails while a table differs from the file, and `python tools/check_data_contract.py --dataset DS-NN FILE` validates a real input file against it. The host behaviour entry `HB-01` concerns `tools/check_excel_run.py`, `HB-02` to `HB-04` concern `tools/devbuild/excel_run.py` and hold for the host they name, `HB-05` concerns `tools/devbuild/build_workbook.py` and the identity by rebuild of `tools/check_excel_run.py`, and `HB-06` and `HB-07` concern the harness and installation guides; keep them, delete the template's issue and commit references from their *Issue* and *Result* columns, which this repository's history cannot resolve, and record your own host when you measure it. |
 | `tests/fixtures/`, `tests/expected/`, `tests/derivations/`, `tests/accuracy/`, `tools/check_test_cases.py`, `tools/check_data_contract.py`, `tools/check_derivations.py`, `tools/check_accuracy.py` and their tests | **Keep and adapt** | The numerical test cases, their format check, the data contract's reference validator, which the format check runs on every variant file of a file-based case, the comparison with the derivation scripts and the accuracy contracts, which **Repository integrity** runs. Remove the `illustrative-format-example` and `illustrative-file-import-example` cases, their scripts, `tests/derivations/illustrative_total.py` and `illustrative_file_total.py`, and the row of the *Traceability* table in `docs/methodology/VALIDATION_PLAN.md` that names them, when you replace the illustrative entries of the methodology guides they use, and replace the illustrative contract `ACC-01` with the project's. In the same change, point `CaseIllustrativeResults` in `tests/modules/TEST_Examples.bas`, which reads those fixtures, at the replacement cases, or replace it and update the suite's counts in `.github/excel-evidence-policy.json` and the guides; `tests/test_vba_harness.py` fails while it reads a fixture that is gone, or while the results it records differ from the outputs of the contracts' cases. |
 | `tools/check_independent.py`, `tests/test_check_independent.py` | **Keep; register an adapter when wanted** | Runs each independent implementation registered in `tests/independent/adapters.json` on the test cases and compares its results with the expected values; with no adapter, as in the template, it passes and says that nothing was cross-checked. To register one: give the implementation an `IMPL-` entry in `docs/methodology/SOURCES.md`; write an adapter script under `tests/independent/` that translates a fixture into the implementation's input, runs it and prints its outputs, or why it cannot represent the case or is not installed; then create `tests/independent/adapters.json`, which the template does not ship, or add to it the adapter's `source` and `command` ([independent implementations](../methodology/TEST_CASES.md#independent-implementations)). An adapter whose implementation is not installed is skipped with a note: install the implementation in the **Repository integrity** workflow for the comparison to run in CI. |
-| `docs/licenses/` | **Keep** | Notice and license texts for the files listed in `THIRD_PARTY_NOTICES.txt`, which keep the license the notice states for them (MPL-2.0 or MIT) whatever license you choose. If you remove a listed file, remove it from the notice and from `provenance.json` too. That register records the source repository, license and revision of each adapted file, and a test keeps it in step with the notice; record the revision of any file you adapt, or why it is unknown. |
-| `docs/repo_governance/SETTINGS.md` | **Keep and maintain** | Records the adopted baseline. The integrity workflow explicitly requires this file. |
-| `docs/setup/repository-settings.json` | **Keep** | Enables future drift checks and reapplication. The setup tests read this file. |
-| `tools/setup_repository.py` | **Keep** | Provides preview, apply and verification for future maintenance. |
-| `.github/workflows/settings-drift.yml` | **Keep** | Runs `setup_repository.py --check --token-scope workflow` daily with the read-only workflow token, and fails on drift in the rulesets and the other values that token can read; it lists the rest as not checked ([scheduled drift check](../repo_governance/SETTINGS.md#drift)). It fails until you apply the baseline. Remove it together with the setup tooling, as *Optional: retire the setup tooling* says. |
-| `tests/test_setup_repository.py` | **Keep while retaining setup tooling** | Imports the setup script and reads its JSON configuration. |
-| `docs/setup/REPOSITORY_SETUP.md` | **Keep or retire after handover** | Optional operational guide; remove links to it if you retire it. |
+| `docs/native-declarations.json`, `tools/check_vba_declares.py`, `tests/test_check_vba_declares.py` | **Keep and adapt** | The [register of native declarations](../REPOSITORY_STRUCTURE.md#native-declarations) and the static check that reads it. Add an entry for each export that a `Declare` imports, in the pull request that adds it, with its ABI in the optional `arguments` and `returns` keys; **Repository integrity** fails on a `Declare` the register does not list, or that differs from its export's ABI in a compilation environment. The register is empty in the template, and the check passes while there is no VBA source. |
+| `tests/modules/TEST_Relations.bas` | **Keep and adapt** | The illustrative [relation tests](../methodology/TEST_HARNESS.md#relation-tests), each with its corruption check, on a stand-in total. Replace `IllustrativeTotal` with a call to the core procedure of your calculation and the relations with those its calculation contract implies, keeping a corruption check in every case; `tests/test_vba_harness.py` keeps the counts and the checks consistent, and skips them once the module is gone. Delete the module, and its row in the harness guide's *Modules* table, if no relation applies. |
+| `tools/devbuild/`, `tests/test_devbuild.py`, `tests/test_excel_run.py` | **Keep and adapt** | Builds the workbook from source ([building a workbook from source](../../INSTALLATION.md#building-a-workbook-from-source)), binds an export to it, and records an Excel run with one command (`excel_run.py`, [recording an Excel run](../../INSTALLATION.md#recording-an-excel-run)). Replace the illustrative sheets and names of `tools/devbuild/workbook.json` together with the workbook contract; the tests keep them equal. |
+| `tools/check_restated_counts.py`, `tests/test_check_restated_counts.py` | **Keep and adapt** | Fails, in **Repository integrity**, when a Markdown file restates by hand a count that has a single source; its docstring lists the sources. Declare the project's own counted records in `SOURCES`, and keep a reviewed restatement only in `ALLOWED`, with its reason. |
 | `.github/PULL_REQUEST_TEMPLATE.md` | **Keep and adapt** | Records linked issues, validation, final-head review and what was not validated. Add the project's own checks to *Validated*. |
 | `.github/workflows/traffic-history.yml`, `tools/traffic_history.py`, `tests/test_traffic_history.py`, `docs/repo_governance/TRAFFIC.md` | **Keep; enable if wanted** | Optional traffic collection. It does nothing until you follow *Enabling* in `TRAFFIC.md`. Point the README's traffic badges at the new repository, or remove them; **Repository integrity** fails while they read another repository. If you never want it, remove all four files and the badges together, and in the same change: remove the files from `docs/licenses/THIRD_PARTY_NOTICES.txt` and `docs/licenses/provenance.json`; remove the two `traffic-history.yml` entries of `WRITE_PERMISSIONS` and the two traffic tests, `test_traffic_app_credentials_stay_in_their_steps` and `test_traffic_alert_reads_the_commit_its_collection_wrote`, from `tests/test_workflow_controls.py`; and remove every link to `TRAFFIC.md`, which `python tools/check_links.py` lists. |
-| `pyproject.toml`, `tools/requirements-quality-ci.txt`, `tests/test_quality_gates.py`, `tools/strict_yaml.py` | **Keep** | Ruff and strict mypy settings and their hash-locked versions; `tests/test_quality_gates.py` proves the complexity ceiling, strict mode, the unreachable-code warning and actionlint are active, and `tools/strict_yaml.py` makes the workflow control tests and the `codeql-default-branch` check reject duplicate YAML keys. |
-| `.github/dependabot.yml`, `.github/requirements.txt` | **Keep** | Proposes updates to the SHA-pinned Actions, the hash-locked configuration parser for the tests that read YAML and the `codeql-default-branch` check, and the hash-locked quality tools. Its `target-branch` names the active release branch: set it to this repository's release branch or remove it to target the default branch. **Repository integrity** fails while it names a branch that does not exist. |
-| `.github/workflows/release.yml`, `tools/release.py`, `tests/test_release.py` | **Keep** | On a pushed `vX.Y.Z` tag, verifies it against the changelog, `VERSION`, the default branch, its message and **Repository integrity**; when the tagged commit holds a VBA component, the message must declare its Excel evidence, which `release.py evidence` checks and `release.py verify` checks again on the machine of the run before the push, or an invariant 4 deviation. It then builds a reproducible source bundle, attests its provenance (on a private repository only with GitHub Enterprise Cloud and the repository variable `RELEASE_ATTESTATIONS` set to `enabled`) and drafts the release. A manual run is a rehearsal. Publication stays manual; afterwards, `release.py verify-published` checks the published release, each attached workbook's private data included ([RELEASING.md](../../RELEASING.md)). |
-| `.github/workflows/scorecard.yml` | **Keep; public repositories** | Scores the default branch's supply-chain posture with OpenSSF Scorecard weekly and on each push to it, and publishes the results to the Scorecard service and to code scanning. It is skipped on a private repository and is not a required check. If you never want the results published, delete it together with its `WRITE_PERMISSIONS` entry and its test in `tests/test_workflow_controls.py`. |
-| `.github/workflows/codeql.yml` | **Keep** | Scans the Python, JavaScript and workflow code with CodeQL's security-extended queries on pushes to `main`, on pull requests into `main` and `release/**` except those that change only Markdown files and files under `docs/`, and weekly; results appear under **Security → Code scanning**. Pull requests are analyzed without write permission: their SARIF is kept as a 30-day artifact and they show no code scanning annotations. Leave GitHub's default setup off, because it rejects results from this workflow. Free on a public repository; on a private one it needs GitHub Code Security and the repository variable `CODE_SCANNING` set to `enabled`, otherwise it skips the analysis. If the default branch is not `main`, rename it in the workflow's `push` and `pull_request` branch lists; **Repository integrity** fails while they omit it, as it does for `repository-integrity.yml`. |
-| `tools/check_repository.py`, `tests/test_check_repository.py`, `.github/actionlint/invalid-workflow.yml`, `tools/gitio.py`, `tests/test_gitio.py`, `tests/gitfixture.py` | **Keep and evolve** | Runs every **Repository integrity** check, locally and in CI, and writes per-check logs, `report.json` (commit, dirty state, file hashes) and the job summary under `test-results/integrity/`; CI keeps them as a 30-day artifact. With `--ci`, which CI passes, it fails when the working tree differs from the commit. The `actionlint` check first lints `.github/actionlint/invalid-workflow.yml`, a workflow with a known error that never runs, and fails unless actionlint rejects it. Add project checks to its list, each with its entry in `tools/verification_depth.json`. Every tool runs Git through `tools/gitio.py`, and the tests create their Git repositories through `tests/gitfixture.py`, which ignores the user's and the system's Git configuration. |
-| `tools/vba_lexer.py`, `tools/check_vba_*.py`, `tests/test_check_vba.py` | **Keep** | The static checks of exported VBA source, which **Repository integrity** runs, the call check as advisory. They read the facade prefix from the house style's naming table, so replace `<REGIME>` there. They pass while there is no VBA source. |
-| `docs/native-declarations.json`, `tools/check_vba_declares.py`, `tests/test_check_vba_declares.py` | **Keep and adapt** | The [register of native declarations](../REPOSITORY_STRUCTURE.md#native-declarations) and the static check that reads it. Add an entry for each export that a `Declare` imports, in the pull request that adds it, with its ABI in the optional `arguments` and `returns` keys; **Repository integrity** fails on a `Declare` the register does not list, or that differs from its export's ABI in a compilation environment. The register is empty in the template, and the check passes while there is no VBA source. |
-| `tests/modules/TEST_Harness.bas`, `tests/modules/TEST_Examples.bas`, `.github/excel-evidence-policy.json`, `tools/check_excel_run.py`, `tests/test_check_excel_run.py`, `tests/test_vba_harness.py` | **Keep** | The VBA test harness, its example suite, the evidence policy and the offline check of Excel-run evidence against it ([harness guide](../methodology/TEST_HARNESS.md#evidence-policy)). Add the project's suites beside the example suite, each with a certification entry point and an entry under `suites` in the evidence policy ([harness guide](../methodology/TEST_HARNESS.md#modes-and-certification)); keep the example suite, whose certification is the release evidence that the harness works on the host. |
-| `tools/vba_code_identity.py`, `tests/test_vba_code_identity.py` | **Keep** | Compares two versions of a VBA component by their code, without comments, for `tools/check_excel_run.py --carried-to`, which carries a run's evidence to a pull request commit that changes only comments or layout ([carried evidence](../../INSTALLATION.md#carried-evidence)). It refuses non-ASCII input and any component that uses `[` or `]` outside a string. Carried evidence never certifies a release. |
-| `tests/modules/TEST_Relations.bas` | **Keep and adapt** | The illustrative [relation tests](../methodology/TEST_HARNESS.md#relation-tests), each with its corruption check, on a stand-in total. Replace `IllustrativeTotal` with a call to the core procedure of your calculation and the relations with those its calculation contract implies, keeping a corruption check in every case; `tests/test_vba_harness.py` keeps the counts and the checks consistent, and skips them once the module is gone. Delete the module, and its row in the harness guide's *Modules* table, if no relation applies. |
-| `tools/devbuild/`, `tests/test_devbuild.py`, `tests/test_excel_run.py` | **Keep and evolve** | Builds the workbook from source ([building a workbook from source](../../INSTALLATION.md#building-a-workbook-from-source)), binds an export to it, and records an Excel run with one command (`excel_run.py`). Replace the illustrative sheets and names of `tools/devbuild/workbook.json` together with the workbook contract; the tests keep them equal. |
-| `tools/check_workbook_protection.py`, `tests/test_check_workbook_protection.py`, `tests/workbook_template.py` | **Keep** | Compares the protection of `src/workbook/Template.xlsx` with its protection matrix ([workbook contract](../methodology/WORKBOOK_CONTRACT.md#protection)), in **Repository integrity**. It passes while neither exists. |
-| `tools/format_vba.py`, `tests/test_format_vba.py` | **Keep** | Brings exported VBA source into the house-style layout with `--write`; **Repository integrity** runs `--check` on the tracked modules. It passes while there is no VBA source. If you import modules that are not in layout, list them in a `tools/vba_layout_baseline.json` [baseline](../VBA_HOUSE_STYLE.md#source-representation) instead of reformatting them all at once; the check then fails on any other module out of layout and on a listed module back in layout, so the list only shrinks. |
-| `tools/make_mutant.py`, `tests/test_make_mutant.py` | **Keep** | Writes a mutant, a copy of a source file with one text replaced, under the ignored `test-results/mutants/` at the source's relative path, for the [negative control](../../CONTRIBUTING.md#-negative-controls) of a defect fix. It refuses unless the text occurs exactly once, keeps every other byte, CRLF line endings and `Attribute VB_Name` included, and prints the changed lines and the SHA-256 of the source and of the mutant. It never writes over a source file or into a folder that Git does not ignore. |
-| `tools/check_verification_depth.py`, `tools/verification_depth.json`, `tests/test_check_verification_depth.py` | **Keep and evolve** | Fails **Repository integrity** while a check that can fail the run has no entry in the inventory with an executable negative proof: a test that `python -m unittest discover -s tests` collects, or the check's probe ([negative controls](../../CONTRIBUTING.md#-negative-controls)). The required checks come from `tools/check_repository.py` as CI runs them, so add an entry, with what the check runs, its proofs, its negative claim and its state, in the same change as each project check, and update the entry when you rename or delete a proof test. A project check without a negative test needs one first. |
-| `tools/render_docs.py`, `tests/test_render_docs.py` | **Keep and evolve** | Renders the documentation blocks between `BEGIN generated` and `END generated` markers, such as the list of **Repository integrity** checks and the example suite's expected results; **Repository integrity** fails while one is stale. Add a renderer for each fact the project's code already knows, and run `--write` after changing it. A count written by hand outside a block fails `restated-counts`; render it instead. |
-| `tools/check_restated_counts.py`, `tests/test_check_restated_counts.py` | **Keep and adapt** | Fails, in **Repository integrity**, when a tracked Markdown file other than `CHANGELOG.md` states, outside a generated block, a count that has a single source: the example suite's cases, assertions, modes and failure entry points in `.github/excel-evidence-policy.json`, the **Repository integrity** checks and the static checks of VBA source that `tools/check_repository.py` lists, the data contract's datasets and the validator's finding codes. It matches a declared noun phrase, such as `cases` or `modes`, after a count in digits or in words, whatever the value, and names the file, line, phrase and source. Declare the project's own counted records in `SOURCES`, and keep a reviewed restatement only in `ALLOWED`, with its reason. |
-| `tools/check_template_wording.py`, `tests/test_check_template_wording.py` | **Keep** | Fails, in **Repository integrity** with `--template true` or `false`, when a tracked text file says "in the template", "the template's", "template repository" or "generated repository": such a sentence describes the template, not the repository the file is in. The guides and configuration comments copied from the template are worded to be true in both; the initializer replaces the house style's request to replace `<REGIME>`, and the steps that only the template needs are in this guide or in the template-only section of `AGENTS.md`. Its `EXCLUDED` paths, this guide, the changelog, the license texts and the initializer among them, are not read, and the template-only section of `AGENTS.md` is left out. Keep a reviewed use, such as "the template's" meaning the workbook template, only in `ALLOWED`, with its reason; an entry that matches nothing fails the check. |
-| `tools/check_links.py`, `tests/test_check_links.py`, `.github/workflows/link-check.yml` | **Keep** | Check every Markdown link, read the way GitHub renders Markdown: relative links, anchors and HTTPS in **Repository integrity**, with reviewed exclusions of wrong reports in `.github/link-check-exclusions.json`; external links weekly, the wiki's pages as raw Markdown while the repository is public, with optional expiring exceptions in `.github/link-exceptions.json` ([maintain the baseline](#-maintain-the-baseline)). |
-| `tools/check_doc_commands.py`, `tests/test_check_doc_commands.py` | **Keep** | Checks, in **Repository integrity**, that each `python tools/...` command and repository `python -m` command in the tracked Markdown runs a tracked script, and that its subcommands and options exist in the script's `argparse` parser, read from its source without running it. A parser it cannot read is a failure, not a pass. Commands of a **Remove once run** tool are skipped once its file is deleted. Keep each tool's parser literal so it stays readable. |
+| `.github/workflows/scorecard.yml` | **Keep, or remove** | Scores the default branch's supply-chain posture with OpenSSF Scorecard weekly and on each push to it, and publishes the results to the Scorecard service and to code scanning. It is skipped on a private repository and is not a required check. If you never want the results published, delete it together with its `WRITE_PERMISSIONS` entry and its test in `tests/test_workflow_controls.py`. |
 | `docs/repo_governance/README.md` | **Keep and adapt** | The index of the governance guides and the repository controls. Update its links when you add, retire or move a guide. |
 | `docs/repo_governance/PULL_REQUESTS.md` | **Keep and adapt** | Final-head review procedure that the pull request template refers to. Adapt it if the project uses another automated reviewer. |
-| `.github/workflows/repository-integrity.yml` | **Keep and evolve** | Supplies the required `Repository integrity` check, on every pull request, on pushes to `main` and `release/**`, and on manual dispatch. Add project-specific checks as the project grows. If the default branch is not `main`, rename it in the `push` branch list; **Repository integrity** fails while it omits it. |
-| `.github/workflows/minimum-python.yml` | **Keep** | Runs the tests on the minimum supported Python, the `python_version` in `pyproject.toml`, on pull requests that change Python code, `tests/`, `tools/`, `.github/scripts/`, `pyproject.toml` or `.github/requirements.txt`, on pushes to `main`, and on manual dispatch. It is not a required check. If the default branch is not `main`, rename it in the `push` branch list; **Repository integrity** fails while it omits it. |
-| `.github/workflows/closing-keywords.yml`, `tools/check_closing_keywords.py`, `tests/test_check_closing_keywords.py` | **Keep** | On each pull request, finds the closing keywords it would carry to the default branch ([release branches](../repo_governance/PULL_REQUESTS.md#-release-branches)). Into a release branch, any keyword in a commit, the title or the body fails; into the default branch from a release branch, a keyword that names an open issue fails unless the body lists the issue on a `Reopen after merge: #N` line. Any other pull request is reported as not checked. It reads issue states with the workflow token and `issues: read` and `pull-requests: read`, outside **Repository integrity**, and is not a required check. |
-| `tests/test_workflow_controls.py` | **Keep and evolve** | Governance checks of the workflows and Dependabot, read with the pinned configuration parser: pinned Actions and credential-free checkouts, timeouts, explicit permissions and the jobs listed in `WRITE_PERMISSIONS`, the unconditional required check, concurrency, hash-locked installs, shared toolchain versions, Dependabot coverage, the guards and triggers of the label, closing keyword, CodeQL, minimum-Python, Scorecard, settings drift, traffic and milestone workflows, the weekly schedules of the label-drift and milestone scans, and the milestone workflow's script, which clears milestones from pull requests only. Update it in the same change as the workflow it checks. The tests of the traffic alert script skip once `.github/workflows/traffic-history.yml` is removed. |
 | GitHub **Template repository** setting | **Review separately** | Choose whether the new project should itself be reusable as a template; the setup script does not change this flag. |
+
+Every other file is kept as it is; its guide or its docstring says what it
+does.
+
+### As the project grows
+
+- **Checks.** Add each project check to `tools/check_repository.py`, which the
+  **Repository integrity** workflow runs, with its entry in
+  `tools/verification_depth.json`. A check without a negative test needs one
+  first; update the entry when you rename or delete a proof test.
+- **Generated facts.** Add a renderer to `tools/render_docs.py` for each fact
+  the code already knows, and run `python tools/render_docs.py --write`.
+- **Workflows.** Update `tests/test_workflow_controls.py` in the same change as
+  the workflow it checks.
+- **Suites.** Add the project's VBA suites beside the example suite, each with
+  a certification entry point and an entry under `suites` in
+  `.github/excel-evidence-policy.json`
+  ([harness guide](../methodology/TEST_HARNESS.md#modes-and-certification)).
+  Keep the example suite: its certification is the release evidence that the
+  harness works on the host.
+- **Binaries.** Add a reviewed binary, such as a documentation image, to
+  `.github/binary-allowlist.json` with its SHA-256 and reason.
+- **Cross-file checks.** Adapt a check of `tests/test_repository_consistency.py`
+  only together with the files it compares.
+- **Git and editor rules.** Change `.gitattributes`, `.gitignore` and
+  `.editorconfig` only with a layout change that needs it.
+- **Third-party files.** If you remove a file listed in
+  `docs/licenses/THIRD_PARTY_NOTICES.txt`, remove it from the notice and from
+  `docs/licenses/provenance.json` too. Record there the revision of any file
+  you adapt, or why it is unknown.
 
 ### Optional: retire the setup tooling
 
@@ -404,17 +405,16 @@ settings, not every GitHub setting or inherited policy.
 ## 🔄 Maintain the baseline
 
 Update the JSON and Markdown together when changing policy, review the preview,
-and run the offline tests before applying it. The tests also need Node.js, which
-runs the label scripts. Install the pinned configuration parser once; without it
-the tests that read YAML and the `codeql-default-branch` check are skipped
-locally:
+and run the [local checks](../../CONTRIBUTING.md#-local-checks) before applying
+it:
 
 ```sh
-python -m pip install --require-hashes -r .github/requirements.txt
-python -m unittest discover -s tests -v
+python tools/check_repository.py
 ```
 
-After that one-time installation, the tests require neither credentials nor network access.
+Once the tools they need are installed, they require neither credentials nor
+network access.
+
 **Toolchain baseline.** The workflows set exact versions: Python 3.13.18, Python
 3.11.18 in `minimum-python.yml` (the `python_version` in `pyproject.toml`), and
 Node.js 24.22.2 without the package-manager cache. Dependabot does not update
@@ -454,59 +454,12 @@ ruff check tools tests
 mypy
 ```
 
-The tests already check every relative link and anchor, and that every
-external link uses HTTPS: a plain `http://` link in a Markdown link, a
-reference definition, an autolink or an HTML attribute fails **Repository
-integrity**. Markdown is read the way GitHub renders it: text in code spans,
-code blocks and HTML comments is not checked, nor is escaped text such as
-`\[text](path)`, and backslash escapes and character references such as
-`&amp;` are decoded before a path is looked up. If the checker reports a link
-wrongly, list the report in `.github/link-check-exclusions.json`, which the
-template does not ship:
-
-```json
-{
-  "schema_version": 1,
-  "exclusions": [
-    {"path": "docs/guide.md", "link": "notes.md#part", "reason": "GitHub renders this text as code"}
-  ]
-}
-```
-
-The `path` is the Markdown file and the `link` is the link as the report
-prints it. **Repository integrity** fails while the file is malformed or an
-entry matches no report; a plain `http://` link cannot be excluded.
-
-To also request the external links, over HTTPS only, as the weekly **Link
-check** workflow does:
-
-```sh
-python tools/check_links.py --external
-```
-
-Links into this repository itself are skipped, locally as in the workflow: the
-repository is read from `GITHUB_REPOSITORY`, else from the `origin` remote.
-Links to pages of its wiki are the exception: while the repository's page
-answers an anonymous request, each is requested as the page's raw Markdown,
-which fails when the page does not exist; for a private repository they are
-skipped too. A 403, 429 or 5xx answer, or no answer, is a warning, because the site may
-only be busy or refuse automated requests. To keep such a link while you
-review it again later, list it in `.github/link-exceptions.json`, which the
-template does not ship; create it with the first exception:
-
-```json
-{
-  "schema_version": 1,
-  "exceptions": [
-    {"url": "https://example.org/page", "reason": "Answers 403 to automated requests", "expires": "2027-06-30"}
-  ]
-}
-```
-
-The `url` is the link without its `#fragment`. Up to and including the
-`expires` date the warning stays a warning; after it, the weekly check fails
-for that URL until you renew or remove the exception. **Repository integrity**
-fails while the file is malformed or lists a URL that no Markdown file links.
+**Repository integrity** checks every relative link and anchor, and that every
+external link uses HTTPS; the weekly **Link check** workflow requests the
+external links with `python tools/check_links.py --external`. The docstring of
+[`tools/check_links.py`](../../tools/check_links.py) says how Markdown is read,
+and how to list a wrongly reported link in `.github/link-check-exclusions.json`
+or a busy external site in `.github/link-exceptions.json`, with an expiry date.
 
 Once setup tooling has been retired from a generated project, use that project's
 replacement validation and settings-maintenance process instead.

@@ -29,13 +29,7 @@ Keep editorial rules, assistant instructions, branch-naming preferences, and col
 
 ## Review findings
 
-When a review of this repository finds something to fix, record each finding, or each group of findings that one change will fix, as an issue before or instead of fixing it silently. Every such issue must pass **Issue triage** (`docs/repo_governance/ISSUE_LABELS.md`):
-
-- assigned to me;
-- exactly one priority label (`P1` only for a confirmed calculation bug), plus the type labels that fit;
-- the open milestone with the earliest due date;
-- a `- Start date: YYYY-MM-DD (Europe/Rome)` line, and a `- Target end date: YYYY-MM-DD (Europe/Rome)` line not before it and earlier than that milestone's due date;
-- a dependency section that names prerequisites or says "None".
+When a review of this repository finds something to fix, record each finding, or each group of findings that one change will fix, as an issue before or instead of fixing it silently. Every such issue must meet the [triage rules](docs/repo_governance/ISSUE_LABELS.md#triage-rules) of **Issue triage**. Give it the type labels that fit and the open milestone with the earliest due date, and write its dates as the `- Start date:` and `- Target end date:` lines of that guide.
 
 Describe the finding with its file and line, the evidence, why it matters, and the proposed fix, so the issue can be resolved without the review that found it.
 
