@@ -111,7 +111,9 @@ SECTION_START = "<!-- template-only:start -->"
 SECTION_END = "<!-- template-only:end -->"
 REPLACEMENT = "<!-- template-only:replacement"
 GITHUB_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/")
-DIRECTORY = re.compile(r"^(\s*)directory:.*$", re.M)
+# An update's directory, or its directories with the list items below the key.
+DIRECTORY = re.compile(r"^([ \t]*)(?:directory:[^\n]*|directories:[ \t]*(?:\n\1[ \t]*-[^\n]*)+)$",
+                       re.M)
 INSTALLATION = "INSTALLATION.md"
 VALIDATION_PLAN = "docs/methodology/VALIDATION_PLAN.md"
 TESTED_HEADER = "| Tested environment |"

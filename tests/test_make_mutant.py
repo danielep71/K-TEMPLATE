@@ -83,13 +83,13 @@ class MakeMutantTest(Fixture):
 
     def test_zero_occurrences_are_refused(self) -> None:
         code, _, err = self.run_tool("--find", "a < 0", "--replace", "a > 0")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("occurs 0 times", err)
         self.assert_nothing_written()
 
     def test_two_occurrences_are_refused(self) -> None:
         code, _, err = self.run_tool("--find", "Total", "--replace", "Sum")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("occurs 2 times", err)
         self.assert_nothing_written()
 
@@ -100,13 +100,13 @@ class MakeMutantTest(Fixture):
             make_mutant.mutate(b"abababa", b"aba", b"X", False)
         self.put("notes/run.txt", b"x = aaa\n")
         code, _, err = self.run_tool("--find", "aa", "--replace", "b", file="notes/run.txt")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("occurs 2 times", err)
         self.assertFalse(self.mutants.exists())
 
     def test_an_unchanged_replacement_is_refused(self) -> None:
         code, _, err = self.run_tool("--find", "a > 0", "--replace", "a > 0")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("would not differ", err)
         self.assert_nothing_written()
 
@@ -140,7 +140,7 @@ class MakeMutantTest(Fixture):
         find = self.put("find.txt", b"one\ntwo\n")
         code, _, err = self.run_tool("--find-file", str(find), "--replace", "x",
                                      file="notes/mixed.txt")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("mixes CRLF and LF", err)
         self.assertFalse(self.mutants.exists())
 
@@ -157,7 +157,7 @@ class MakeMutantTest(Fixture):
         for label, (find, replace) in cases.items():
             with self.subTest(label):
                 code, _, err = self.run_tool("--find", find, "--replace", replace)
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertIn("Attribute VB_Name", err)
                 self.assert_nothing_written()
 
@@ -165,12 +165,12 @@ class MakeMutantTest(Fixture):
         self.put("src/modules/M_Bare.bas", b"Option Explicit\r\nPublic X As Long\r\n")
         code, _, err = self.run_tool("--find", "Long", "--replace", "Integer",
                                      file="src/modules/M_Bare.bas")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("no Attribute VB_Name", err)
 
     def test_a_non_ascii_replacement_in_vba_is_refused(self) -> None:
         code, _, err = self.run_tool("--find", "a + b", "--replace", "a − b")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("not ASCII", err)
         self.assert_nothing_written()
 
@@ -200,7 +200,7 @@ class MakeMutantTest(Fixture):
     def test_an_output_folder_git_does_not_ignore_is_refused(self) -> None:
         code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b",
                                      "--output", str(self.root / "scratch"))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("Git does not ignore scratch/src/modules/M_Sample.bas", err)
         self.assertFalse((self.root / "scratch").exists())
 
@@ -209,7 +209,7 @@ class MakeMutantTest(Fixture):
         (self.root / ".git" / "info" / "exclude").write_text("/src/scratch/\n", encoding="utf-8")
         code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b",
                                      "--output", str(self.root / "src" / "scratch"))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("in the source directory src/", err)
         self.assertFalse((self.root / "src" / "scratch").exists())
 
@@ -218,7 +218,7 @@ class MakeMutantTest(Fixture):
         git(self.root, "add", "-f", "test-results/kept/evidence.txt")
         code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b",
                                      "--output", str(self.root / "test-results" / "kept"))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("holds tracked files", err)
         self.assertFalse((self.root / "test-results/kept/src").exists())
 
@@ -228,7 +228,7 @@ class MakeMutantTest(Fixture):
             outside.write_bytes(CRLF_MODULE)
             code, _, err = self.run_tool("--find", "a + b", "--replace", "a * b",
                                          file=str(outside))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("outside the repository", err)
         self.assertFalse(self.mutants.exists())
 
@@ -252,7 +252,7 @@ class SymlinkDestinationTest(Fixture):
             self.skipTest("cannot create symbolic links here")
 
     def assert_refused(self, code: int, err: str) -> None:
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn("symbolic link", err)
 
     def test_a_link_at_the_mutant_path_to_the_source_is_refused(self) -> None:

@@ -585,7 +585,7 @@ class EvidenceTest(unittest.TestCase):
     def test_unknown_commit_fails(self) -> None:
         with evidence() as folder, contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(check_excel_run.main([str(folder), "--commit", "0" * 40,
-                                                   "--root", str(ROOT)]), 1)
+                                                   "--root", str(ROOT)]), 2)
 
     def test_wrong_source_identity(self) -> None:
         self.assertFinding(edit("exported/TEST_Harness.bas", "Option Explicit",
@@ -953,10 +953,10 @@ class EquivalenceTest(unittest.TestCase):
         for name in ("HEAD", self.built[:12], self.built.upper()):
             with self.subTest(name=name):
                 code, text = self.run_main("--equivalent-to", name)
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertIn(f"--equivalent-to {name}: not a full lower-case commit SHA", text)
         code, text = self.run_main("--equivalent-to", "0" * 40)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn(f"commit {'0' * 40} not found", text)
 
     def test_the_build_tools_are_the_modules_the_build_loads(self) -> None:
@@ -1142,10 +1142,10 @@ class CarriedTest(unittest.TestCase):
         for name in ("HEAD", target[:12], target.upper()):
             with self.subTest(name=name):
                 code, text = self.run_main("--carried-to", name)
-                self.assertEqual(code, 1)
+                self.assertEqual(code, 2)
                 self.assertIn(f"--carried-to {name}: not a full lower-case commit SHA", text)
         code, text = self.run_main("--carried-to", "0" * 40)
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
         self.assertIn(f"commit {'0' * 40} not found", text)
         with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
             self.run_main("--carried-to", target, "--equivalent-to", target)

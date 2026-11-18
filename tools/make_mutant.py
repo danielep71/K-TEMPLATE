@@ -42,7 +42,7 @@ replaced text starts, and the SHA-256 of the source and of the mutant.
 Each output is written to a new file and renamed over its path, so a file
 already there, even a hard link to the source, is replaced and never
 written through. Running it again replaces the mutant. Exit status: 0 when the mutant is
-written, 1 when it refuses, 2 on a usage error.
+written, 2 when it refuses or on a usage error.
 """
 
 from __future__ import annotations
@@ -285,7 +285,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = write(root, args.file.resolve(), output, find, replace)
     except (Refusal, OSError) as exc:
         print(f"make_mutant: refused: {exc}", file=sys.stderr)
-        return 1
+        return 2
     print("\n".join(report))
     return 0
 

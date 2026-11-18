@@ -435,6 +435,15 @@ Use only the categories an entry needs.
   in `CONTRIBUTING.md` and the link checker's exclusions and exceptions
   moved to the tools' docstrings. The release checklist now links the
   closeout checklist (#570).
+- Every tool in `tools/` follows one exit status: 0 passed, 1 problems found,
+  2 could not run. `check_excel_run.py` (an invalid or unknown commit),
+  `check_accuracy.py --record-holdout` (a refusal), `make_mutant.py` (a
+  refusal) and `release.py evidence` (an unknown commit) exited 1 in those
+  cases and now exit 2, so a failed run says whether to fix the code or the
+  command. `CONTRIBUTING.md` states the convention (#582).
+- Dependabot has one `pip` block for `/.github` and `/tools`, with one group,
+  so a week with updates in both directories opens a single pull request
+  instead of two (#581).
 
 ### Fixed
 
