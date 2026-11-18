@@ -1076,7 +1076,7 @@ class RecordHoldoutTest(unittest.TestCase):
             before = path.read_bytes() if path.is_file() else None
             code, output = run(root, *args, document=document)
             after = path.read_bytes() if path.is_file() else None
-        self.assertEqual((code, after), (1, before), output)
+        self.assertEqual((code, after), (2, before), output)
         self.assertIn("accuracy: REFUSED (nothing measured; tests/accuracy/holdout_exposures.json "
                       "not written)", output)
         self.assertNotIn("worst", output)
