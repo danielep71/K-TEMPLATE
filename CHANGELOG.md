@@ -441,6 +441,9 @@ Use only the categories an entry needs.
   refusal) and `release.py evidence` (an unknown commit) exited 1 in those
   cases and now exit 2, so a failed run says whether to fix the code or the
   command. `CONTRIBUTING.md` states the convention (#582).
+- Dependabot has one `pip` block for `/.github` and `/tools`, with one group,
+  so a week with updates in both directories opens a single pull request
+  instead of two (#581).
 
 ### Fixed
 
