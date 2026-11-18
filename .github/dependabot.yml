@@ -38,7 +38,9 @@ updates:
         patterns:
           - "*"
   - package-ecosystem: pip
-    directory: /.github
+    directories:
+      - /.github
+      - /tools
     target-branch: release/1.1.0
     schedule:
       interval: weekly
@@ -56,28 +58,6 @@ updates:
     cooldown:
       default-days: 14
     groups:
-      configuration-parser:
-        patterns:
-          - "*"
-  - package-ecosystem: pip
-    directory: /tools
-    target-branch: release/1.1.0
-    schedule:
-      interval: weekly
-      day: monday
-      time: "05:00"
-      timezone: Europe/Rome
-    open-pull-requests-limit: 5
-    labels:
-      - ci
-      - P3
-    assignees:
-      - danielep71
-    commit-message:
-      prefix: ci
-    cooldown:
-      default-days: 14
-    groups:
-      python-quality-tools:
+      python-dependencies:
         patterns:
           - "*"

@@ -730,8 +730,18 @@ class WorkflowControlTests(unittest.TestCase):
         document = strict_yaml.load((ROOT / '.github/dependabot.yml').read_text(encoding='utf-8'))
         self.assertEqual(document['version'], 2)
         updates = document['updates']
-        self.assertEqual(sorted((u['package-ecosystem'], u['directory']) for u in updates),
-                         [('github-actions', '/'), ('pip', '/.github'), ('pip', '/tools')])
+        # One block per ecosystem: a week with updates in both pip directories
+        # still opens a single pull request.
+        self.assertEqual(sorted(u['package-ecosystem'] for u in updates), ['github-actions', 'pip'])
+        covered = sorted(directory for u in updates
+                         for directory in u.get('directories', [u.get('directory')]))
+        self.assertEqual(covered, ['/', '/.github', '/tools'])
+        # Every tracked requirements file sits in a directory a pip block covers.
+        tracked = subprocess.run(['git', 'ls-files', '*requirements*.txt'], cwd=ROOT, check=True,
+                                 capture_output=True, text=True).stdout.split()
+        self.assertTrue(tracked, 'no tracked requirements file found')
+        for name in tracked:
+            self.assertIn('/' + str(Path(name).parent), covered, name)
         for update in updates:
             with self.subTest(ecosystem=update['package-ecosystem']):
                 self.assertNotIn('milestone', update)
