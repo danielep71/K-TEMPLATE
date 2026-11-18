@@ -170,3 +170,13 @@ snapshot_date,rank,path,title,count,uniques
 2026-11-17,8,/danielep71/MyTemplate/issues/276,/issues/276,2,1
 2026-11-17,9,/danielep71/MyTemplate/milestone/1,/milestone/1,2,1
 2026-11-17,10,/danielep71/MyTemplate/milestones,/milestones,2,1
+2026-11-18,1,/danielep71/MyTemplate/blob/f1d0d17ecede525941cfedf07f0cf737bf1346ef/.gitattributes,/blob/f1d0d17ecede525941cfedf07f0cf737bf1346ef/.gitattributes,4,3
+2026-11-18,2,/danielep71/K-TEMPLATE/branches,/branches,4,1
+2026-11-18,3,/danielep71/MyTemplate/compare/23678ddd1f1446f0523ea82cb38c98b086fa88a3...f1d0d17ecede525941cfedf07f0cf737bf1346ef,/compare/23678ddd1f1446f0523ea82cb38c98b086fa88a3...f1d0d17ecede525941cfedf07f0cf737bf1346ef,3,3
+2026-11-18,4,/danielep71/MyTemplate/blob/887f4b7d7ae66b905e31ebac4b406226bae36931/tools/setup_repository.py,/blob/887f4b7d7ae66b905e31ebac4b406226bae36931/tools/setup_repository.py,3,1
+2026-11-18,5,/danielep71/MyTemplate,Overview,2,2
+2026-11-18,6,/danielep71/MyTemplate/issues,/issues,2,1
+2026-11-18,7,/danielep71/MyTemplate/issues/276,/issues/276,2,1
+2026-11-18,8,/danielep71/MyTemplate/milestones,/milestones,2,1
+2026-11-18,9,/danielep71/K-TEMPLATE,Overview,1,1
+2026-11-18,10,/danielep71/K-TEMPLATE/blob/5c0e22ce43a976449503a8cc3db01c73db797ba5/tools/check_repository.py,/blob/5c0e22ce43a976449503a8cc3db01c73db797ba5/tools/check_repository.py,1,1
