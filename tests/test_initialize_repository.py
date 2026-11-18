@@ -331,6 +331,16 @@ class AdaptationTests(unittest.TestCase):
         self.assertEqual(added, adapted.replace('"release/0.1.0"', "release/0.1.0"))
         self.assertIn("    directory: /tools\n    target-branch: release/0.1.0\n", added)
 
+    def test_dependabot_target_branch_is_added_after_a_list_of_directories(self) -> None:
+        removed = initialize.adapt_dependabot(DEPENDABOT, Options(REPOSITORY, "LCR"))[0]
+        multiple = removed.replace("    directory: /tools\n",
+                                   "    directories:\n      - /.github\n      - /tools\n")
+        self.assertNotEqual(multiple, removed)
+        added = self.assertIdempotent(initialize.adapt_dependabot, multiple)
+        self.assertIn("    directories:\n      - /.github\n      - /tools\n"
+                      "    target-branch: release/0.1.0\n    schedule:", added)
+        self.assertEqual(added.count("target-branch:"), 2)
+
     def test_house_style_takes_the_regime_in_its_table_and_the_request_above_it(self) -> None:
         adapted = self.assertIdempotent(initialize.adapt_house_style, HOUSE_STYLE)
         self.assertIn("| `LCR_` plus subject | `LCR_Functions` |", adapted)
