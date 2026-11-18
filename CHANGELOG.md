@@ -435,6 +435,9 @@ Use only the categories an entry needs.
   in `CONTRIBUTING.md` and the link checker's exclusions and exceptions
   moved to the tools' docstrings. The release checklist now links the
   closeout checklist (#570).
+- Dependabot has one `pip` block for `/.github` and `/tools`, with one group,
+  so a week with updates in both directories opens a single pull request
+  instead of two (#581).
 
 ### Fixed
 
