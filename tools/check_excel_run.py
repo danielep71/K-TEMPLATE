@@ -1527,7 +1527,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                           ("--carried-to", args.carried_to)):
         if value is not None and not check_accuracy.SHA.fullmatch(value):
             print(f"FAIL: {option} {value}: not a full lower-case commit SHA")
-            return 1
+            return 2
     resolved = []
     for name in (args.commit, args.equivalent_to or args.carried_to):
         if name is None:
@@ -1537,7 +1537,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                                 f"{name}^{{commit}}").decode().strip())
         except RuntimeError as error:
             print(f"FAIL: commit {name} not found: {error}")
-            return 1
+            return 2
     commit, target = resolved[0], (resolved[1] if len(resolved) > 1 else None)
     carried_to = target if args.carried_to is not None else None
     evidence = check(root, commit, args.evidence, args.workbook, args.require_binding,

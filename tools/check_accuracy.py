@@ -1391,7 +1391,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for refusal in refusals:
                 print(f"REFUSED: {refusal}")
             print(f"accuracy: REFUSED (nothing measured; {EXPOSURES.as_posix()} not written)")
-            return 1
+            return 2
     findings, contracts, lines = check(root, args.results or (), args.commit)
     registry = read_registry(root, None, Report(), REGISTRY.as_posix())
     invariants = len(registry.invariants) if registry is not None else 0

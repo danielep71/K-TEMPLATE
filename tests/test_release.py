@@ -455,7 +455,7 @@ class ExcelGateTest(unittest.TestCase):
         self.assertTrue(text.endswith(f"release-evidence: PASS ({self.head[:12]})\n"))
         with mock.patch.object(check_excel_run, "check", FakeChecker(binding="FAIL")), \
                 contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(release.main([*arguments, "--run-commit", "nothing"]), 1)
+            self.assertEqual(release.main([*arguments, "--run-commit", "nothing"]), 2)
             self.assertEqual(release.main(arguments), 1)
         self.assertIn("FAIL: commit nothing not found\nrelease-evidence: FAIL (HEAD)",
                       output.getvalue())

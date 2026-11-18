@@ -716,7 +716,7 @@ def evidence_main(root: Path, commit: str, folder: Path, workbook: Path, run: st
     except ReleaseError as error:
         print(f"FAIL: {error}")
         print(f"release-evidence: FAIL ({commit})")
-        return 1
+        return 2
     if gate.report:
         print(gate.report)
     for problem in gate.problems:

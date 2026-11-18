@@ -154,6 +154,10 @@ python tools/check_repository.py
   writes a log for each check, `report.json` and `summary.md` under
   `test-results/integrity/`, which Git ignores; the docstring of
   `tools/check_repository.py` says how it runs.
+- **Exit status.** Every tool in `tools/` exits 0 when it passed, 1 when it
+  ran and found problems, and 2 when it could not run: an invalid argument, an
+  unreadable input, a refusal or a missing prerequisite. A red run that exits
+  2 needs a different command, not a code fix.
 
 It runs these checks, in this order. `OWNER/REPOSITORY` is the repository that
 `--repository` names, as CI passes it, or else the GitHub repository of the
