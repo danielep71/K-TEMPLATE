@@ -9,7 +9,7 @@ style states (*Source representation*):
 3. four spaces for each tab of a line's indentation;
 4. procedure declarations, their End statements and labels at the outer
    level;
-5. two blank lines after each procedure's End statement.
+5. one blank line after each procedure's End statement.
 
 It never changes a string literal: every rule works on indentation, on the
 end of a line, or on whole lines it recognises outside literals, and a
@@ -18,7 +18,7 @@ followed by a colon, such as Else: or Loop:, is not a label. A line that ends
 with a space or tab and an underscore continues on the next one, a comment
 included. No blank line is added to or removed from one logical line: a
 physical line that a continuation carries over is kept as it stands, blank or
-not, the two blank lines after an End statement wait until its whole logical
+not, the one blank line after an End statement waits until its whole logical
 line has been emitted, and a blank line that ends a continuation at the end
 of the file stays. The header that the VBE writes (VERSION, BEGIN ... END,
 Object and Attribute lines) is kept byte for byte.
@@ -160,8 +160,8 @@ def format_body(lines: Sequence[str]) -> list[str]:
                 out.append(line)
             continue
         if pending_end:
-            # Two blank lines between a procedure's End and what follows it.
-            out.extend(["", ""])
+            # One blank line between a procedure's End and what follows it.
+            out.append("")
             pending_end = False
         if outer_level(line):
             line = line.lstrip()

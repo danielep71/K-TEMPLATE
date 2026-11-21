@@ -469,8 +469,8 @@ def checks(context: Context) -> list[Check]:
         Check("secret-files", function=secret_files),
         Check("vba-format", [python, "tools/format_vba.py", "--check"]),
         *[Check(f"vba-{name.replace('_', '-')}", [python, f"tools/check_vba_{name}.py"])
-          for name in ("source", "conditionals", "jumps", "public_api", "dependencies",
-                       "identifiers", "errors", "declares")],
+          for name in ("source", "layout", "conditionals", "jumps", "public_api",
+                       "dependencies", "identifiers", "errors", "declares")],
         Check("vba-calls", [python, "tools/check_vba_calls.py"], advisory=True),
         Check("data-contract", [python, "tools/check_data_contract.py"]),
         Check("test-cases", [python, "tools/check_test_cases.py"]),
