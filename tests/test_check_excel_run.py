@@ -1025,8 +1025,8 @@ class CarriedTest(unittest.TestCase):
         """A commit that edits a comment of a .bas, a .cls and a .frm, and the layout
         and the letter case of the .bas."""
         harness = self.read(POLICY.harness)
-        self.assertIn(b"\n    Option Explicit\n", harness)
-        harness = harness.replace(b"\n    Option Explicit\n",
+        self.assertIn(b"\nOption Explicit\n", harness)
+        harness = harness.replace(b"\nOption Explicit\n",
                                   b"\noption   explicit   ' re-cased\n", 1)
         form = next(name for name in FORM if name.endswith(".frm"))
         return commit_change(self.root, self.built, {

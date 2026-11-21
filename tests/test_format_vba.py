@@ -24,8 +24,10 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import format_vba  # noqa: E402
+import vba_baseline  # noqa: E402
 import vba_lexer  # noqa: E402
 from gitfixture import git, init  # noqa: E402
+from test_check_vba_layout import module as headed_module  # noqa: E402
 
 HEAD = ['Attribute VB_Name = "CORE_Probe"', "Option Explicit", "Option Private Module", ""]
 
@@ -119,7 +121,7 @@ class RuleTest(unittest.TestCase):
             with self.subTest(end=end):
                 self.assertFormats([f"{end} ' explanation _", "    Debug.Print 1",
                                     "Private Sub Two()", "End Sub"],
-                                   [f"{end} ' explanation _", "    Debug.Print 1", "", "",
+                                   [f"{end} ' explanation _", "    Debug.Print 1", "",
                                     "Private Sub Two()", "End Sub"])
         # Comment text that looks like a label or an End statement stays put,
         # after a space or a tab before the underscore.
@@ -128,9 +130,9 @@ class RuleTest(unittest.TestCase):
                 with self.subTest(continued=continued, text=text):
                     lines = ["Private Sub Run()", continued, text, "End Sub"]
                     self.assertFormats(lines, lines)
-        # A blank line ends the continuation; the two blank lines then follow it.
+        # A blank line ends the continuation; it is the one blank line after End.
         self.assertFormats(["End Sub ' a _", "    more", "", "Private Sub Two()", "End Sub"],
-                           ["End Sub ' a _", "    more", "", "", "Private Sub Two()", "End Sub"])
+                           ["End Sub ' a _", "    more", "", "Private Sub Two()", "End Sub"])
 
     def test_statement_keywords_are_not_labels(self) -> None:
         # A keyword and a colon separator, such as Else: or Loop:, keeps its
@@ -150,7 +152,7 @@ class RuleTest(unittest.TestCase):
     PROBE_ROWS = [
         ("a continued comment after End",
          ["End Sub ' explanation _", "    Debug.Print 1", "Private Sub Two()"],
-         ["End Sub ' explanation _", "    Debug.Print 1", "", "", "Private Sub Two()"]),
+         ["End Sub ' explanation _", "    Debug.Print 1", "", "Private Sub Two()"]),
         ("comment continuation text that looks like a label",
          ["    ' note _", "        Done:"], ["    ' note _", "        Done:"]),
         ("a tab before the underscore",
@@ -175,29 +177,29 @@ class RuleTest(unittest.TestCase):
         unchanged = [
             ["Private Sub One()", "    X = 1 _", "", "    Y = 2", "End Sub"],
             ["Private Sub One()", "    ' a _", "", "End Sub"],
-            ["Private Sub One()", "End Sub ' a _", "", "", "", "Private Sub Two()", "End Sub"],
+            ["Private Sub One()", "End Sub ' a _", "", "", "Private Sub Two()", "End Sub"],
             ["Private Sub One()", "    X = 1 _", ""],
         ]
         for lines in unchanged:
             with self.subTest(lines=lines):
                 self.assertFormats(lines, lines)
-        self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "Private Sub Two()",
+        self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "", "Private Sub Two()",
                             "End Sub"],
-                           ["Private Sub One()", "End Sub ' a _", "", "", "",
-                            "Private Sub Two()", "End Sub"])
+                           ["Private Sub One()", "End Sub ' a _", "", "", "Private Sub Two()",
+                            "End Sub"])
         self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "", ""],
                            ["Private Sub One()", "End Sub ' a _", ""])
         self.assertFormats(["Private Const A As Long = 1 _", "    + 1", "", "  ", ""],
                            ["Private Const A As Long = 1 _", "    + 1"])
 
-    def test_two_blank_lines_between_procedures(self) -> None:
+    def test_one_blank_line_between_procedures(self) -> None:
         self.assertFormats(["Private Sub One()", "End Sub", "'Header of Two",
                             "Private Sub Two()", "End Sub"],
-                           ["Private Sub One()", "End Sub", "", "", "'Header of Two",
+                           ["Private Sub One()", "End Sub", "", "'Header of Two",
                             "Private Sub Two()", "End Sub"])
         self.assertFormats(["Private Sub One()", "End Sub", "", "", "", "",
                             "Private Sub Two()", "End Sub"],
-                           ["Private Sub One()", "End Sub", "", "",
+                           ["Private Sub One()", "End Sub", "",
                             "Private Sub Two()", "End Sub"])
 
     def test_other_lines_are_not_moved(self) -> None:
@@ -287,8 +289,8 @@ def deform(text: str) -> str:
 
 def baselined(root: Path) -> set[str]:
     """The modules the root's default layout baseline lists; none without the file."""
-    path = root / format_vba.BASELINE
-    return set(format_vba.load_baseline(path, format_vba.BASELINE)) if path.exists() else set()
+    path = root / vba_baseline.BASELINE
+    return set(vba_baseline.load_baseline(path, vba_baseline.BASELINE)) if path.exists() else set()
 
 
 class DeformTest(unittest.TestCase):
@@ -382,7 +384,7 @@ class MainTest(unittest.TestCase):
             git(self.root, "add", "--all")
 
     def baseline(self, files: object, **fields: object) -> None:
-        path = self.root / format_vba.BASELINE
+        path = self.root / vba_baseline.BASELINE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"schema_version": 1, "files": files, **fields}),
                         encoding="utf-8")
@@ -463,8 +465,25 @@ class MainTest(unittest.TestCase):
                       "tools/format_vba.py --write src/B.bas", printed)
         self.assertNotIn("FAIL: src/A.bas", printed)
 
-    def test_listed_module_in_layout_fails_until_removed(self) -> None:
+    def test_listed_module_without_headers_stays_listed_after_write(self) -> None:
+        # In statement layout but without banners and headers: the entry stays,
+        # because tools/check_vba_layout.py still needs it.
         self.track({"src/A.bas": self.BAD, "src/B.bas": self.GOOD})
+        self.baseline(["src/A.bas"])
+        code, printed, _ = self.run_main("--write", "src/A.bas")
+        self.assertEqual(code, 0)
+        self.assertIn("src/A.bas stays in tools/vba_layout_baseline.json until its banners "
+                      "and headers pass python tools/check_vba_layout.py", printed)
+        self.assertNotIn("Remove src/A.bas", printed)
+        code, printed, _ = self.run_main("--check")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("baselined: src/A.bas", printed)
+
+    def test_listed_module_in_layout_fails_until_removed(self) -> None:
+        bad = headed_module().replace("\n", "\r\n").replace("Public Sub Run()",
+                                                             "  Public Sub Run()")
+        good = headed_module().replace("\n", "\r\n")
+        self.track({"src/A.bas": bad, "src/B.bas": good})
         self.baseline(["src/A.bas"])
         code, printed, _ = self.run_main("--write", "src/A.bas")
         self.assertEqual(code, 0)
@@ -477,7 +496,7 @@ class MainTest(unittest.TestCase):
                       "tools/vba_layout_baseline.json; remove its entry", printed)
         self.baseline([])
         self.assertEqual(self.run_main("--check")[0], 0)
-        (self.root / format_vba.BASELINE).unlink()
+        (self.root / vba_baseline.BASELINE).unlink()
         self.assertEqual(self.run_main("--check")[0], 0)
 
     def test_listed_path_that_is_not_a_tracked_module_fails(self) -> None:
@@ -499,7 +518,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("FAIL: src/A.bas: not in house-style layout", printed)
         self.assertIn("0 baselined", printed)
         # --no-baseline ignores a baseline file, even a malformed one.
-        (self.root / format_vba.BASELINE).write_text("{", encoding="utf-8")
+        (self.root / vba_baseline.BASELINE).write_text("{", encoding="utf-8")
         self.assertEqual(self.run_main("--check", "--no-baseline")[0], 1)
 
     def test_explicit_baseline(self) -> None:
@@ -533,7 +552,7 @@ class MainTest(unittest.TestCase):
             "dot": json.dumps({**valid, "files": ["./src/A.bas"]}),
             "empty": json.dumps({**valid, "files": [""]}),
         }
-        path = self.root / format_vba.BASELINE
+        path = self.root / vba_baseline.BASELINE
         path.parent.mkdir(parents=True, exist_ok=True)
         for label, content in cases.items():
             for mode in ("--check", "--write"):

@@ -9,7 +9,7 @@ style states (*Source representation*):
 3. four spaces for each tab of a line's indentation;
 4. procedure declarations, their End statements and labels at the outer
    level;
-5. two blank lines after each procedure's End statement.
+5. one blank line after each procedure's End statement.
 
 It never changes a string literal: every rule works on indentation, on the
 end of a line, or on whole lines it recognises outside literals, and a
@@ -18,7 +18,7 @@ followed by a colon, such as Else: or Loop:, is not a label. A line that ends
 with a space or tab and an underscore continues on the next one, a comment
 included. No blank line is added to or removed from one logical line: a
 physical line that a continuation carries over is kept as it stands, blank or
-not, the two blank lines after an End statement wait until its whole logical
+not, the one blank line after an End statement waits until its whole logical
 line has been emitted, and a blank line that ends a continuation at the end
 of the file stays. The header that the VBE writes (VERSION, BEGIN ... END,
 Object and Attribute lines) is kept byte for byte.
@@ -30,12 +30,14 @@ passes when there is none; a path may name a module or a folder, whose
 modules are formatted.
 
 An optional baseline, tools/vba_layout_baseline.json by default, lets a
-project adopt the check one module at a time. It holds schema_version 1 and
-a sorted, unique "files" list of root-relative POSIX paths, and --check
-ratchets it:
+project adopt the layout one module at a time. tools/check_vba_layout.py reads
+the same file (tools/vba_baseline.py). It holds schema_version 1 and a sorted,
+unique "files" list of root-relative POSIX paths, and --check ratchets it:
 
 - a module out of layout that the baseline does not list fails;
-- a listed module that is in layout fails until its entry is removed;
+- a listed module that is fully in layout, here and in the banners and
+  headers that tools/check_vba_layout.py checks, fails until its entry is
+  removed;
 - a listed path that is not a tracked module under the source directories
   fails (checked when no path is named).
 
@@ -49,19 +51,18 @@ nor runs VBA.
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 from collections.abc import Sequence
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 import gitio
+import vba_baseline
+from vba_header_layout import check_text
 from vba_lexer import VBA_SUFFIXES
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIRECTORIES = ("src", "tests/modules", "examples/modules")
-BASELINE = "tools/vba_layout_baseline.json"
-BASELINE_SCHEMA = 1
 INDENT = "    "
 
 PROCEDURE = re.compile(r"^(?:(?:Public|Private|Friend)\s+)?(?:Static\s+)?"
@@ -76,10 +77,6 @@ HEADER_LINE = re.compile(r"^(?:VERSION\s|Object\s*=|Attribute\s)", re.I)
 # A space or tab and an underscore at the end of a line continue it, in code
 # and in a comment alike.
 CONTINUED = re.compile(r"[ \t]_$")
-
-
-class BaselineError(ValueError):
-    """The baseline file is missing, malformed or lists an invalid path."""
 
 
 def split_code_comment(line: str) -> tuple[str, str]:
@@ -160,8 +157,8 @@ def format_body(lines: Sequence[str]) -> list[str]:
                 out.append(line)
             continue
         if pending_end:
-            # Two blank lines between a procedure's End and what follows it.
-            out.extend(["", ""])
+            # One blank line between a procedure's End and what follows it.
+            out.append("")
             pending_end = False
         if outer_level(line):
             line = line.lstrip()
@@ -219,40 +216,14 @@ def named_files(paths: Sequence[Path]) -> list[Path]:
     return files
 
 
-def load_baseline(path: Path, shown_as: str) -> list[str]:
-    """The sorted, unique root-relative POSIX paths that a baseline file lists."""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        reason = error.strerror if isinstance(error, OSError) and error.strerror else error
-        raise BaselineError(f"cannot read baseline {shown_as}: {reason}") from error
-    if not isinstance(data, dict) or data.get("schema_version") != BASELINE_SCHEMA:
-        raise BaselineError(f"{shown_as}: expected an object with schema_version "
-                            f"{BASELINE_SCHEMA}")
-    files = data.get("files")
-    if not isinstance(files, list) or not all(isinstance(name, str) for name in files):
-        raise BaselineError(f"{shown_as}: 'files' must be a list of paths")
-    for name in files:
-        parts = PurePosixPath(name).parts
-        if (not name or name.startswith("/") or "\\" in name or ":" in name
-                or ".." in parts or "." in name.split("/") or name.endswith("/")):
-            raise BaselineError(f"{shown_as}: {name!r} is not a root-relative POSIX path")
-    if files != sorted(set(files)):
-        raise BaselineError(f"{shown_as}: 'files' must be sorted and unique")
-    return files
-
-
-def shown(path: Path, root: Path) -> str:
-    """A path relative to the root when it is inside it, else absolute."""
-    resolved = path.resolve()
-    if resolved.is_relative_to(root):
-        return resolved.relative_to(root).as_posix()
-    return resolved.as_posix()
-
-
 def read(path: Path) -> str:
     # Latin-1 maps every byte to one character, so any byte round-trips.
     return path.read_bytes().decode("latin-1")
+
+
+def fully_in_layout(name: str, text: str) -> bool:
+    """Whether a module is in statement layout and has its banners and headers."""
+    return format_text(text) == text and not check_text(name, text)[0]
 
 
 def check(root: Path, paths: Sequence[Path], baseline: Sequence[str], baseline_name: str,
@@ -260,33 +231,29 @@ def check(root: Path, paths: Sequence[Path], baseline: Sequence[str], baseline_n
     """Report each module out of layout and each stale baseline entry; 1 if any.
 
     ``tracked`` is the full list of tracked modules when no path was named:
-    then a listed path that is not one of them is reported too.
+    then a listed path that is not one of them is reported too. A listed module
+    is stale only once it is in layout for this check and for vba-layout.
     """
     listed = set(baseline)
     failures = 0
     for path in paths:
-        name = shown(path, root)
+        name = vba_baseline.shown(path, root)
         text = read(path)
-        in_layout = format_text(text) == text
-        if name in listed:
-            if in_layout:
-                failures += 1
-                print(f"FAIL: {name}: in layout but still listed in {baseline_name}; "
-                      "remove its entry")
-            else:
-                print(f"baselined: {name}: not in house-style layout, listed in "
-                      f"{baseline_name}")
-        elif not in_layout:
+        verdict = vba_baseline.judge(name, listed, format_text(text) == text,
+                                     fully_in_layout(name, text))
+        if verdict == vba_baseline.STALE:
+            failures += 1
+            print(f"FAIL: {name}: {vba_baseline.stale_message(baseline_name)}")
+        elif verdict == vba_baseline.BASELINED:
+            print(f"baselined: {name}: {vba_baseline.baselined_message(baseline_name)}")
+        elif verdict == vba_baseline.FAIL:
             failures += 1
             print(f"FAIL: {name}: not in house-style layout; run python tools/format_vba.py "
                   f"--write {name} and re-import it into the VBE")
     if tracked is not None:
-        known = set(tracked)
-        for name in baseline:
-            if name not in known:
-                failures += 1
-                print(f"FAIL: {name}: listed in {baseline_name} but not a tracked VBA module "
-                      "under the source directories")
+        for name in vba_baseline.unknown_entries(baseline, tracked):
+            failures += 1
+            print(f"FAIL: {name}: {vba_baseline.unknown_message(baseline_name)}")
     status = "FAIL" if failures else "PASS"
     print(f"vba-format: {status} ({len(paths)} file(s), {len(baseline)} baselined; "
           "layout only, nothing compiled)")
@@ -303,14 +270,18 @@ def write(root: Path, paths: Sequence[Path], baseline: Sequence[str],
         formatted = format_text(text)
         if formatted != text:
             path.write_bytes(formatted.encode("latin-1"))
-            written.append(shown(path, root))
+            written.append(vba_baseline.shown(path, root))
             print(f"formatted: {written[-1]}")
     print(f"vba-format: {len(written)} of {len(paths)} file(s) rewritten")
     if written:
         print("Re-import each rewritten module into the VBE before committing.")
     for name in written:
         if name in listed:
-            print(f"Remove {name} from {baseline_name}: it is now in layout.")
+            if fully_in_layout(name, read(root / name)):
+                print(f"Remove {name} from {baseline_name}: it is now in layout.")
+            else:
+                print(f"{name} stays in {baseline_name} until its banners and headers pass "
+                      "python tools/check_vba_layout.py.")
     return 0
 
 
@@ -323,8 +294,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     source = parser.add_mutually_exclusive_group()
     source.add_argument("--baseline", type=Path,
-                        help=f"baseline file, relative to the root (default: {BASELINE}, "
-                             "when it exists)")
+                        help="baseline file, relative to the root (default: "
+                             "tools/vba_layout_baseline.json, when it exists)")
     source.add_argument("--no-baseline", action="store_true",
                         help="ignore any baseline: every module must be in layout")
     parser.add_argument("paths", nargs="*", type=Path,
@@ -334,10 +305,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = args.root.resolve()
     # Relative paths are relative to the root, wherever the tool runs from.
     named = [path if path.is_absolute() else root / path for path in args.paths]
-    baseline_path = args.baseline or Path(BASELINE)
-    baseline_path = baseline_path if baseline_path.is_absolute() else root / baseline_path
-    baseline_name = shown(baseline_path, root)
     baseline: list[str] = []
+    baseline_name = vba_baseline.BASELINE
     tracked: list[str] | None = None
     try:
         if named:
@@ -345,14 +314,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             tracked = tracked_modules(root)
             paths = [root / name for name in tracked if (root / name).is_file()]
-        # The default baseline is optional; one named with --baseline must exist.
-        if not args.no_baseline and (args.baseline or baseline_path.exists()):
-            baseline = load_baseline(baseline_path, baseline_name)
+        baseline, baseline_name = vba_baseline.read_baseline(root, args.baseline,
+                                                             args.no_baseline)
     except FileNotFoundError as missing:
-        print(f"vba-format: ERROR: {shown(Path(str(missing)), root)} is not a file or folder",
+        print(f"vba-format: ERROR: {vba_baseline.shown(Path(str(missing)), root)} is not a file or folder",
               file=sys.stderr)
         return 2
-    except (BaselineError, RuntimeError) as error:
+    except (vba_baseline.BaselineError, RuntimeError) as error:
         print(f"vba-format: ERROR: {error}", file=sys.stderr)
         return 2
     if not paths and not baseline:

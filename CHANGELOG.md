@@ -65,6 +65,18 @@ Use only the categories an entry needs.
 
 ### Added
 
+- `tools/check_vba_layout.py`, run by **Repository integrity** as `vba-layout`,
+  checks the new *Layout* section of the VBA house style on every component:
+  banners of exactly 79 characters, and a header with nine fields, in order
+  and each with text, on the component and on every procedure. VBA written
+  from now on follows that layout, and every repository created from the
+  template inherits the guide and the check. Static check only: no Excel run
+  (#591). It reads the same optional baseline as `format_vba.py --check`,
+  `tools/vba_layout_baseline.json`, so that a project importing existing modules
+  brings them into layout one at a time: a listed module may stay out of
+  layout, an unlisted one fails, and a listed module that both tools find in
+  layout fails until its entry is removed. Both tools read the modules under
+  the source directories of the house style (#593).
 - The **Closing keywords** workflow runs `tools/check_closing_keywords.py` on
   each pull request. Into a release branch, it fails on any closing keyword,
   such as `Resolves #N`, in a commit, the title or the body. Into the default
@@ -229,6 +241,13 @@ Use only the categories an entry needs.
 
 ### Changed
 
+- The VBA house style separates procedures with one blank line instead of
+  two, and gives each component and procedure the same nine-field header
+  under banners of 79 characters; `python tools/format_vba.py` applies the
+  one blank line. The modules of `tests/modules/` are reformatted to the new
+  layout with their code unchanged. Their blob ids change, so the Excel
+  evidence of the harness and the example suite needs a new run, unless
+  `--carried-to` carries it over the comment-only change (#591).
 - **Repository integrity** runs on every pull request and on pushes to `main`
   and `release/**` only, no longer a second time on each push to a task
   branch. The `codeql-default-branch` check also fails while the workflow's
