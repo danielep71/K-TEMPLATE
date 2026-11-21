@@ -451,7 +451,7 @@ Private Sub CaseMonotonicity()
 '------------------------------------------------------------------------------
 ' PURPOSE
 '   Raising one input by INCREMENT never lowers the total; a raised total
-'   corrupted as if the increment had been subtracted is rejected.
+'   lowered by twice INCREMENT, below the original total, is rejected.
 '   2 assertions.
 '
 ' WHY THIS EXISTS
