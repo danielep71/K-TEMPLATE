@@ -9,7 +9,8 @@ nine fields, in this order:
     PURPOSE, WHY THIS EXISTS, INPUTS, RETURNS, BEHAVIOR, ERROR POLICY,
     DEPENDENCIES, NOTES, UPDATED
 
-This check reads every tracked .bas, .cls and .frm file and reports:
+This check reads every tracked .bas, .cls and .frm file under the source
+directories of tools/format_vba.py and reports:
 
 - a banner line that is not exactly 79 characters long;
 - a component without its header: the first comment block after the lines
@@ -24,176 +25,84 @@ A field label is a comment line of one space and upper-case words, such as
 "' ERROR POLICY"; its text follows on lines indented three spaces. A
 procedure's header is the comment block that follows its declaration, after
 the Attribute lines the VBE writes below it and at most one blank line. A
-form's VBE header is exempt. The check reads
-comments only: it never compiles or runs VBA.
+form's VBE header is exempt. The check reads comments only: it never
+compiles or runs VBA.
+
+It reads the baseline that tools/format_vba.py reads (tools/vba_baseline.py):
+a project that imports existing modules lists, in
+tools/vba_layout_baseline.json, the modules not yet fully in layout. A listed module is reported as baselined and does not fail;
+a listed module that is in layout in both checks fails until its entry is
+removed; a listed path that is not a tracked module fails. --baseline FILE
+reads another file and --no-baseline ignores it. Exit status: 0 when
+everything passes, 1 for a layout finding, 2 for an error: a missing or
+malformed baseline, or an unreadable Git index.
 """
 
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from vba_lexer import Finding, logical_units, report, tracked_components
+import format_vba
+import vba_baseline
+from vba_header_layout import check_text
+from vba_lexer import Finding, report
 
 ROOT = Path(__file__).resolve().parents[1]
-FIELDS = ("PURPOSE", "WHY THIS EXISTS", "INPUTS", "RETURNS", "BEHAVIOR", "ERROR POLICY",
-          "DEPENDENCIES", "NOTES", "UPDATED")
-BANNER_WIDTH = 79
-# A comment line made of one repeated dash or equals sign, ten or more times.
-BANNER = re.compile(r"^'([-=])\1{9,}\s*$")
-LABEL = re.compile(r"^' ([A-Z][A-Z ]*[A-Z])\s*$")
-COMPONENT = re.compile(r"^' (MODULE|CLASS): (\S+)\s*$")
-FIELD_TEXT = re.compile(r"^'   \S")
-DATE = re.compile(r"^'   \d{4}-\d{2}-\d{2}\s*$")
-VBE_LINE = re.compile(r"^(?:VERSION\s|Object\s*=|Attribute\s)", re.I)
-VB_NAME = re.compile(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"', re.I | re.M)
-PROCEDURE = re.compile(r"^(?:(?:Public|Private|Friend)\s+)?(?:Static\s+)?"
-                       r"(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)", re.I)
-ATTRIBUTE = re.compile(r"^Attribute\s+\w+\.VB_", re.I)
 
 
-def vbe_header_length(lines: Sequence[str]) -> int:
-    """The number of leading lines the VBE writes: VERSION, BEGIN ... END, Attribute."""
-    depth = 0
-    for index, line in enumerate(lines):
-        word = line.strip().split(" ", 1)[0].upper()
-        if word == "BEGIN":
-            depth += 1
-        elif word == "END" and depth:
-            depth -= 1
-        elif not depth and not VBE_LINE.match(line):
-            return index
-    return len(lines)
-
-
-def comment_block(lines: Sequence[str], start: int) -> list[tuple[int, str]]:
-    """The consecutive comment lines from ``start``, with their 0-based indexes."""
-    block = []
-    index = start
-    while index < len(lines) and lines[index].startswith("'"):
-        block.append((index, lines[index].rstrip()))
-        index += 1
-    return block
-
-
-def header_findings(path: str, block: Sequence[tuple[int, str]], what: str,
-                    first_line: int) -> list[Finding]:
-    """The findings on the fields of one header."""
+def check(root: Path, baseline: Sequence[str],
+          baseline_name: str) -> tuple[list[Finding], list[str], int, int]:
+    """The findings, the baselined modules, the modules read and their procedures."""
     findings: list[Finding] = []
-    labels: list[tuple[int, str]] = []
-    for position, (index, line) in enumerate(block):
-        match = LABEL.match(line)
-        if not match:
-            continue
-        label = match.group(1)
-        if label not in FIELDS:
-            findings.append(Finding(path, index + 1, f"{what}: unknown header field {label}"))
-            continue
-        labels.append((position, label))
-    found = [label for _, label in labels]
-    if found != list(FIELDS):
-        missing = [field for field in FIELDS if field not in found]
-        detail = f"missing {', '.join(missing)}" if missing else \
-            f"fields out of order or repeated: {', '.join(found)}"
-        findings.append(Finding(path, first_line, f"{what}: header {detail}"))
-        return findings
-    ends = [position for position, _ in labels[1:]] + [len(block)]
-    for (position, label), end in zip(labels, ends, strict=True):
-        text = [line for _, line in block[position + 1:end] if not BANNER.match(line)]
-        index = block[position][0] + 1
-        if not any(FIELD_TEXT.match(line) for line in text):
-            findings.append(Finding(path, index, f"{what}: {label} has no text; "
-                                                 "write None"))
-        elif label == "UPDATED" and not (len([t for t in text if FIELD_TEXT.match(t)]) == 1
-                                         and DATE.match(next(t for t in text
-                                                             if FIELD_TEXT.match(t)))):
-            findings.append(Finding(path, index, f"{what}: UPDATED is not one "
-                                                 "YYYY-MM-DD date"))
-    return findings
-
-
-def check_text(path: str, text: str) -> tuple[list[Finding], int]:
-    """The findings in one component's text and the number of procedures read."""
-    lines = text.replace("\r\n", "\n").split("\n")
-    findings: list[Finding] = []
-    start = vbe_header_length(lines)
-    for index in range(start, len(lines)):
-        line = lines[index].rstrip()
-        if BANNER.match(line) and len(line) != BANNER_WIDTH:
-            findings.append(Finding(path, index + 1, f"banner is {len(line)} characters, "
-                                                     f"not {BANNER_WIDTH}"))
-    # The component header: after blank lines and Option statements only.
-    index = start
-    while index < len(lines) and (not lines[index].strip()
-                                  or lines[index].lstrip().lower().startswith("option ")):
-        index += 1
-    block = comment_block(lines, index)
-    named = [COMPONENT.match(line) for _, line in block]
-    kinds = ("MODULE", "CLASS") if path.lower().endswith(".cls") else ("MODULE",)
-    name_match = VB_NAME.search(text)
-    name = name_match.group(1) if name_match else Path(path).stem
-    found = next((match for match in named if match), None)
-    if not block or found is None:
-        findings.append(Finding(path, index + 1, "component header missing: after the "
-                                                 "Option statements, expected a comment "
-                                                 f"block naming ' {kinds[0]}: {name}"))
-    else:
-        if found.group(1) not in kinds or found.group(2) != name:
-            findings.append(Finding(path, index + 1, f"component header names "
-                                                     f"{found.group(1)}: {found.group(2)}, "
-                                                     f"expected {kinds[0]}: {name}"))
-        findings += header_findings(path, block, "component", index + 1)
-    # Each procedure's header. A declaration is found among the logical lines,
-    # so a line continued with " _" is one declaration and a comment continued
-    # with " _" never holds one.
+    baselined: list[str] = []
+    listed = set(baseline)
+    names = format_vba.tracked_modules(root)
     procedures = 0
-    resume = start
-    for first, last, kind, code in logical_units(lines, blank_strings=True):
-        if first - 1 < resume or kind != "code":
+    for name in names:
+        if not (root / name).is_file():
             continue
-        match = PROCEDURE.match(code.strip())
-        if not match:
-            continue
-        procedures += 1
-        # The VBE writes a procedure's Attribute lines right below its signature.
-        following = last
-        while following < len(lines) and ATTRIBUTE.match(lines[following]):
-            following += 1
-        if following < len(lines) and not lines[following].strip():
-            following += 1
-        block = comment_block(lines, following)
-        what = f"procedure {match.group(1)}"
-        if not block:
-            findings.append(Finding(path, first, f"{what}: header missing below its "
-                                                 "declaration"))
-        else:
-            findings += header_findings(path, block, what, first)
-        resume = following + len(block)
-    return findings, procedures
-
-
-def check(root: Path) -> tuple[list[Finding], int, int]:
-    findings: list[Finding] = []
-    components = tracked_components(root)
-    procedures = 0
-    for path in components:
-        text = (root / path).read_bytes().decode("ascii", errors="replace")
-        found, count = check_text(path, text)
-        findings += found
+        text = format_vba.read(root / name)
+        found, count = check_text(name, text)
         procedures += count
-    return findings, len(components), procedures
+        verdict = vba_baseline.judge(name, listed, not found,
+                                     not found and format_vba.format_text(text) == text)
+        if verdict == vba_baseline.FAIL:
+            findings += found
+        elif verdict == vba_baseline.STALE:
+            findings.append(Finding(name, None, vba_baseline.stale_message(baseline_name)))
+        elif verdict == vba_baseline.BASELINED:
+            baselined.append(name)
+    for name in vba_baseline.unknown_entries(baseline, names):
+        findings.append(Finding(name, None, vba_baseline.unknown_message(baseline_name)))
+    return findings, baselined, len(names), procedures
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--root", type=Path, default=ROOT)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--baseline", type=Path,
+                        help="baseline file, relative to the root (default: "
+                             "tools/vba_layout_baseline.json, when it exists)")
+    source.add_argument("--no-baseline", action="store_true",
+                        help="ignore any baseline: every module must be in layout")
     args = parser.parse_args(argv)
-    findings, components, procedures = check(args.root.resolve())
+    root = args.root.resolve()
+    try:
+        baseline, baseline_name = vba_baseline.read_baseline(root, args.baseline,
+                                                             args.no_baseline)
+        findings, baselined, components, procedures = check(root, baseline, baseline_name)
+    except (vba_baseline.BaselineError, RuntimeError) as error:
+        print(f"vba-layout: ERROR: {error}", file=sys.stderr)
+        return 2
+    for name in baselined:
+        print(f"baselined: {name}: {vba_baseline.baselined_message(baseline_name)}")
     return report("vba-layout", findings,
-                  f"{components} VBA component(s), {procedures} procedure(s)")
+                  f"{components} VBA component(s), {len(baselined)} baselined, "
+                  f"{procedures} procedure(s)")
 
 
 if __name__ == "__main__":

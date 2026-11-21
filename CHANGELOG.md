@@ -71,7 +71,12 @@ Use only the categories an entry needs.
   and each with text, on the component and on every procedure. VBA written
   from now on follows that layout, and every repository created from the
   template inherits the guide and the check. Static check only: no Excel run
-  (#591).
+  (#591). It reads the same optional baseline as `format_vba.py --check`,
+  `tools/vba_layout_baseline.json`, so that a project importing existing modules
+  brings them into layout one at a time: a listed module may stay out of
+  layout, an unlisted one fails, and a listed module that both tools find in
+  layout fails until its entry is removed. Both tools read the modules under
+  the source directories of the house style (#593).
 - The **Closing keywords** workflow runs `tools/check_closing_keywords.py` on
   each pull request. Into a release branch, it fails on any closing keyword,
   such as `Resolves #N`, in a commit, the title or the body. Into the default
