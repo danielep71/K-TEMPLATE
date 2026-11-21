@@ -198,6 +198,16 @@
       "state": "green"
     },
     {
+      "check": "vba-layout",
+      "checker": "python tools/check_vba_layout.py",
+      "proofs": [
+        "tests.test_check_vba_layout.LayoutTest.test_invalid_fixtures_fail",
+        "tests.test_check_vba_layout.LayoutTest.test_main_exits_0_when_valid_and_1_when_invalid"
+      ],
+      "negative_claim": "a banner that is not 79 characters, a missing component header, a procedure header with a missing, repeated, unknown or out-of-order field, a field with no text and an UPDATED field that is not a date fail the check",
+      "state": "green"
+    },
+    {
       "check": "vba-identifiers",
       "checker": "python tools/check_vba_identifiers.py",
       "proofs": [

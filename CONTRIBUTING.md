@@ -181,6 +181,7 @@ It runs these checks, in this order. `OWNER/REPOSITORY` is the repository that
 | `secret-files` | Built in: No tracked file is named as a secret or private key file. |
 | `vba-format` | `python tools/format_vba.py --check` |
 | `vba-source` | `python tools/check_vba_source.py` |
+| `vba-layout` | `python tools/check_vba_layout.py` |
 | `vba-conditionals` | `python tools/check_vba_conditionals.py` |
 | `vba-jumps` | `python tools/check_vba_jumps.py` |
 | `vba-public-api` | `python tools/check_vba_public_api.py` |

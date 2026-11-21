@@ -119,7 +119,7 @@ class RuleTest(unittest.TestCase):
             with self.subTest(end=end):
                 self.assertFormats([f"{end} ' explanation _", "    Debug.Print 1",
                                     "Private Sub Two()", "End Sub"],
-                                   [f"{end} ' explanation _", "    Debug.Print 1", "", "",
+                                   [f"{end} ' explanation _", "    Debug.Print 1", "",
                                     "Private Sub Two()", "End Sub"])
         # Comment text that looks like a label or an End statement stays put,
         # after a space or a tab before the underscore.
@@ -128,9 +128,9 @@ class RuleTest(unittest.TestCase):
                 with self.subTest(continued=continued, text=text):
                     lines = ["Private Sub Run()", continued, text, "End Sub"]
                     self.assertFormats(lines, lines)
-        # A blank line ends the continuation; the two blank lines then follow it.
+        # A blank line ends the continuation; it is the one blank line after End.
         self.assertFormats(["End Sub ' a _", "    more", "", "Private Sub Two()", "End Sub"],
-                           ["End Sub ' a _", "    more", "", "", "Private Sub Two()", "End Sub"])
+                           ["End Sub ' a _", "    more", "", "Private Sub Two()", "End Sub"])
 
     def test_statement_keywords_are_not_labels(self) -> None:
         # A keyword and a colon separator, such as Else: or Loop:, keeps its
@@ -150,7 +150,7 @@ class RuleTest(unittest.TestCase):
     PROBE_ROWS = [
         ("a continued comment after End",
          ["End Sub ' explanation _", "    Debug.Print 1", "Private Sub Two()"],
-         ["End Sub ' explanation _", "    Debug.Print 1", "", "", "Private Sub Two()"]),
+         ["End Sub ' explanation _", "    Debug.Print 1", "", "Private Sub Two()"]),
         ("comment continuation text that looks like a label",
          ["    ' note _", "        Done:"], ["    ' note _", "        Done:"]),
         ("a tab before the underscore",
@@ -175,29 +175,29 @@ class RuleTest(unittest.TestCase):
         unchanged = [
             ["Private Sub One()", "    X = 1 _", "", "    Y = 2", "End Sub"],
             ["Private Sub One()", "    ' a _", "", "End Sub"],
-            ["Private Sub One()", "End Sub ' a _", "", "", "", "Private Sub Two()", "End Sub"],
+            ["Private Sub One()", "End Sub ' a _", "", "", "Private Sub Two()", "End Sub"],
             ["Private Sub One()", "    X = 1 _", ""],
         ]
         for lines in unchanged:
             with self.subTest(lines=lines):
                 self.assertFormats(lines, lines)
-        self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "Private Sub Two()",
+        self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "", "Private Sub Two()",
                             "End Sub"],
-                           ["Private Sub One()", "End Sub ' a _", "", "", "",
-                            "Private Sub Two()", "End Sub"])
+                           ["Private Sub One()", "End Sub ' a _", "", "", "Private Sub Two()",
+                            "End Sub"])
         self.assertFormats(["Private Sub One()", "End Sub ' a _", "", "", ""],
                            ["Private Sub One()", "End Sub ' a _", ""])
         self.assertFormats(["Private Const A As Long = 1 _", "    + 1", "", "  ", ""],
                            ["Private Const A As Long = 1 _", "    + 1"])
 
-    def test_two_blank_lines_between_procedures(self) -> None:
+    def test_one_blank_line_between_procedures(self) -> None:
         self.assertFormats(["Private Sub One()", "End Sub", "'Header of Two",
                             "Private Sub Two()", "End Sub"],
-                           ["Private Sub One()", "End Sub", "", "", "'Header of Two",
+                           ["Private Sub One()", "End Sub", "", "'Header of Two",
                             "Private Sub Two()", "End Sub"])
         self.assertFormats(["Private Sub One()", "End Sub", "", "", "", "",
                             "Private Sub Two()", "End Sub"],
-                           ["Private Sub One()", "End Sub", "", "",
+                           ["Private Sub One()", "End Sub", "",
                             "Private Sub Two()", "End Sub"])
 
     def test_other_lines_are_not_moved(self) -> None:

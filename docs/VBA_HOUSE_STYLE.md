@@ -95,12 +95,12 @@ any other export.
 
 ## Contracts, units and errors
 
-Each procedure's header states, where they apply: `PURPOSE`, `INPUTS`,
-`RETURNS`, `ERROR POLICY`, `DEPENDENCIES`, `STATE OWNERSHIP` and `REFERENCE`,
-with an `UPDATED` date. `INPUTS` gives each argument's meaning, type, unit,
-currency or date basis, valid range and ownership. `REFERENCE` cites the
-[calculation contract](methodology/CALCULATION_CONTRACTS.md) and the source it
-implements. Comments explain invariants and reasons, not obvious assignments.
+Each component and each procedure has a [header](#layout) with the same nine
+fields. `INPUTS` gives each argument's meaning, type, unit, currency or date
+basis, valid range and ownership. `DEPENDENCIES` also cites the
+[calculation contract](methodology/CALCULATION_CONTRACTS.md) and the source the
+procedure implements, and `BEHAVIOR` or `NOTES` says which state it owns.
+Comments explain invariants and reasons, not obvious assignments.
 
 - Use `Double` for amounts and proportions, `Long` for counts, `Boolean` for
   flags, `String` for identifiers and currency codes, and `Date` for dates on
@@ -188,12 +188,11 @@ each failed restoration, and a primary and cleanup failure together.
   that the VBE writes.
 - Indent with four spaces; no tabs and no trailing white space. Keep
   procedure declarations, `End` statements and labels at their outer level.
-  Separate procedures with two blank lines.
+  Separate procedures with one blank line. The [layout](#layout) below
+  gives the order of a component's parts.
 - A form's header, which the VBE writes, is exempt: it keeps its bytes, such
   as the blank at the end of its `Begin` line, because the next export writes
   them again. **Repository integrity** checks the code after it.
-- Use `MODULE SETTINGS`, `DECLARE`, `INITIALIZE` and `FAIL` sections where they
-  make a routine easier to follow, not as empty ceremony.
 - A generated component names its generator and is regenerated, never edited
   by hand.
 
@@ -206,7 +205,7 @@ name:
 - no trailing white space, and four spaces for each indentation tab;
 - procedure declarations, their `End` statements and labels at the outer
   level;
-- two blank lines after each procedure's `End` statement.
+- one blank line after each procedure's `End` statement.
 
 It never changes a string literal, and it keeps the `VERSION`, `BEGIN`, `END`,
 `Object` and `Attribute` lines that the VBE writes. A statement keyword and a
@@ -214,7 +213,7 @@ colon, such as `Else:` or `Loop:`, is not a label and keeps its indentation.
 A line that ends with a space or tab and `_` continues on the next one, in a
 comment as in code. No blank line is added to or removed from one logical
 line: each line a continuation carries over stays as it is, blank or not, the
-blank lines after an `End` statement follow the end of what it continues, and
+blank line after an `End` statement follows the end of what it continues, and
 a blank line that ends a continuation at the end of the file stays. It
 neither compiles nor checks the other rules of this guide.
 
@@ -253,6 +252,92 @@ ignores it. A missing `--baseline` file, a malformed one, or an entry that is
 absolute, uses `\` or `..`, or breaks the order is an error with exit status
 2, distinct from the exit status 1 of a layout finding.
 
+## Layout
+
+Write every component, new or imported, in this layout. `python
+tools/format_vba.py` applies its whitespace rules, and
+[`tools/check_vba_layout.py`](#static-checks) checks its banners and headers.
+The `.frm` designer block that the VBE writes, and every `.frx`, stay as the
+VBE wrote them.
+
+**Top of the file.** The `Attribute` lines, one blank line, `Option Explicit`
+(with `Option Private Module` and `Option Compare` where used), one blank
+line, then the component header.
+
+**Banners.** A banner is an apostrophe and 78 dashes, 79 characters in all; a
+test module may use equals signs instead of dashes in its component header.
+A *section banner* has an upper-case title, left-aligned after one space. A
+*procedure title banner* has an upper-case verb phrase centred in the 78
+columns, not the procedure's identifier. A *group banner* separates families
+of procedures: a lone `'`, a banner, an empty comment line, a centred
+upper-case title, an empty comment line, a banner and a lone `'`.
+
+**Headers.** A component starts with a lone `'`, a banner, `' MODULE: <name>`
+or `' CLASS: <name>` (a UserForm or a document module also uses `MODULE:`),
+the nine fields and a closing banner. A procedure's header sits below its
+signature, after one blank line, or directly below a signature that spans
+several lines: a lone `'`, its title banner and the nine fields. Each field is
+its upper-case label after one space, with its text indented three spaces and a
+lone `'` between fields. Omit none; write `None` instead.
+
+| Field | Content |
+| --- | --- |
+| `PURPOSE` | What it does, in one or two sentences. |
+| `WHY THIS EXISTS` | The problem it solves, or why it has this shape. |
+| `INPUTS` | `None`, or each parameter on its own line and its description beneath it. |
+| `RETURNS` | `Nothing` for a `Sub`; else the value and its edge cases. |
+| `BEHAVIOR` | What happens, in order; bullets are `-` items. |
+| `ERROR POLICY` | What it raises, what it suppresses and what is best effort. |
+| `DEPENDENCIES` | Components, object models and members it relies on; the calculation contract and source it implements. |
+| `NOTES` | Decisions, caveats and call examples, or `None`. |
+| `UPDATED` | The date of the last change to its behavior, as `YYYY-MM-DD`. |
+
+Keep `UPDATED` when you only reformat; set it when behavior changes.
+
+**Declarations.** Below the header, under section banners in this order and
+leaving out those that are empty: `PRIVATE TYPES`, `WINDOWS API DECLARATIONS`,
+`PRIVATE CONSTANTS`, `PUBLIC CONSTANTS`, `PUBLIC ENUMS`, `PUBLIC TYPES`,
+`PUBLIC STATE`, `PRIVATE STATE`; a class has `PRIVATE CONSTANTS` and `PRIVATE
+VARIABLES`. A component may add sections of its own with a clear name. Indent
+what stands under a banner by four spaces, align the `As` keywords in one
+column and the trailing comments in another within a block, and give each
+declaration a trailing comment. Separate a section from the first group
+banner by two blank lines.
+
+**Procedures.** Every parameter has an explicit `ByVal` or `ByRef` and an
+explicit type, as does every function, and every procedure an explicit
+visibility. Separate procedures with one blank line. A procedure body is a
+sequence of section banners:
+
+- `DECLARE`: `Const PROC_NAME As String = "<Component>.<Procedure>"`, then
+  every `Dim`;
+- `INITIALIZE`: `On Error GoTo ErrorHandler` and the initial state;
+- one section per logical step, titled with a short upper-case verb phrase,
+  such as `VALIDATE INPUTS`;
+- `EXIT PROCEDURE`: the clean exit, after any cleanup;
+- `ERROR HANDLER`: the label at the outer level, then capture, cleanup and
+  re-raise as [Operation and cleanup outcomes](#operation-and-cleanup-outcomes)
+  describes.
+
+A trivial procedure keeps only the sections it needs. Under a section, put a
+one-line intent comment at four spaces, with no space after the apostrophe,
+and its statements at eight; nested blocks add four spaces each. The comment
+says why or what, in sentence case and without a final period.
+
+**Statements.** Qualify library calls, `VBA.Len`, `VBA.Trim$` and the like,
+preferring the `$` string variants, and test for empty with `VBA.Len(x) = 0`
+or `VBA.LenB(x) = 0`. Give `InStr` and `StrComp` an explicit compare mode. Name
+the counter in `Next`. Write one statement per line, with no `:` separator; a
+single-line `If ... Then` is allowed for a guard or an `Exit`. Break a long
+line after an operator or comma and indent its continuation four more spaces;
+keep an `Err.Raise` number and source on its first line. Keep lines to about
+100 characters and never past 120 outside a string literal. Release an object
+variable with `Set x = Nothing` on the exit path.
+
+The layout is not retrofitted by [`format_vba.py`](#source-representation): a
+module that predates it needs its headers written by hand, and its code must
+stay the same, which `tools/vba_code_identity.py` compares without comments.
+
 ## Static checks
 
 **Repository integrity** runs the static checks below on every tracked `.bas`,
@@ -264,6 +349,7 @@ integrity** reports its findings as a warning, not a failure.
 | Check | Enforces |
 | --- | --- |
 | `tools/check_vba_source.py` | Each component in its home with its role's prefix and a `VB_Name` equal to its file name, names unique ignoring case and at most 31 characters; ASCII only; `Option Explicit`, and `Option Private Module` in core and test modules; no `Option Base`; no tab or trailing white space, except in a form's VBE header; closed string literals; each form beside its `.frx`; LF storage with CRLF checkout; no workbook committed except `src/workbook/Template.xlsx` and the regulatory source copies under `docs/methodology/sources/` |
+| `tools/check_vba_layout.py` | The [layout](#layout) of each component: every banner is 79 characters; the component and each procedure carry a header whose nine fields are all present, once each and in order, each with text, and whose `UPDATED` is one `YYYY-MM-DD` date. It reads comments only and does not judge their content |
 | `tools/check_vba_conditionals.py` | Well-formed `#If`, `#ElseIf`, `#Else` and `#End If` blocks, evaluated in each compilation environment (VBA6 Win32, VBA7 Win32 and VBA7 Win64); every `Declare` reachable under VBA7 is `PtrSafe`. A module-level `#Const Name = <value>` defines `Name` from its line on, in each environment that reaches the line, so a `#Const` inside an `#If` branch exists only where that branch is active; its value is `True`, `False`, `-1`, `0` or an expression over the compiler constants `VBA6`, `VBA7`, `Win32` and `Win64` and the module's earlier `#Const` names, with `Not`, `And`, `Or`, `=`, `<>` and parentheses. A condition is not evaluated in an environment that cannot enter its branch. A finding, so that the check fails closed: any other symbol, such as a project's conditional-compilation argument or a `#Const` used before or outside its definition; a `#Const` without a name or `=`, with a value that is not Boolean, such as `2`, that redefines a compiler constant, or defined twice in one environment |
 | `tools/check_vba_jumps.py` | Every `GoTo`, `GoSub`, `Resume` and `On Error GoTo` target, and the line number in `If x Then 100`, is a label of the same procedure, in each environment; no label is defined twice in a procedure; no `Err.Raise` or `Error` statement follows a `Resume <label>` while one of the procedure's own `On Error GoTo <label>` handlers is enabled |
 | `tools/check_vba_public_api.py` | Explicit visibility on every declaration; the public declarations of `src/modules/` match the `[supported]` tier of [PUBLIC_API.txt](PUBLIC_API.txt), and every other public declaration under `src/` its `[project-public]` tier, one to one, with normalized signatures; no declaration listed in the wrong tier; no public variable or public `Declare` in a standard module; no public name in two standard modules, which Excel reports as an ambiguous name |
