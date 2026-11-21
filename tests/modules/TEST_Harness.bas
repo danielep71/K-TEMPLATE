@@ -2026,7 +2026,7 @@ Private Sub WriteText( _
 '   Write text to a file exactly as given, without a line ending added
 '
 ' WHY THIS EXISTS
-'   The results file has LF line endings, which Print would not write
+'   The results file has LF line endings; a plain Print would add CR LF
 '
 ' INPUTS
 '   Path
@@ -2042,7 +2042,8 @@ Private Sub WriteText( _
 '   Opens the file for output, prints the text and closes the file
 '
 ' ERROR POLICY
-'   A file error is re-raised after the file is closed
+'   A write error is re-raised after the file is closed; an Open error is
+'   raised as it is, with no file open
 '
 ' DEPENDENCIES
 '   None
