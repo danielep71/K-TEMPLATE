@@ -24,8 +24,10 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "tests"))
 
 import format_vba  # noqa: E402
+import vba_baseline  # noqa: E402
 import vba_lexer  # noqa: E402
 from gitfixture import git, init  # noqa: E402
+from test_check_vba_layout import module as headed_module  # noqa: E402
 
 HEAD = ['Attribute VB_Name = "CORE_Probe"', "Option Explicit", "Option Private Module", ""]
 
@@ -287,8 +289,8 @@ def deform(text: str) -> str:
 
 def baselined(root: Path) -> set[str]:
     """The modules the root's default layout baseline lists; none without the file."""
-    path = root / format_vba.BASELINE
-    return set(format_vba.load_baseline(path, format_vba.BASELINE)) if path.exists() else set()
+    path = root / vba_baseline.BASELINE
+    return set(vba_baseline.load_baseline(path, vba_baseline.BASELINE)) if path.exists() else set()
 
 
 class DeformTest(unittest.TestCase):
@@ -382,7 +384,7 @@ class MainTest(unittest.TestCase):
             git(self.root, "add", "--all")
 
     def baseline(self, files: object, **fields: object) -> None:
-        path = self.root / format_vba.BASELINE
+        path = self.root / vba_baseline.BASELINE
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"schema_version": 1, "files": files, **fields}),
                         encoding="utf-8")
@@ -463,8 +465,25 @@ class MainTest(unittest.TestCase):
                       "tools/format_vba.py --write src/B.bas", printed)
         self.assertNotIn("FAIL: src/A.bas", printed)
 
-    def test_listed_module_in_layout_fails_until_removed(self) -> None:
+    def test_listed_module_without_headers_stays_listed_after_write(self) -> None:
+        # In statement layout but without banners and headers: the entry stays,
+        # because tools/check_vba_layout.py still needs it.
         self.track({"src/A.bas": self.BAD, "src/B.bas": self.GOOD})
+        self.baseline(["src/A.bas"])
+        code, printed, _ = self.run_main("--write", "src/A.bas")
+        self.assertEqual(code, 0)
+        self.assertIn("src/A.bas stays in tools/vba_layout_baseline.json until its banners "
+                      "and headers pass python tools/check_vba_layout.py", printed)
+        self.assertNotIn("Remove src/A.bas", printed)
+        code, printed, _ = self.run_main("--check")
+        self.assertEqual(code, 0, printed)
+        self.assertIn("baselined: src/A.bas", printed)
+
+    def test_listed_module_in_layout_fails_until_removed(self) -> None:
+        bad = headed_module().replace("\n", "\r\n").replace("Public Sub Run()",
+                                                             "  Public Sub Run()")
+        good = headed_module().replace("\n", "\r\n")
+        self.track({"src/A.bas": bad, "src/B.bas": good})
         self.baseline(["src/A.bas"])
         code, printed, _ = self.run_main("--write", "src/A.bas")
         self.assertEqual(code, 0)
@@ -477,7 +496,7 @@ class MainTest(unittest.TestCase):
                       "tools/vba_layout_baseline.json; remove its entry", printed)
         self.baseline([])
         self.assertEqual(self.run_main("--check")[0], 0)
-        (self.root / format_vba.BASELINE).unlink()
+        (self.root / vba_baseline.BASELINE).unlink()
         self.assertEqual(self.run_main("--check")[0], 0)
 
     def test_listed_path_that_is_not_a_tracked_module_fails(self) -> None:
@@ -499,7 +518,7 @@ class MainTest(unittest.TestCase):
         self.assertIn("FAIL: src/A.bas: not in house-style layout", printed)
         self.assertIn("0 baselined", printed)
         # --no-baseline ignores a baseline file, even a malformed one.
-        (self.root / format_vba.BASELINE).write_text("{", encoding="utf-8")
+        (self.root / vba_baseline.BASELINE).write_text("{", encoding="utf-8")
         self.assertEqual(self.run_main("--check", "--no-baseline")[0], 1)
 
     def test_explicit_baseline(self) -> None:
@@ -533,7 +552,7 @@ class MainTest(unittest.TestCase):
             "dot": json.dumps({**valid, "files": ["./src/A.bas"]}),
             "empty": json.dumps({**valid, "files": [""]}),
         }
-        path = self.root / format_vba.BASELINE
+        path = self.root / vba_baseline.BASELINE
         path.parent.mkdir(parents=True, exist_ok=True)
         for label, content in cases.items():
             for mode in ("--check", "--write"):
