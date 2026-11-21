@@ -64,6 +64,22 @@ class LayoutTest(unittest.TestCase):
         broken = text.replace(header("RUN"), "' just a comment")
         self.assertTrue(any("procedure Run" in line for line in findings(broken)))
 
+    def test_procedure_attribute_lines_come_before_the_header(self) -> None:
+        text = module().replace("Public Sub Run()\n", "Public Sub Run()\n"
+                                'Attribute Run.VB_Description = "Runs"\n'
+                                "Attribute Run.VB_UserMemId = 0\n")
+        self.assertEqual(findings(text), [])
+        broken = text.replace(header("RUN"), "' just a comment")
+        self.assertTrue(any("procedure Run" in line for line in findings(broken)))
+
+    def test_a_declaration_in_a_continued_comment_is_not_a_procedure(self) -> None:
+        text = module().replace("    Dim Count As Long\n",
+                                "    ' Example declaration _\nPublic Sub Example()\n"
+                                "    Dim Count As Long\n")
+        self.assertEqual(findings(text), [])
+        found, procedures = check_vba_layout.check_text(PATH, text)
+        self.assertEqual(procedures, 1)
+
     def test_equals_banner_is_allowed_for_a_component_header(self) -> None:
         equals = "'" + "=" * 78
         self.assertEqual(findings(module(header("MODULE: TEST_Fixture", banner=equals))), [])

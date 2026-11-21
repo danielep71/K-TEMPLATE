@@ -23,7 +23,8 @@ This check reads every tracked .bas, .cls and .frm file and reports:
 A field label is a comment line of one space and upper-case words, such as
 "' ERROR POLICY"; its text follows on lines indented three spaces. A
 procedure's header is the comment block that follows its declaration, after
-at most one blank line. A form's VBE header is exempt. The check reads
+the Attribute lines the VBE writes below it and at most one blank line. A
+form's VBE header is exempt. The check reads
 comments only: it never compiles or runs VBA.
 """
 
@@ -35,7 +36,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from vba_lexer import Finding, report, strip_code, tracked_components
+from vba_lexer import Finding, logical_units, report, tracked_components
 
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS = ("PURPOSE", "WHY THIS EXISTS", "INPUTS", "RETURNS", "BEHAVIOR", "ERROR POLICY",
@@ -51,7 +52,7 @@ VBE_LINE = re.compile(r"^(?:VERSION\s|Object\s*=|Attribute\s)", re.I)
 VB_NAME = re.compile(r'^Attribute\s+VB_Name\s*=\s*"([^"]+)"', re.I | re.M)
 PROCEDURE = re.compile(r"^(?:(?:Public|Private|Friend)\s+)?(?:Static\s+)?"
                        r"(?:Sub|Function|Property\s+(?:Get|Let|Set))\s+([A-Za-z_]\w*)", re.I)
-CONTINUED = re.compile(r"\s_\s*$")
+ATTRIBUTE = re.compile(r"^Attribute\s+\w+\.VB_", re.I)
 
 
 def vbe_header_length(lines: Sequence[str]) -> int:
@@ -145,30 +146,32 @@ def check_text(path: str, text: str) -> tuple[list[Finding], int]:
                                                      f"{found.group(1)}: {found.group(2)}, "
                                                      f"expected {kinds[0]}: {name}"))
         findings += header_findings(path, block, "component", index + 1)
-    # Each procedure's header.
+    # Each procedure's header. A declaration is found among the logical lines,
+    # so a line continued with " _" is one declaration and a comment continued
+    # with " _" never holds one.
     procedures = 0
-    index = start
-    while index < len(lines):
-        code = strip_code(lines[index]).strip()
-        match = PROCEDURE.match(code)
+    resume = start
+    for first, last, kind, code in logical_units(lines, blank_strings=True):
+        if first - 1 < resume or kind != "code":
+            continue
+        match = PROCEDURE.match(code.strip())
         if not match:
-            index += 1
             continue
         procedures += 1
-        signature = index
-        while CONTINUED.search(lines[index]) and index + 1 < len(lines):
-            index += 1
-        following = index + 1
+        # The VBE writes a procedure's Attribute lines right below its signature.
+        following = last
+        while following < len(lines) and ATTRIBUTE.match(lines[following]):
+            following += 1
         if following < len(lines) and not lines[following].strip():
             following += 1
         block = comment_block(lines, following)
         what = f"procedure {match.group(1)}"
         if not block:
-            findings.append(Finding(path, signature + 1, f"{what}: header missing below its "
-                                                         "declaration"))
+            findings.append(Finding(path, first, f"{what}: header missing below its "
+                                                 "declaration"))
         else:
-            findings += header_findings(path, block, what, signature + 1)
-        index = following + len(block)
+            findings += header_findings(path, block, what, first)
+        resume = following + len(block)
     return findings, procedures
 
 
