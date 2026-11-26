@@ -248,6 +248,15 @@ Use only the categories an entry needs.
   layout with their code unchanged. Their blob ids change, so the Excel
   evidence of the harness and the example suite needs a new run, unless
   `--carried-to` carries it over the comment-only change (#591).
+- The modules of `tests/modules/` follow the statement rules of the house
+  style too: library calls written `VBA.CStr`, `VBA.Len` and so on, `InStr`
+  with an explicit `vbBinaryCompare`, `Const PROC_NAME` in each `DECLARE`
+  section and as the `Err.Raise` source, error handlers set in an
+  `INITIALIZE` section, a `Case Else` for every `Select Case` and descriptive
+  loop counters. What they do is unchanged, but their code changes, so earlier
+  Excel evidence cannot be carried to them: the harness and the example suite
+  need a new run. The guide states these rules, and when a handler may be set
+  later, as in `TEST_Harness.BeginRun` (#598).
 - **Repository integrity** runs on every pull request and on pushes to `main`
   and `release/**` only, no longer a second time on each push to a task
   branch. The `codeql-default-branch` check also fails while the workflow's

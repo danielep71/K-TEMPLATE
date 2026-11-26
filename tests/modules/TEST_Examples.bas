@@ -371,6 +371,8 @@ Private Sub RunSuite( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Examples.RunSuite"
+
     Dim ErrNumber       As Long     'Runner error number; 0 for none
     Dim ErrSource       As String   'Runner error source
     Dim ErrDescription  As String   'Runner error description
@@ -508,7 +510,8 @@ Private Sub CertifyMode( _
 '------------------------------------------------------------------------------
     'Save the log and print where it went
         TEST_Harness.SaveLog Path
-        TEST_Harness.Echo "SAVED=" & Path & "; mode=" & Mode & "; error=" & CStr(RunErrorNumber) & _
+        TEST_Harness.Echo "SAVED=" & Path & "; mode=" & Mode & _
+            "; error=" & VBA.CStr(RunErrorNumber) & _
             IIf(RunErrorNumber = 0, vbNullString, " " & RunErrorDescription)
     'Certify how the run reached this caller
         TEST_Harness.CertifyRun Mode, MustPass, RunErrorNumber, RunErrorDescription
@@ -789,10 +792,10 @@ Private Sub CaseExactText()
 ' RUN CASE
 '------------------------------------------------------------------------------
     'Compare a built text exactly
-        TEST_Harness.AssertEqualText "concatenation", "CASE-1", "CASE" & "-" & CStr(1)
+        TEST_Harness.AssertEqualText "concatenation", "CASE-1", "CASE" & "-" & VBA.CStr(1)
     'Check that case matters
         TEST_Harness.AssertTrue "case-matters", _
-            StrComp("a", "A", vbBinaryCompare) <> 0, "a and A must differ"
+            VBA.StrComp("a", "A", vbBinaryCompare) <> 0, "a and A must differ"
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -916,6 +919,8 @@ Private Sub CaseRaisedError()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Examples.CaseRaisedError"
+
     Dim Result          As Double   'Value of the checked square root
     Dim RaisedError     As Long     'Err.Number right after the call
 
@@ -1006,6 +1011,8 @@ Private Sub CaseIllustrativeResults()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Examples.CaseIllustrativeResults"
+
     Dim Total       As Double   'Sum of the notional amounts of one file
     Dim Records     As Long     'Amounts read from that file
 
@@ -1176,6 +1183,8 @@ Private Sub CaseCleanupKeepsPrimaryError()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Examples.CaseCleanupKeepsPrimaryError"
+
     Dim Details         As String   'Cleanup failures reported by the operation
     Dim RaisedError     As Long     'Err.Number right after the call
 
@@ -1198,9 +1207,11 @@ Private Sub CaseCleanupKeepsPrimaryError()
     'Check the primary error and both reported restoration failures
         TEST_Harness.AssertRaised "primary-error", ERR_EXAMPLE_OPERATION, RaisedError
         TEST_Harness.AssertTrue "calculation-failure-reported", _
-            InStr(Details, "Calculation not restored") > 0, "details='" & Details & "'"
+            VBA.InStr(1, Details, "Calculation not restored", vbBinaryCompare) > 0, _
+            "details='" & Details & "'"
         TEST_Harness.AssertTrue "screen-failure-reported", _
-            InStr(Details, "ScreenUpdating not restored") > 0, "details='" & Details & "'"
+            VBA.InStr(1, Details, "ScreenUpdating not restored", vbBinaryCompare) > 0, _
+            "details='" & Details & "'"
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1338,6 +1349,8 @@ Private Sub CaseCleanupChangeFailure()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Examples.CaseCleanupChangeFailure"
+
     Dim Details         As String   'Cleanup failures reported by the operation
     Dim RaisedError     As Long     'Err.Number right after the call
     Dim SavedScreen     As Boolean  'ScreenUpdating before the operation
@@ -1363,7 +1376,8 @@ Private Sub CaseCleanupChangeFailure()
     'Check the change error, the restoration attempt and the restored setting
         TEST_Harness.AssertRaised "change-error", ERR_EXAMPLE_HOST, RaisedError
         TEST_Harness.AssertTrue "calculation-restore-attempted", _
-            InStr(Details, "Calculation not restored") > 0, "details='" & Details & "'"
+            VBA.InStr(1, Details, "Calculation not restored", vbBinaryCompare) > 0, _
+            "details='" & Details & "'"
         TEST_Harness.AssertTrue "screen-updating-restored", _
             Application.ScreenUpdating = SavedScreen, "ScreenUpdating differs after the operation"
 
@@ -1425,6 +1439,8 @@ Private Sub CaseCleanupPrimaryOnly()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Examples.CaseCleanupPrimaryOnly"
+
     Dim Details             As String           'Cleanup failures reported by the operation
     Dim RaisedError         As Long             'Err.Number right after the call
     Dim SavedCalculation    As XlCalculation    'Calculation before the operation
@@ -1513,6 +1529,8 @@ Private Sub CaseCleanupEachRestorationFailure()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Examples.CaseCleanupEachRestorationFailure"
+
     Dim Details         As String   'Cleanup failures reported by the operation
     Dim RaisedError     As Long     'Err.Number right after the call
 
@@ -1535,8 +1553,9 @@ Private Sub CaseCleanupEachRestorationFailure()
     'Check the cleanup error and that only Calculation was reported
         TEST_Harness.AssertRaised "calculation-cleanup-error", ERR_CLEANUP_FAILED, RaisedError
         TEST_Harness.AssertTrue "only-calculation-reported", _
-            InStr(Details, "Calculation not restored") > 0 _
-            And InStr(Details, "ScreenUpdating") = 0, "details='" & Details & "'"
+            VBA.InStr(1, Details, "Calculation not restored", vbBinaryCompare) > 0 _
+            And VBA.InStr(1, Details, "ScreenUpdating", vbBinaryCompare) = 0, _
+            "details='" & Details & "'"
     'Fail only the ScreenUpdating restoration and capture the error
         On Error Resume Next
         RunExampleOperation vbNullString, False, True, Details
@@ -1545,8 +1564,9 @@ Private Sub CaseCleanupEachRestorationFailure()
     'Check the cleanup error and that only ScreenUpdating was reported
         TEST_Harness.AssertRaised "screen-cleanup-error", ERR_CLEANUP_FAILED, RaisedError
         TEST_Harness.AssertTrue "only-screen-reported", _
-            InStr(Details, "ScreenUpdating not restored") > 0 _
-            And InStr(Details, "Calculation") = 0, "details='" & Details & "'"
+            VBA.InStr(1, Details, "ScreenUpdating not restored", vbBinaryCompare) > 0 _
+            And VBA.InStr(1, Details, "Calculation", vbBinaryCompare) = 0, _
+            "details='" & Details & "'"
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1624,7 +1644,8 @@ Private Sub CaseCleanupOnlyFailure()
         On Error GoTo CaseFailed
     'Check the cleanup error and that details were returned
         TEST_Harness.AssertRaised "cleanup-error", ERR_CLEANUP_FAILED, RaisedError
-        TEST_Harness.AssertTrue "failure-reported", Len(Details) > 0, "no cleanup detail returned"
+        TEST_Harness.AssertTrue "failure-reported", VBA.Len(Details) > 0, _
+            "no cleanup detail returned"
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -1745,7 +1766,7 @@ Private Function ExampleSquareRoot( _
     'Reject a negative value
         If Value < 0# Then
             Err.Raise ERR_EXAMPLE_INVALID, "TEST_Examples.ExampleSquareRoot", _
-                "Value must be >= 0; got " & CStr(Value) & "."
+                "Value must be >= 0; got " & VBA.CStr(Value) & "."
         End If
 
 '------------------------------------------------------------------------------
@@ -1804,7 +1825,7 @@ Private Function FixturePath( _
 ' VALIDATE INPUTS
 '------------------------------------------------------------------------------
     'Require a fixtures folder
-        If Len(mFixtures) = 0 Then
+        If VBA.Len(mFixtures) = 0 Then
             Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.FixturePath", _
                 "No fixtures folder: pass the full path of tests/fixtures."
         End If
@@ -1814,7 +1835,8 @@ Private Function FixturePath( _
 '------------------------------------------------------------------------------
     'Use the separator of the fixtures folder
         Separator = "\"
-        If InStr(mFixtures, "/") > 0 And InStr(mFixtures, "\") = 0 Then
+        If VBA.InStr(1, mFixtures, "/", vbBinaryCompare) > 0 And _
+            VBA.InStr(1, mFixtures, "\", vbBinaryCompare) = 0 Then
             Separator = "/"
         End If
     'Join the folder and the relative path
@@ -1864,6 +1886,8 @@ Private Function ReadFixture( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Examples.ReadFixture"
+
     Dim FileNumber          As Integer  'Handle of the open file
     Dim Text                As String   'Content of the file
     Dim Index               As Long     'Position in Text
@@ -1872,7 +1896,7 @@ Private Function ReadFixture( _
     Dim ErrorDescription    As String   'File error description
 
 '------------------------------------------------------------------------------
-' READ
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Open the file; Access Read raises on a missing file instead of
     'creating it
@@ -1880,6 +1904,10 @@ Private Function ReadFixture( _
         Open Path For Binary Access Read As #FileNumber
     'Close the file on a read error
         On Error GoTo ReadFailed
+
+'------------------------------------------------------------------------------
+' READ
+'------------------------------------------------------------------------------
     'Read the whole file
         Text = Space$(LOF(FileNumber))
         Get #FileNumber, , Text
@@ -1891,10 +1919,10 @@ Private Function ReadFixture( _
 ' REQUIRE ASCII
 '------------------------------------------------------------------------------
     'Reject any character outside ASCII
-        For Index = 1 To Len(Text)
-            If AscW(Mid$(Text, Index, 1)) > 127 Or AscW(Mid$(Text, Index, 1)) < 0 Then
-                Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.ReadFixture", _
-                    Path & " is not ASCII at byte " & CStr(Index) & "."
+        For Index = 1 To VBA.Len(Text)
+            If AscW(VBA.Mid$(Text, Index, 1)) > 127 Or AscW(VBA.Mid$(Text, Index, 1)) < 0 Then
+                Err.Raise ERR_EXAMPLE_FIXTURE, PROC_NAME, _
+                    Path & " is not ASCII at byte " & VBA.CStr(Index) & "."
             End If
         Next Index
 
@@ -1989,11 +2017,11 @@ Private Function SumJsonNumbers( _
         Records = 0
     'Add up the number after each marker. Val reads it with a period as the
     'decimal separator, whatever the regional settings, and skips the blanks
-        Position = InStr(1, Text, Marker, vbBinaryCompare)
+        Position = VBA.InStr(1, Text, Marker, vbBinaryCompare)
         Do While Position > 0
-            Total = Total + Val(Mid$(Text, Position + Len(Marker)))
+            Total = Total + Val(VBA.Mid$(Text, Position + VBA.Len(Marker)))
             Records = Records + 1
-            Position = InStr(Position + Len(Marker), Text, Marker, vbBinaryCompare)
+            Position = VBA.InStr(Position + VBA.Len(Marker), Text, Marker, vbBinaryCompare)
         Loop
     'Return the sum
         SumJsonNumbers = Total
@@ -2052,12 +2080,14 @@ Private Function SumCsvColumn( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Lines   As Variant  'The file's lines
-    Dim Header  As Variant  'The header's fields
-    Dim Fields  As Variant  'One row's fields
-    Dim Target  As Long     'Index of Column, -1 until found
-    Dim Index   As Long     'Line or field index
-    Dim Total   As Double   'Sum so far
+    Const PROC_NAME As String = "TEST_Examples.SumCsvColumn"
+
+    Dim Lines       As Variant  'The file's lines
+    Dim Header      As Variant  'The header's fields
+    Dim Fields      As Variant  'One row's fields
+    Dim Target      As Long     'Index of Column, -1 until found
+    Dim Index       As Long     'Line or field index
+    Dim Total       As Double   'Sum so far
 
 '------------------------------------------------------------------------------
 ' FIND THE COLUMN
@@ -2074,7 +2104,7 @@ Private Function SumCsvColumn( _
         Next Index
     'Reject a header without the column
         If Target < 0 Then
-            Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.SumCsvColumn", _
+            Err.Raise ERR_EXAMPLE_FIXTURE, PROC_NAME, _
                 Path & " has no column " & Column & "."
         End If
 
@@ -2084,11 +2114,11 @@ Private Function SumCsvColumn( _
     'Add up the field of every non-empty row, rejecting a row without it
         Records = 0
         For Index = 1 To UBound(Lines)
-            If Len(Lines(Index)) > 0 Then
+            If VBA.Len(Lines(Index)) > 0 Then
                 Fields = Split(Lines(Index), ",")
                 If UBound(Fields) < Target Then
-                    Err.Raise ERR_EXAMPLE_FIXTURE, "TEST_Examples.SumCsvColumn", _
-                        Path & " line " & CStr(Index + 1) & " has no " & Column & "."
+                    Err.Raise ERR_EXAMPLE_FIXTURE, PROC_NAME, _
+                        Path & " line " & VBA.CStr(Index + 1) & " has no " & Column & "."
                 End If
                 Total = Total + Val(Fields(Target))
                 Records = Records + 1
@@ -2160,6 +2190,8 @@ Private Sub RunExampleOperation( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME             As String = "TEST_Examples.RunExampleOperation"
+
     Dim SavedCalculation        As XlCalculation    'Calculation mode before the operation
     Dim SavedScreen             As Boolean          'ScreenUpdating before the operation
     Dim RestoreCalculationDue   As Boolean          'Calculation captured and about to change
@@ -2184,7 +2216,7 @@ Private Sub RunExampleOperation( _
     'Capture Calculation, then ScreenUpdating
         SavedCalculation = Application.Calculation
         If FailAt = "capture-screen" Then
-            Err.Raise ERR_EXAMPLE_HOST, "TEST_Examples.RunExampleOperation", _
+            Err.Raise ERR_EXAMPLE_HOST, PROC_NAME, _
                 "Simulated failure capturing ScreenUpdating."
         End If
         SavedScreen = Application.ScreenUpdating
@@ -2194,7 +2226,7 @@ Private Sub RunExampleOperation( _
     'Register the Calculation restoration, then change it
         RestoreCalculationDue = True
         If FailAt = "change-calculation" Then
-            Err.Raise ERR_EXAMPLE_HOST, "TEST_Examples.RunExampleOperation", _
+            Err.Raise ERR_EXAMPLE_HOST, PROC_NAME, _
                 "Simulated failure changing Calculation."
         End If
         Application.Calculation = xlCalculationManual
@@ -2204,7 +2236,7 @@ Private Sub RunExampleOperation( _
 '------------------------------------------------------------------------------
     'Do the work, here only a simulated failure
         If FailAt = "work" Then
-            Err.Raise ERR_EXAMPLE_OPERATION, "TEST_Examples.RunExampleOperation", _
+            Err.Raise ERR_EXAMPLE_OPERATION, PROC_NAME, _
                 "Simulated failure of the operation."
         End If
 
@@ -2227,8 +2259,8 @@ CleanUp:
         If ErrNumber <> 0 Then
             Err.Raise ErrNumber, ErrSource, ErrDescription
         End If
-        If Len(CleanupDetails) > 0 Then
-            Err.Raise ERR_CLEANUP_FAILED, "TEST_Examples.RunExampleOperation", CleanupDetails
+        If VBA.Len(CleanupDetails) > 0 Then
+            Err.Raise ERR_CLEANUP_FAILED, PROC_NAME, CleanupDetails
         End If
     'Exit before the error handler
         Exit Sub
@@ -2433,9 +2465,9 @@ Private Function AppendDetail( _
 ' RETURN VALUE
 '------------------------------------------------------------------------------
     'Join the texts, skipping an empty one
-        If Len(First) = 0 Then
+        If VBA.Len(First) = 0 Then
             AppendDetail = Second
-        ElseIf Len(Second) = 0 Then
+        ElseIf VBA.Len(Second) = 0 Then
             AppendDetail = First
         Else
             AppendDetail = First & "; " & Second
