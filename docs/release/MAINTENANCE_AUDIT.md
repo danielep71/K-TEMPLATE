@@ -20,6 +20,9 @@ closeout record.
   before changing anything: [CONTRIBUTING.md](../../CONTRIBUTING.md), the
   [issue rules](../repo_governance/ISSUE_LABELS.md) and the
   [pull request guide](../repo_governance/PULL_REQUESTS.md).
+- **Name the context.** Take the repository and my GitHub login from the
+  connected account and the repository's own context, never from a name
+  copied into a guide, and say which repository the audit covers.
 - **Complete coverage.** Inspect every applicable item, following every page
   of a paginated list. If pagination, permissions or missing evidence stop
   you, say so in the report; do not claim a complete audit.
@@ -30,6 +33,9 @@ closeout record.
 - **What the audit changes.** Correct issue and pull request metadata,
   descriptions, checkboxes and comments written on my behalf directly when
   the evidence supports it.
+- **History and evidence stay.** A correction adds what changed and keeps
+  what was written and the technical evidence behind it, for an issue, a
+  description and a checkbox as for a comment.
 - **What the audit never does.** It merges no pull request, changes no
   repository setting, deletes no branch, publishes no release and changes no
   code. A finding that needs one of these goes in the report, and in an issue

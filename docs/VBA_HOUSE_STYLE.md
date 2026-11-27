@@ -37,7 +37,8 @@ it is `<REGIME>_`, they accept any project prefix that is not a reserved one
 - VBA names are case-insensitive, and the VBE re-cases every use of a name to
   its latest spelling ([HB-01](methodology/VALIDATION_PLAN.md#host-behaviour)).
   Review case changes in a diff before accepting them.
-- Single-letter names are for loop counters only.
+- Give every local variable a descriptive name, a loop counter included:
+  `Index` or `Position`, not `i`.
 - There are no mutable public variables.
 
 Every component starts with `Option Explicit`. Core and test standard modules
@@ -316,7 +317,11 @@ sequence of section banners:
 
 - `DECLARE`: `Const PROC_NAME As String = "<Component>.<Procedure>"`, then
   every `Dim`;
-- `INITIALIZE`: `On Error GoTo ErrorHandler` and the initial state;
+- `INITIALIZE`: `On Error GoTo ErrorHandler` and the initial state. A step
+  whose failure must reach the caller, such as opening a file or refusing a
+  start, may come before the handler there. A handler that must not cover
+  the task sections before it is set in the section where its part starts,
+  and its intent comment says why;
 - one section per logical step, titled with a short upper-case verb phrase,
   such as `VALIDATE INPUTS`;
 - `EXIT PROCEDURE`: the clean exit, after any cleanup;
@@ -335,13 +340,17 @@ or `VBA.LenB(x) = 0`. Give `InStr` and `StrComp` an explicit compare mode. Name
 the counter in `Next`. Write one statement per line, with no `:` separator; a
 single-line `If ... Then` is allowed for a guard or an `Exit`. Break a long
 line after an operator or comma and indent its continuation four more spaces;
-keep an `Err.Raise` number and source on its first line. Keep lines to about
-100 characters and never past 120 outside a string literal. Release an object
-variable with `Set x = Nothing` on the exit path.
+keep an `Err.Raise` number and source on its first line, and in a procedure
+that declares `PROC_NAME`, use it as the source. Give a `Select Case` a
+`Case Else`. Keep lines to about 100 characters and never past 120 outside a
+string literal. Release an object variable with `Set x = Nothing` on the exit
+path.
 
 The layout is not retrofitted by [`format_vba.py`](#source-representation): a
-module that predates it needs its headers written by hand, and its code must
-stay the same, which `tools/vba_code_identity.py` compares without comments.
+module that predates it needs its headers, sections and statements brought to
+it by hand. Keep its behavior: a change that touches only comments and
+layout leaves the code that `tools/vba_code_identity.py` compares without
+comments unchanged, while a change to a statement needs a new Excel run.
 
 ## Static checks
 
