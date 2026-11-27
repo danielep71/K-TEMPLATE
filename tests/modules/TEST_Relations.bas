@@ -121,17 +121,23 @@ Public Sub RunRelationTests()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Relations.RunRelationTests"
+
     Dim ErrNumber       As Long     'Runner error number; 0 for none
     Dim ErrSource       As String   'Runner error source
     Dim ErrDescription  As String   'Runner error description
 
 '------------------------------------------------------------------------------
-' RUN CASES
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Start the run; a refused start propagates directly
         TEST_Harness.BeginRun SUITE_NAME, "NORMAL", EXPECTED_CASES, EXPECTED_ASSERTIONS
     'Send an error that escapes a case to the runner handler
         On Error GoTo RunFailed
+
+'------------------------------------------------------------------------------
+' RUN CASES
+'------------------------------------------------------------------------------
     'Run every case in a fixed order
         CaseZeroInput
         CaseAdditivity
@@ -290,6 +296,8 @@ Private Sub CaseAdditivity()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Relations.CaseAdditivity"
+
     Dim FirstList(1 To 2)   As Double   'The first list
     Dim SecondList(1 To 3)  As Double   'The second list
     Dim BothLists(1 To 5)   As Double   'Both lists together
@@ -389,6 +397,8 @@ Private Sub CaseSymmetry()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Relations.CaseSymmetry"
+
     Dim Forward(1 To 4)     As Double   'The list
     Dim Reversed(1 To 4)    As Double   'The same list in reverse order
     Dim Index               As Long     'Position in the list
@@ -485,6 +495,8 @@ Private Sub CaseMonotonicity()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Relations.CaseMonotonicity"
+
     Dim Original(1 To 3)    As Double   'The list
     Dim Raised(1 To 3)      As Double   'The same list with its second amount raised
     Dim Index               As Long     'Position in the list
@@ -520,7 +532,7 @@ Private Sub CaseMonotonicity()
         RaisedTotal = IllustrativeTotal(Raised)
     'Check the relation, then that a corrupted total is rejected
         TEST_Harness.AssertTrue "holds", RaisedTotal >= OriginalTotal, _
-            "raised total " & CStr(RaisedTotal) & " is below " & CStr(OriginalTotal)
+            "raised total " & VBA.CStr(RaisedTotal) & " is below " & VBA.CStr(OriginalTotal)
         TEST_Harness.AssertTrue "detects-corruption", _
             Not (RaisedTotal - 2# * INCREMENT >= OriginalTotal), _
             "a corrupted raised total was accepted"

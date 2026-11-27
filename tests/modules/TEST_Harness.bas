@@ -198,6 +198,11 @@ Public Sub BeginRun( _
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Harness.BeginRun"
+
+'------------------------------------------------------------------------------
 ' REFUSE AN UNSAFE START
 '------------------------------------------------------------------------------
     'An interrupted run or an unverified cleanup must be acknowledged with
@@ -215,14 +220,14 @@ Public Sub BeginRun( _
             Say "RECOVERY=REQUIRED; reason=" & mRecoveryReason & _
                 "; action=check Excel state, then run TEST_Harness.ResetTests"
             Say mLastResult
-            Err.Raise ERR_TEST_DIRTY_START, "TEST_Harness.BeginRun", _
+            Err.Raise ERR_TEST_DIRTY_START, PROC_NAME, _
                 "Recovery required: " & mRecoveryReason & ". Run TEST_Harness.ResetTests."
         End If
     'Reject expected counts below 1
         If ExpectedCases < 1 Or ExpectedAssertions < 1 Then
-            Err.Raise ERR_TEST_USAGE, "TEST_Harness.BeginRun", _
-                "Expected counts must be at least 1; got cases=" & CStr(ExpectedCases) & _
-                ", assertions=" & CStr(ExpectedAssertions) & "."
+            Err.Raise ERR_TEST_USAGE, PROC_NAME, _
+                "Expected counts must be at least 1; got cases=" & VBA.CStr(ExpectedCases) & _
+                ", assertions=" & VBA.CStr(ExpectedAssertions) & "."
         End If
 
 '------------------------------------------------------------------------------
@@ -241,8 +246,9 @@ Public Sub BeginRun( _
 '------------------------------------------------------------------------------
 ' SNAPSHOT HOST STATE
 '------------------------------------------------------------------------------
-    'Mark the snapshot valid only after every read, so that cleanup never
-    'compares a value that was not read
+    'Set the snapshot handler only here, so that a refused start raises to
+    'the caller; mark the snapshot valid only after every read, so that
+    'cleanup never compares a value that was not read
         On Error GoTo SnapshotFailed
         mInitialCalculation = Application.Calculation
         mInitialAlerts = Application.DisplayAlerts
@@ -260,8 +266,8 @@ WriteHeader:
         On Error GoTo 0
     'Write the run header and the host description
         Say "RUN=" & SuiteName & "; mode=" & Mode & _
-            "; expected_cases=" & CStr(ExpectedCases) & _
-            "; expected_assertions=" & CStr(ExpectedAssertions) & _
+            "; expected_cases=" & VBA.CStr(ExpectedCases) & _
+            "; expected_assertions=" & VBA.CStr(ExpectedAssertions) & _
             "; started=" & Format$(Now, "yyyy-mm-dd hh:mm:ss")
         Say "ENVIRONMENT=" & EnvironmentSummary()
     'Exit before the error handler
@@ -376,6 +382,8 @@ Public Sub RecordCaseError()
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Harness.RecordCaseError"
+
     Dim ErrorNumber         As Long     'Number of the case error
     Dim ErrorSource         As String   'Source of the case error
     Dim ErrorDescription    As String   'Description of the case error
@@ -391,10 +399,10 @@ Public Sub RecordCaseError()
         RequireActiveRun "RecordCaseError"
     'Count the error, log it and record it as a failure of the case
         mErrorCount = mErrorCount + 1
-        Say "ERROR=" & mCurrentCase & "; number=" & CStr(ErrorNumber) & _
+        Say "ERROR=" & mCurrentCase & "; number=" & VBA.CStr(ErrorNumber) & _
             "; source=" & ErrorSource & "; description=" & ErrorDescription
         RecordFailure mCurrentCase & ".unexpected-error", _
-            "number=" & CStr(ErrorNumber) & "; source=" & ErrorSource
+            "number=" & VBA.CStr(ErrorNumber) & "; source=" & ErrorSource
 
 End Sub
 
@@ -458,6 +466,8 @@ Public Sub EndRun( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Harness.EndRun"
+
     Dim CleanupDetail   As String   'Reason for the cleanup outcome
     Dim CleanupPassed   As Boolean  'True when the host state is unchanged
     Dim Completed       As Boolean  'True when both expected counts were met
@@ -473,10 +483,10 @@ Public Sub EndRun( _
     'Count, log and record an error that escaped the runner
         If RunErrorNumber <> 0 Then
             mErrorCount = mErrorCount + 1
-            Say "ERROR=run; number=" & CStr(RunErrorNumber) & "; source=" & RunErrorSource & _
+            Say "ERROR=run; number=" & VBA.CStr(RunErrorNumber) & "; source=" & RunErrorSource & _
                 "; description=" & RunErrorDescription
             RecordFailure "runner.unexpected-error", _
-                "number=" & CStr(RunErrorNumber) & "; source=" & RunErrorSource
+                "number=" & VBA.CStr(RunErrorNumber) & "; source=" & RunErrorSource
         End If
     'The operation outcome covers what ran; completeness and cleanup are
     'judged separately below, so that each is reported on its own
@@ -493,10 +503,10 @@ Public Sub EndRun( _
                     (mAssertionCount = mExpectedAssertions)
         If Not Completed Then
             RecordFailure "harness.completeness", _
-                "expected cases=" & CStr(mExpectedCases) & _
-                ", assertions=" & CStr(mExpectedAssertions) & _
-                "; observed cases=" & CStr(mCaseCount) & _
-                ", assertions=" & CStr(mAssertionCount)
+                "expected cases=" & VBA.CStr(mExpectedCases) & _
+                ", assertions=" & VBA.CStr(mExpectedAssertions) & _
+                "; observed cases=" & VBA.CStr(mCaseCount) & _
+                ", assertions=" & VBA.CStr(mAssertionCount)
         End If
     'Verify the host state, release the run and require recovery on change
         CleanupPassed = VerifyHostState(CleanupDetail)
@@ -516,10 +526,11 @@ Public Sub EndRun( _
 ' REPORT
 '------------------------------------------------------------------------------
     'Write the counts and the primary failure
-        Say "CASES=" & CStr(mCaseCount) & "; expected=" & CStr(mExpectedCases)
-        Say "ASSERTIONS=" & CStr(mAssertionCount) & "; expected=" & CStr(mExpectedAssertions)
-        Say "FAILURES=" & CStr(mFailureCount) & "; errors=" & CStr(mErrorCount)
-        If Len(mPrimaryFailure) > 0 Then
+        Say "CASES=" & VBA.CStr(mCaseCount) & "; expected=" & VBA.CStr(mExpectedCases)
+        Say "ASSERTIONS=" & VBA.CStr(mAssertionCount) & _
+            "; expected=" & VBA.CStr(mExpectedAssertions)
+        Say "FAILURES=" & VBA.CStr(mFailureCount) & "; errors=" & VBA.CStr(mErrorCount)
+        If VBA.Len(mPrimaryFailure) > 0 Then
             Say "PRIMARY_FAILURE=" & mPrimaryFailure
         End If
     'Write the cleanup and recovery outcomes
@@ -534,9 +545,9 @@ Public Sub EndRun( _
         mLastResult = "RESULT=" & Verdict & "; suite=" & mSuite & _
             "; operation=" & Operation & _
             "; completeness=" & IIf(Completed, "COMPLETE", "INCOMPLETE") & _
-            "; cases=" & CStr(mCaseCount) & _
-            "; assertions=" & CStr(mAssertionCount) & _
-            "; failures=" & CStr(mFailureCount) & _
+            "; cases=" & VBA.CStr(mCaseCount) & _
+            "; assertions=" & VBA.CStr(mAssertionCount) & _
+            "; failures=" & VBA.CStr(mFailureCount) & _
             "; cleanup=" & IIf(CleanupPassed, "PASS", "FAIL") & _
             "; recovery=" & IIf(mRecoveryRequired, "REQUIRED", "NONE")
         Say mLastResult
@@ -550,7 +561,7 @@ Public Sub EndRun( _
         End If
     'Raise a failed run
         If Verdict <> "PASS" Then
-            Err.Raise ERR_TEST_FAILED, "TEST_Harness.EndRun", _
+            Err.Raise ERR_TEST_FAILED, PROC_NAME, _
                 "Suite " & mSuite & " did not pass; see the log."
         End If
 
@@ -789,7 +800,7 @@ Public Sub AssertEqualText( _
 ' ASSERT
 '------------------------------------------------------------------------------
     'Compare in binary mode and log both texts
-        LogAssertion AssertionName, (StrComp(Actual, Expected, vbBinaryCompare) = 0), _
+        LogAssertion AssertionName, (VBA.StrComp(Actual, Expected, vbBinaryCompare) = 0), _
             "expected='" & Expected & "'; actual='" & Actual & "'"
 
 End Sub
@@ -899,10 +910,10 @@ Public Sub AssertErrorValue( _
     'error 13, Type mismatch
         If Not IsError(Actual) Then
             LogAssertion AssertionName, False, _
-                "expected error " & CStr(ExpectedCode) & "; actual type=" & TypeName(Actual)
+                "expected error " & VBA.CStr(ExpectedCode) & "; actual type=" & TypeName(Actual)
         Else
-            LogAssertion AssertionName, (CStr(Actual) = CStr(CVErr(ExpectedCode))), _
-                "expected error " & CStr(ExpectedCode) & "; actual=" & CStr(Actual)
+            LogAssertion AssertionName, (VBA.CStr(Actual) = VBA.CStr(CVErr(ExpectedCode))), _
+                "expected error " & VBA.CStr(ExpectedCode) & "; actual=" & VBA.CStr(Actual)
         End If
 
 End Sub
@@ -957,7 +968,8 @@ Public Sub AssertRaised( _
 '------------------------------------------------------------------------------
     'Compare the error numbers and log both
         LogAssertion AssertionName, (ActualNumber = ExpectedNumber), _
-            "expected error=" & CStr(ExpectedNumber) & "; actual error=" & CStr(ActualNumber)
+            "expected error=" & VBA.CStr(ExpectedNumber) & _
+            "; actual error=" & VBA.CStr(ActualNumber)
 
 End Sub
 
@@ -1014,7 +1026,9 @@ Public Function WithinTolerance( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Bound   As Double   'Larger of the two bounds
+    Const PROC_NAME As String = "TEST_Harness.WithinTolerance"
+
+    Dim Bound       As Double   'Larger of the two bounds
 
 '------------------------------------------------------------------------------
 ' COMPARE
@@ -1175,6 +1189,8 @@ Public Sub CertifyRun( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME     As String = "TEST_Harness.CertifyRun"
+
     Dim Completeness    As String   'COMPLETE, INCOMPLETE or NONE
     Dim Passed          As Boolean  'True when the run ended as required
     Dim Verdict         As String   'PASS, FAIL or NONE
@@ -1192,13 +1208,14 @@ Public Sub CertifyRun( _
             mLastResult = vbNullString
         End If
     'Read the verdict and completeness of the run's RESULT record, if any
-        If Len(mLastResult) = 0 Then
+        If VBA.Len(mLastResult) = 0 Then
             Verdict = "NONE"
             Completeness = "NONE"
         Else
-            Verdict = IIf(Left$(mLastResult, 12) = "RESULT=PASS;", "PASS", "FAIL")
-            Completeness = IIf(InStr(mLastResult, "; completeness=COMPLETE;") > 0, _
-                               "COMPLETE", "INCOMPLETE")
+            Verdict = IIf(VBA.Left$(mLastResult, 12) = "RESULT=PASS;", "PASS", "FAIL")
+            Completeness = IIf( _
+                VBA.InStr(1, mLastResult, "; completeness=COMPLETE;", vbBinaryCompare) > 0, _
+                "COMPLETE", "INCOMPLETE")
         End If
     'Consume the RESULT record
         mLastResult = vbNullString
@@ -1214,7 +1231,7 @@ Public Sub CertifyRun( _
                 mCertComplete = mCertComplete + 1
             End If
         Else
-            Passed = (RaisedNumber = ERR_TEST_FAILED) And (Len(RaisedDescription) > 0) _
+            Passed = (RaisedNumber = ERR_TEST_FAILED) And (VBA.Len(RaisedDescription) > 0) _
                      And (Verdict = "FAIL")
         End If
     'Count the run and its failure
@@ -1224,7 +1241,7 @@ Public Sub CertifyRun( _
         End If
     'Write the MODE record
         CertSay "MODE=" & Mode & "; expected=" & IIf(MustPass, "PASS", "FAIL") & _
-            "; error=" & CStr(RaisedNumber) & "; result=" & Verdict & _
+            "; error=" & VBA.CStr(RaisedNumber) & "; result=" & Verdict & _
             "; completeness=" & Completeness & "; status=" & IIf(Passed, "PASS", "FAIL")
 
 End Sub
@@ -1274,6 +1291,8 @@ Public Sub EndCertification( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Harness.EndCertification"
+
     Dim Completed   As Boolean  'True when every required run was complete
     Dim Verdict     As String   'PASS or FAIL
 
@@ -1292,7 +1311,7 @@ Public Sub EndCertification( _
     'Write the verdict and release the certification
         CertSay "CERTIFICATION=" & Verdict & "; suite=" & mCertSuite & _
             "; completeness=" & IIf(Completed, "COMPLETE", "INCOMPLETE") & _
-            "; modes=" & CStr(mCertModes) & "; failures=" & CStr(mCertFailures)
+            "; modes=" & VBA.CStr(mCertModes) & "; failures=" & VBA.CStr(mCertFailures)
         mCertActive = False
 
 '------------------------------------------------------------------------------
@@ -1302,7 +1321,7 @@ Public Sub EndCertification( _
         WriteRecords Path, mCertLog
     'Raise a failed certification only after the log is written
         If Verdict <> "PASS" Then
-            Err.Raise ERR_TEST_FAILED, "TEST_Harness.EndCertification", _
+            Err.Raise ERR_TEST_FAILED, PROC_NAME, _
                 "Certification of " & mCertSuite & " did not pass; see " & Path & "."
         End If
 
@@ -1636,16 +1655,18 @@ Public Sub SaveResults( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
-    Dim Text    As String   'The whole file
-    Dim Entry   As Variant  'One recorded result
-    Dim Count   As Long     'Results written so far
+    Const PROC_NAME As String = "TEST_Harness.SaveResults"
+
+    Dim Text        As String   'The whole file
+    Dim Entry       As Variant  'One recorded result
+    Dim Count       As Long     'Results written so far
 
 '------------------------------------------------------------------------------
 ' COMPOSE
 '------------------------------------------------------------------------------
     'Refuse before the first run
         If mResults Is Nothing Then
-            Err.Raise ERR_TEST_USAGE, "TEST_Harness.SaveResults", "No run has recorded results."
+            Err.Raise ERR_TEST_USAGE, PROC_NAME, "No run has recorded results."
         End If
     'Open the file object with its schema, kind and commit
         Text = "{" & vbLf & "  ""schema_version"": 1," & vbLf & _
@@ -1655,7 +1676,7 @@ Public Sub SaveResults( _
     'Add every recorded result, separated by commas
         For Each Entry In mResults
             Count = Count + 1
-            Text = Text & IIf(Count = 1, vbNullString, ",") & vbLf & "    " & CStr(Entry)
+            Text = Text & IIf(Count = 1, vbNullString, ",") & vbLf & "    " & VBA.CStr(Entry)
         Next Entry
     'Close the results list and the file object
         Text = Text & IIf(Count = 0, vbNullString, vbLf & "  ") & "]" & vbLf & "}" & vbLf
@@ -1728,7 +1749,7 @@ Private Sub LogAssertion( _
         RequireActiveRun "an assertion"
         mAssertionCount = mAssertionCount + 1
     'Record an assertion outside a case
-        If Len(mCurrentCase) = 0 Then
+        If VBA.Len(mCurrentCase) = 0 Then
             RecordFailure "harness.no-case", "assertion '" & AssertionName & "' outside a case"
         End If
     'Log the outcome; record a failure
@@ -1785,7 +1806,7 @@ Private Sub RecordFailure( _
 '------------------------------------------------------------------------------
     'Count the failure and keep the first one
         mFailureCount = mFailureCount + 1
-        If Len(mPrimaryFailure) = 0 Then
+        If VBA.Len(mPrimaryFailure) = 0 Then
             mPrimaryFailure = FailureId & "; " & Detail
         End If
     'Log it
@@ -1974,6 +1995,8 @@ Private Sub WriteRecords( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Harness.WriteRecords"
+
     Dim FileNumber          As Integer  'Handle of the open file
     Dim Entry               As Variant  'One record
     Dim ErrorNumber         As Long     'File error number
@@ -1981,15 +2004,19 @@ Private Sub WriteRecords( _
     Dim ErrorDescription    As String   'File error description
 
 '------------------------------------------------------------------------------
-' WRITE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Open the file, then close it on a write error
         FileNumber = FreeFile
         Open Path For Output As #FileNumber
         On Error GoTo WriteFailed
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
     'Print each record on its own line
         For Each Entry In Records
-            Print #FileNumber, CStr(Entry)
+            Print #FileNumber, VBA.CStr(Entry)
         Next Entry
         Close #FileNumber
 
@@ -2058,18 +2085,24 @@ Private Sub WriteText( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME         As String = "TEST_Harness.WriteText"
+
     Dim FileNumber          As Integer  'Handle of the open file
     Dim ErrorNumber         As Long     'File error number
     Dim ErrorSource         As String   'File error source
     Dim ErrorDescription    As String   'File error description
 
 '------------------------------------------------------------------------------
-' WRITE
+' INITIALIZE
 '------------------------------------------------------------------------------
     'Open the file, then close it on a write error
         FileNumber = FreeFile
         Open Path For Output As #FileNumber
         On Error GoTo WriteFailed
+
+'------------------------------------------------------------------------------
+' WRITE
+'------------------------------------------------------------------------------
     'The trailing semicolon keeps Print from adding CR LF
         Print #FileNumber, Text;
         Close #FileNumber
@@ -2137,7 +2170,7 @@ Private Function StampedCommit() _
 '------------------------------------------------------------------------------
     'Read the stamp, returning an empty string when it cannot be read
         On Error GoTo ReadFailed
-        StampedCommit = CStr(ThisWorkbook.Names(STAMP_COMMIT_NAME).RefersToRange.Value)
+        StampedCommit = VBA.CStr(ThisWorkbook.Names(STAMP_COMMIT_NAME).RefersToRange.Value)
 
 '------------------------------------------------------------------------------
 ' EXIT PROCEDURE
@@ -2194,6 +2227,8 @@ Private Function JsonText( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Harness.JsonText"
+
     Dim Index       As Long     'Position in Value
     Dim Character   As String   'Character at Index
     Dim Code        As Long     'Its UTF-16 code unit, 0 to 65535
@@ -2203,13 +2238,13 @@ Private Function JsonText( _
 ' ESCAPE
 '------------------------------------------------------------------------------
     'Escape the quote, the backslash, control and non-ASCII characters
-        For Index = 1 To Len(Value)
-            Character = Mid$(Value, Index, 1)
+        For Index = 1 To VBA.Len(Value)
+            Character = VBA.Mid$(Value, Index, 1)
             Code = AscW(Character) And &HFFFF&
             If Character = """" Or Character = "\" Then
                 Text = Text & "\" & Character
             ElseIf Code < 32 Or Code > 126 Then
-                Text = Text & "\u" & Right$("000" & Hex$(Code), 4)
+                Text = Text & "\u" & VBA.Right$("000" & Hex$(Code), 4)
             Else
                 Text = Text & Character
             End If
@@ -2259,7 +2294,7 @@ Private Function JsonTextOrNull( _
 ' RETURN VALUE
 '------------------------------------------------------------------------------
     'Return null for an empty string, otherwise the quoted text
-        If Len(Value) = 0 Then
+        If VBA.Len(Value) = 0 Then
             JsonTextOrNull = "null"
         Else
             JsonTextOrNull = JsonText(Value)
@@ -2313,7 +2348,7 @@ Private Function ScopeJson( _
 ' RETURN VALUE
 '------------------------------------------------------------------------------
     'Return null for the whole calculation, otherwise the dataset and record
-        If Len(Dataset) = 0 And Len(Record) = 0 Then
+        If VBA.Len(Dataset) = 0 And VBA.Len(Record) = 0 Then
             ScopeJson = "null"
         Else
             ScopeJson = "{""dataset"": " & JsonText(Dataset) & ", ""record"": " & _
@@ -2411,7 +2446,15 @@ Private Function VerifyHostState( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Harness.VerifyHostState"
+
     Dim Changed     As String   'Names of the changed properties
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Report a value that cannot be read as a failed comparison
+        On Error GoTo ReadFailed
 
 '------------------------------------------------------------------------------
 ' COMPARE
@@ -2423,7 +2466,6 @@ Private Function VerifyHostState( _
             Exit Function
         End If
     'Name each value that changed
-        On Error GoTo ReadFailed
         If Application.Calculation <> mInitialCalculation Then Changed = Changed & " Calculation"
         If Application.DisplayAlerts <> mInitialAlerts Then Changed = Changed & " DisplayAlerts"
         If Application.EnableEvents <> mInitialEvents Then Changed = Changed & " EnableEvents"
@@ -2432,7 +2474,7 @@ Private Function VerifyHostState( _
         If ActiveWindowCaption() <> mInitialWindow Then Changed = Changed & " ActiveWindow"
         On Error GoTo 0
     'Return the outcome and its detail
-        If Len(Changed) = 0 Then
+        If VBA.Len(Changed) = 0 Then
             Detail = "Excel state unchanged (Calculation, DisplayAlerts, EnableEvents, " & _
                 "ScreenUpdating, Workbooks, ActiveWindow)"
             VerifyHostState = True
@@ -2452,7 +2494,7 @@ Private Function VerifyHostState( _
 '------------------------------------------------------------------------------
 ReadFailed:
     'Report the failed read
-        Detail = "Excel state not compared: read failed with error " & CStr(Err.Number) & _
+        Detail = "Excel state not compared: read failed with error " & VBA.CStr(Err.Number) & _
             " (" & Err.Description & ")"
         VerifyHostState = False
 
@@ -2499,30 +2541,32 @@ Private Function IsCaseId( _
 '------------------------------------------------------------------------------
 ' DECLARE
 '------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Harness.IsCaseId"
+
     Dim Character   As String   'Character under test
-    Dim i           As Long     'Position in CaseId
+    Dim Position    As Long     'Position in CaseId
 
 '------------------------------------------------------------------------------
 ' CHECK
 '------------------------------------------------------------------------------
     'Reject an empty identifier or a hyphen at either end
-        If Len(CaseId) = 0 Or Left$(CaseId, 1) = "-" Or Right$(CaseId, 1) = "-" Then
+        If VBA.Len(CaseId) = 0 Or VBA.Left$(CaseId, 1) = "-" Or VBA.Right$(CaseId, 1) = "-" Then
             IsCaseId = False
             Exit Function
         End If
     'Reject a double hyphen
-        If InStr(CaseId, "--") > 0 Then
+        If VBA.InStr(1, CaseId, "--", vbBinaryCompare) > 0 Then
             IsCaseId = False
             Exit Function
         End If
     'Reject any character outside a-z, 0-9 and the hyphen
-        For i = 1 To Len(CaseId)
-            Character = Mid$(CaseId, i, 1)
+        For Position = 1 To VBA.Len(CaseId)
+            Character = VBA.Mid$(CaseId, Position, 1)
             If Not (Character Like "[a-z0-9-]") Then
                 IsCaseId = False
                 Exit Function
             End If
-        Next i
+        Next Position
     'Accept the identifier
         IsCaseId = True
 
@@ -2627,12 +2671,12 @@ Private Function NumberText( _
 ' FORMAT
 '------------------------------------------------------------------------------
     'Format the number without its sign space
-        Text = Trim$(Str$(Value))
+        Text = VBA.Trim$(Str$(Value))
     'Put back the zero before the point
-        If Left$(Text, 1) = "." Then
+        If VBA.Left$(Text, 1) = "." Then
             Text = "0" & Text
-        ElseIf Left$(Text, 2) = "-." Then
-            Text = "-0" & Mid$(Text, 2)
+        ElseIf VBA.Left$(Text, 2) = "-." Then
+            Text = "-0" & VBA.Mid$(Text, 2)
         End If
     'Return the text
         NumberText = Text
@@ -2677,19 +2721,31 @@ Private Function HostProperty( _
 '------------------------------------------------------------------------------
 
 '------------------------------------------------------------------------------
+' DECLARE
+'------------------------------------------------------------------------------
+    Const PROC_NAME As String = "TEST_Harness.HostProperty"
+
+'------------------------------------------------------------------------------
+' INITIALIZE
+'------------------------------------------------------------------------------
+    'Return an empty string when the property cannot be read
+        On Error GoTo ReadFailed
+
+'------------------------------------------------------------------------------
 ' READ
 '------------------------------------------------------------------------------
-    'Read the named property, returning an empty string when it cannot be read
-        On Error GoTo ReadFailed
+    'Read the named property; another name returns an empty string
         Select Case PropertyName
             Case "Name"
                 HostProperty = Application.Name
             Case "Version"
                 HostProperty = Application.Version
             Case "Build"
-                HostProperty = CStr(Application.Build)
+                HostProperty = VBA.CStr(Application.Build)
             Case "OperatingSystem"
                 HostProperty = Application.OperatingSystem
+            Case Else
+                HostProperty = vbNullString
         End Select
 
 '------------------------------------------------------------------------------
